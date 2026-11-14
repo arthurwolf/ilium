@@ -282,7 +282,6 @@ fn doc_076_recovery_policy_values_and_default_match_the_user_documentation() {
     assert!(doc.contains("| Ask before restoring | `ask_before_restore` |"));
     assert!(doc.contains("| Start fresh | `start_fresh` |"));
     assert!(doc.contains("recovery_policy = \"restore_automatically\""));
-    assert!(user_doc("settings.md").contains("| `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |"));
 }
 
 /// REQ: F-076

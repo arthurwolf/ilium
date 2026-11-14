@@ -320,7 +320,7 @@ animation:
 
     #[test]
     fn legacy_image_parameters_survive_current_and_other_scene_selections() {
-        for kind in ["images", "shoreline"] {
+        for kind in ["images", "night_lights"] {
             let config: ProjectConfig = serde_norway::from_str(&format!(
                 "animation:\n  kind: {kind}\n  static_image:\n    source: !Builtin 0\n    contrast_percent: 59\n"
             )).unwrap();
@@ -482,7 +482,7 @@ animation:
         })
         .unwrap();
         let settings = crate::background_animation::AnimationSettings {
-            kind: crate::background_animation::AnimationKind::Kelp,
+            kind: crate::background_animation::AnimationKind::Clouds,
             speed_percent: 150,
             ..Default::default()
         };
@@ -608,45 +608,21 @@ animation:
     }
 
     #[test]
-    fn shoreline_style_defaults_rich_but_an_old_four_key_mapping_stays_classic() {
-        use crate::background_animation::{AnimationKind, ShorelineStyle};
+    fn a_saved_scene_that_moved_into_the_scenes_plugin_loads_as_the_plugin_scene() {
+        use crate::background_animation::AnimationKind;
 
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
-        // Written by a build that only knew the four sliders.
+        // Written by a build that still had the ten classic scenes built in; its per-scene
+        // blocks are ignored now (the Scenes plugin keeps its own settings).
         std::fs::write(
             project.path().join(RELATIVE_PATH),
             "animation:\n  enabled: true\n  kind: shoreline\n  shoreline:\n    reach_percent: 120\n    foam_width_percent: 75\n    grain_percent: 20\n    cycle_seconds: 12\n",
         )
         .unwrap();
         let old = load(project.path()).unwrap().animation;
-        assert_eq!(old.kind, AnimationKind::Shoreline);
-        assert_eq!(old.shoreline.style, ShorelineStyle::Classic);
-        assert_eq!(old.shoreline.reach_percent, 120);
-
-        // A configuration without any shoreline mapping is a fresh one.
-        std::fs::write(
-            project.path().join(RELATIVE_PATH),
-            "animation:\n  enabled: true\n  speed_percent: 125\n",
-        )
-        .unwrap();
-        let fresh = load(project.path()).unwrap().animation;
-        assert_eq!(fresh.shoreline.style, ShorelineStyle::Rich);
-
-        // Both styles and their Rich controls survive a save and reload.
-        let mut rich = fresh;
-        rich.shoreline.chop_percent = 80;
-        rich.shoreline.stick_amount_percent = 95;
-        set_animation(project.path(), rich.clone()).unwrap();
-        assert_eq!(load(project.path()).unwrap().animation, rich);
-        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("style: rich"), "{saved}");
-        let mut classic = rich;
-        classic.shoreline.style = ShorelineStyle::Classic;
-        set_animation(project.path(), classic.clone()).unwrap();
-        assert_eq!(load(project.path()).unwrap().animation, classic);
-        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("style: classic"), "{saved}");
+        assert_eq!(old.kind, AnimationKind::PluginScene);
+        assert!(old.enabled);
     }
 
     #[test]
@@ -661,7 +637,7 @@ animation:
         )
         .unwrap();
         let initial = load(project.path()).unwrap();
-        assert_eq!(initial.animation.kind, AnimationKind::QuietPond);
+        assert_eq!(initial.animation.kind, AnimationKind::PluginScene);
         assert_eq!(initial.animation.lightness_percent, 60);
         assert_eq!(initial.animation.speed_percent, 125);
 
@@ -673,8 +649,7 @@ animation:
         };
         for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
             settings.kind = kind;
-            // Hosted scenes keep their values in the flattened ambient block;
-            // built-in scenes edit their four named sliders.
+            // Hosted scenes keep their values in the flattened ambient block.
             for control in settings.scene_controls() {
                 let ilium_ambient::ControlKind::Slider { min, max, .. } = control.kind else {
                     continue;
@@ -712,14 +687,14 @@ animation:
 
         let project = tempfile::tempdir().unwrap();
         let mut settings = AnimationSettings {
-            kind: AnimationKind::Stars,
+            kind: AnimationKind::NightLights,
             enabled: true,
             ..Default::default()
         };
         settings.ambient.location = ilium_ambient::GeoLocation::new("Tromso, Norway", 69.65, 18.96);
         set_animation(project.path(), settings.clone()).unwrap();
         let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: stars"), "{saved}");
+        assert!(saved.contains("kind: night_lights"), "{saved}");
         assert!(saved.contains("Tromso, Norway"), "{saved}");
         // Flattened: the location sits directly under `animation`, not under
         // an `ambient` key.
@@ -789,65 +764,6 @@ animation:
         assert_ne!(
             load(tempfile::tempdir().unwrap().path()).unwrap().animation,
             settings
-        );
-    }
-
-    #[test]
-    fn topographic_scene_controls_survive_project_write_reload() {
-        use crate::background_animation::{AnimationKind, AnimationSettings};
-        use ilium_ambient::SceneSettings;
-        let project = tempfile::tempdir().unwrap();
-        let mut settings = AnimationSettings {
-            kind: AnimationKind::TopographicMaps,
-            enabled: true,
-            ..Default::default()
-        };
-        for control in settings.ambient.topographic_maps.controls() {
-            if let Some(value) = control.stepped(1) {
-                settings
-                    .ambient
-                    .topographic_maps
-                    .set_control(control.id, value)
-                    .unwrap();
-            }
-        }
-        set_animation(project.path(), settings.clone()).unwrap();
-        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: topographic_maps"), "{saved}");
-        assert!(saved.contains("topographic_maps:"), "{saved}");
-        assert_eq!(load(project.path()).unwrap().animation, settings);
-    }
-
-    #[test]
-    fn voxel_scene_controls_survive_project_write_reload_and_remain_project_local() {
-        use crate::background_animation::{AnimationKind, AnimationSettings};
-        use ilium_ambient::SceneSettings;
-        let project = tempfile::tempdir().unwrap();
-        let other_project = tempfile::tempdir().unwrap();
-        let mut settings = AnimationSettings {
-            kind: AnimationKind::VoxelLandscape,
-            enabled: true,
-            ..Default::default()
-        };
-        for control in settings.ambient.voxel_landscape.controls() {
-            if let Some(value) = control.stepped(1) {
-                settings
-                    .ambient
-                    .voxel_landscape
-                    .set_control(control.id, value)
-                    .unwrap();
-            }
-        }
-        settings.ambient.voxel_landscape.seed = u32::MAX;
-        set_animation(project.path(), settings.clone()).unwrap();
-        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: voxel_landscape"), "{saved}");
-        assert!(saved.contains("voxel_landscape:"), "{saved}");
-        assert!(!saved.contains("ambient:"), "{saved}");
-        assert_eq!(load(project.path()).unwrap().animation, settings);
-        assert_eq!(
-            load(other_project.path()).unwrap().animation,
-            AnimationSettings::default()
         );
     }
 

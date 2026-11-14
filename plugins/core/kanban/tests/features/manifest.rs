@@ -83,17 +83,19 @@ fn manifest_050_draws_on_the_client_with_a_small_server_part_for_settings() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_grants_are_the_ten_kanban_grants_in_order() {
+fn manifest_050_client_grants_are_the_twelve_kanban_grants_in_order() {
     assert_eq!(
         client_grants(),
         [
             "panes.provide-kind",
+            "keys.intercept",
             "fs.read:project",
             "fs.write:project",
             "fs.watch",
             "fs.pick",
             "fs.read:picked",
             "editor.read",
+            "ui.panels",
             "services.use:ilium.core.kanban/set-setting",
             "extensions.provide:ilium.core.kanban/card-actions",
             "extensions.provide:ilium.core.kanban/card-moved",

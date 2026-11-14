@@ -4,9 +4,7 @@ mod ambient_fixture;
 
 use ilium_client::{
     app::App,
-    background_animation::{
-        AnimationFrame, AnimationKind, AnimationLoopCache, AnimationSettings, ShorelineStyle,
-    },
+    background_animation::{AnimationFrame, AnimationKind, AnimationSettings},
     background_composition,
     config::MotionLevel,
 };
@@ -54,7 +52,7 @@ fn summarize(
     samples.sort_by(f64::total_cmp);
     println!(
         "{}",
-        serde_json::json!({"type":"result", "stage":stage,"scene":kind,"width":width,"height":height,"density_percent":density,"foreground":extra["foreground"],"shoreline_style":extra["shoreline_style"],"samples":samples.len(),"mean_us":mean,"median_us":samples[samples.len()/2],"p95_us":samples[(samples.len()-1)*95/100],"extra":extra})
+        serde_json::json!({"type":"result", "stage":stage,"scene":kind,"width":width,"height":height,"density_percent":density,"foreground":extra["foreground"],"samples":samples.len(),"mean_us":mean,"median_us":samples[samples.len()/2],"p95_us":samples[(samples.len()-1)*95/100],"extra":extra})
     );
 }
 /// Synthetic foregrounds exercise safe-space detection, styling and wide
@@ -92,16 +90,15 @@ fn foreground_fixture(area: Rect, selected: &str) -> Buffer {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let resources = ambient_fixture::ResourcesFixture::new()?;
     let (mut width, mut height, mut frames, mut selected) =
-        (160_u16, 50_u16, 300_u32, String::from("shoreline"));
+        (160_u16, 50_u16, 300_u32, String::from("night_lights"));
     let mut density = 60_u16;
     let mut foreground = String::from("empty");
-    let mut shoreline_style = String::from("rich");
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         if flag == "--help" {
             println!(
                 "{}",
-                serde_json::json!({"type":"help","usage":"animation_pipeline_probe --width N --height N --frames N --scene shoreline|all|SCENE_JSON_NAME --density 25..100 --foreground empty|ascii|styled|wide --shoreline-style rich|classic"})
+                serde_json::json!({"type":"help","usage":"animation_pipeline_probe --width N --height N --frames N --scene all|SCENE_JSON_NAME --density 25..100 --foreground empty|ascii|styled|wide"})
             );
             return Ok(());
         }
@@ -113,7 +110,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--scene" => selected = value,
             "--density" => density = value.parse()?,
             "--foreground" => foreground = value,
-            "--shoreline-style" => shoreline_style = value,
             _ => return Err(format!("unknown flag {flag}").into()),
         }
     }
@@ -126,17 +122,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if !["empty", "ascii", "styled", "wide"].contains(&foreground.as_str()) {
         return Err("foreground must be empty|ascii|styled|wide".into());
     }
-    if !["rich", "classic"].contains(&shoreline_style.as_str()) {
-        return Err("shoreline style must be rich|classic".into());
-    }
     let summarize = |stage, kind, width, height, density, samples, mut extra: serde_json::Value| {
         extra["foreground"] = serde_json::Value::String(foreground.clone());
-        extra["shoreline_style"] = serde_json::Value::String(shoreline_style.clone());
         summarize(stage, kind, width, height, density, samples, extra);
     };
     let kinds: Vec<_> = AnimationKind::ALL
         .into_iter()
-        .take(10)
         .filter(|kind| {
             selected == "all"
                 || serde_json::to_value(kind)
@@ -147,20 +138,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     if kinds.is_empty() {
-        return Err("scene must name a built-in monochrome scene".into());
+        return Err("scene must name a hosted scene".into());
     }
     for kind in kinds {
-        let mut settings = AnimationSettings {
+        let settings = AnimationSettings {
             enabled: true,
             kind,
-            loop_seconds: 1,
             density_percent: density,
             ..Default::default()
-        };
-        settings.shoreline.style = if shoreline_style == "classic" {
-            ShorelineStyle::Classic
-        } else {
-            ShorelineStyle::Rich
         };
         let mut field = AnimationFrame::default();
         field.configure_resources(resources.resources.clone());
@@ -168,7 +153,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         field.render(&settings, width, height, Duration::ZERO);
         println!(
             "{}",
-            serde_json::json!({"type":"result","stage":"cold_render","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"shoreline_style":shoreline_style,"us":cold.elapsed().as_secs_f64()*1e6})
+            serde_json::json!({"type":"result","stage":"cold_render","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"us":cold.elapsed().as_secs_f64()*1e6})
         );
         let mut samples = Vec::new();
         for n in 1..=frames {
@@ -225,40 +210,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let foreground_template = foreground_fixture(area, &foreground);
         app.layout.screen_area = area;
         app.layout.pane_area = area;
-        // This component benchmark has its own cache; it does not expose or
-        // mutate the application's worker-owned scene state.
-        let mut cache = AnimationLoopCache::new(resources.resources.clone());
-        let build = Instant::now();
-        while !cache.step(&settings, width, height, 8) {
-            if build.elapsed() > Duration::from_secs(120) {
-                return Err("cache build exceeded120seconds".into());
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        println!(
-            "{}",
-            serde_json::json!({"type":"result","stage":"cache_build","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"shoreline_style":shoreline_style,"loop_seconds":1,"us":build.elapsed().as_secs_f64()*1e6,"resident_bytes":cache.status().resident_bytes,"scope":"isolated cache component"})
-        );
-        let mut samples = Vec::new();
-        for n in 0..frames {
-            let start = Instant::now();
-            std::hint::black_box(cache.copy_frame_into(
-                Duration::from_nanos(u64::from(n) * 1_000_000_000 / 30),
-                &mut field,
-            ));
-            samples.push(start.elapsed().as_secs_f64() * 1e6);
-            std::hint::black_box(field.glyph(0, 0));
-        }
-        summarize(
-            "ready_ram_copy",
-            kind,
-            width,
-            height,
-            density,
-            samples,
-            serde_json::json!({"scope":"isolated cache component"}),
-        );
-        drop(cache);
         let counter = OutputCount::default();
         let mut terminal = Terminal::with_options(
             CrosstermBackend::new(counter.clone()),
@@ -316,7 +267,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if n == 0 {
                 println!(
                     "{}",
-                    serde_json::json!({"type":"result","stage":"cold_display_pipeline","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"shoreline_style":shoreline_style,"us":pipeline_elapsed.as_secs_f64()*1e6,"bytes":counter.bytes.get(),"writes":counter.writes.get()})
+                    serde_json::json!({"type":"result","stage":"cold_display_pipeline","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"us":pipeline_elapsed.as_secs_f64()*1e6,"bytes":counter.bytes.get(),"writes":counter.writes.get()})
                 );
                 counter.bytes.set(0);
                 counter.writes.set(0);

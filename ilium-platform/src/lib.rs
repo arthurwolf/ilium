@@ -50,7 +50,6 @@
 //! of a failure.
 
 pub mod animation_files;
-pub mod animation_sandbox;
 pub mod audio_backend;
 pub mod child_limits;
 pub mod claude_session_record;

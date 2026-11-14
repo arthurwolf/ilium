@@ -61,7 +61,6 @@ thiserror = "2.0.18"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "process"] }
 tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
 toml = "0.8.23"
-toml_edit = "0.25.12"
 tracing = "0.1.44"
 tui-term = "0.3.4"
 tui-tree-widget = { path = "vendor/tui-tree-widget" }

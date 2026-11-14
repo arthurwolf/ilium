@@ -21,7 +21,11 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
         "machine-screen" => crate::machine_screen::create(spec, env),
         "pipes" => crate::pipes::create(spec, env),
         "pi-digits" => crate::pi_digits::create(spec, env),
+        "stars-overhead" => crate::stars::create(spec, env),
+        "topographic-maps" => crate::topographic_maps::create(spec, env),
         "wind" => crate::wind::create(spec, env),
+        // The ten classic scenes (shoreline, moonlit water, ... quiet pond).
+        id if crate::classic::IDS.contains(&id) => return crate::classic::create(id, spec, env),
         // The scenes of the second port round (quiet scenes, box machine, galactic empires,
         // dithr patterns, solar system) have their own table in `scenes2`.
         _ => return crate::scenes2::create(scene_id, spec, env),

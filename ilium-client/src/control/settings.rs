@@ -8,12 +8,11 @@ use ilium_sound::{NotificationEvent, SoundEvent, SoundSourceKind};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use serde_json::Value;
 
-use crate::app::{AppearanceRow, EditorRow, SessionRow, SoundRow, TerminalRow};
+use crate::app::{AppearanceRow, EditorRow, SoundRow, TerminalRow};
 use crate::config::{
     AgentIdentifierMode, GitBranchLine, GitClosePolicy, GitDefaultBase, GitDefaultWhere,
-    LeftPanelSizingMode, MotionLevel, NewPaneDirectory, PluginTreeOrderingChoice,
-    SessionRecoveryPolicy, SidebarDensity, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES,
-    MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
+    LeftPanelSizingMode, MotionLevel, NewPaneDirectory, PluginTreeOrderingChoice, SidebarDensity,
+    MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES, MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
@@ -374,23 +373,6 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             ensure_reached(app.editor_settings.autosave_delay_ms == target)?;
         }
-        "session.recovery_policy" => {
-            let target = parse_recovery_policy(string(&value)?)?;
-            for _ in 0..3 {
-                if app.session_settings.recovery_policy == target {
-                    break;
-                }
-                app.settings_adjust_session_row(SessionRow::RecoveryPolicy, 1);
-            }
-            ensure_reached(app.session_settings.recovery_policy == target)?;
-        }
-        "session.backups_enabled" => {
-            let target = boolean(&value)?;
-            if app.session_settings.backups_enabled != target {
-                app.settings_adjust_session_row(SessionRow::BackupsEnabled, 1);
-            }
-            ensure_reached(app.session_settings.backups_enabled == target)?;
-        }
         "keyboard.shortcut_base" => {
             let shortcut = crate::keymap::ShortcutBase::parse(string(&value)?).ok_or(
                 ilium_prompts::voice::VOICE_SETTINGS_SHORTCUT_BASE_MUST_BE_ONE_ASCII_LETTER,
@@ -432,44 +414,6 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 return Err(app.status_message.clone().unwrap_or_else(|| {
                     ilium_prompts::voice::VOICE_SETTINGS_KEYBOARD_BINDING_WAS_REJECTED.to_owned()
                 }));
-            }
-        }
-        "kanban_board.card_preview_lines" => {
-            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
-                ilium_prompts::voice::VOICE_SETTINGS_CARD_PREVIEW_LINE_COUNT_IS_TOO_LARGE.to_owned()
-            })?;
-            if !(MIN_CARD_PREVIEW_LINES..=MAX_CARD_PREVIEW_LINES).contains(&target) {
-                return Err(
-                    ilium_prompts::voice::VOICE_SETTINGS_CARD_PREVIEW_LINES_MUST_BE_BETWEEN_1
-                        .to_owned(),
-                );
-            }
-            while app.kanban_board_settings.card_preview_lines != target {
-                let direction = if app.kanban_board_settings.card_preview_lines < target {
-                    1
-                } else {
-                    -1
-                };
-                app.settings_adjust_card_preview_lines(direction);
-            }
-        }
-        "kanban_board.minimum_column_width" => {
-            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
-                ilium_prompts::voice::VOICE_SETTINGS_COLUMN_WIDTH_IS_TOO_LARGE.to_owned()
-            })?;
-            if !(MIN_BOARD_COLUMN_WIDTH..=MAX_BOARD_COLUMN_WIDTH).contains(&target) {
-                return Err(
-                    ilium_prompts::voice::VOICE_SETTINGS_MINIMUM_COLUMN_WIDTH_MUST_BE_BETWEEN_10
-                        .to_owned(),
-                );
-            }
-            while app.kanban_board_settings.minimum_column_width != target {
-                let direction = if app.kanban_board_settings.minimum_column_width < target {
-                    1
-                } else {
-                    -1
-                };
-                app.settings_adjust_board_column_width(direction);
             }
         }
         "sound.source" => {
@@ -825,15 +769,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "editor.autosave_delay_ms" => {
             app.settings_adjust_editor_row(EditorRow::AutosaveDelay, direction)
         }
-        "session.recovery_policy" => {
-            app.settings_adjust_session_row(SessionRow::RecoveryPolicy, direction)
-        }
-        "session.backups_enabled" => {
-            app.settings_adjust_session_row(SessionRow::BackupsEnabled, direction)
-        }
         "keyboard.shortcut_base" => app.settings_adjust_shortcut_base(direction),
-        "kanban_board.card_preview_lines" => app.settings_adjust_card_preview_lines(direction),
-        "kanban_board.minimum_column_width" => app.settings_adjust_board_column_width(direction),
         "sound.file" => app.settings_adjust_sound_row(SoundRow::File, direction),
         "inference.kilo_gateway.model" => app.settings_adjust_kilo_gateway_model(direction),
         "inference.openai.model" => app.settings_adjust_openai_model(direction),
@@ -1042,15 +978,6 @@ fn parse_new_pane_directory(value: &str) -> Result<NewPaneDirectory, String> {
         "focused_terminal" => Ok(NewPaneDirectory::FocusedTerminal),
         "last_used" => Ok(NewPaneDirectory::LastUsed),
         _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_NEW_PANE_DIRECTORY_POLICY.to_owned()),
-    }
-}
-
-fn parse_recovery_policy(value: &str) -> Result<SessionRecoveryPolicy, String> {
-    match normalized(value).as_str() {
-        "restore_automatically" => Ok(SessionRecoveryPolicy::RestoreAutomatically),
-        "ask_before_restore" => Ok(SessionRecoveryPolicy::AskBeforeRestore),
-        "start_fresh" => Ok(SessionRecoveryPolicy::StartFresh),
-        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_SESSION_RECOVERY_POLICY.to_owned()),
     }
 }
 

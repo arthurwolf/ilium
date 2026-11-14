@@ -214,34 +214,6 @@ impl AllocationSize for AgentRecovery {
     }
 }
 
-impl AllocationSize for ScheduledPaneInput {
-    fn heap_bytes(&self) -> usize {
-        let ScheduledPaneInput {
-            execute_at_unix_millis,
-            text,
-            send_enter,
-        } = self;
-        0usize
-            .saturating_add(execute_at_unix_millis.heap_bytes())
-            .saturating_add(text.heap_bytes())
-            .saturating_add(send_enter.heap_bytes())
-    }
-}
-
-impl AllocationSize for QueuedPrompt {
-    fn heap_bytes(&self) -> usize {
-        let QueuedPrompt {
-            text,
-            delivery,
-            attempted_delivery,
-        } = self;
-        0usize
-            .saturating_add(text.heap_bytes())
-            .saturating_add(delivery.heap_bytes())
-            .saturating_add(attempted_delivery.heap_bytes())
-    }
-}
-
 impl AllocationSize for PaneWorkspace {
     fn heap_bytes(&self) -> usize {
         let PaneWorkspace {
@@ -356,7 +328,6 @@ impl AllocationSize for PaneStatus {
             Self::PlainShell => 0usize,
             Self::Agent(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::Editor { dirty } => 0usize.saturating_add(dirty.heap_bytes()),
-            Self::Board => 0usize,
             Self::AgentUnavailable(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::Plugin { dirty } => 0usize.saturating_add(dirty.heap_bytes()),
         }
@@ -368,7 +339,6 @@ impl AllocationSize for PaneContentKind {
         match self {
             Self::Terminal => 0usize,
             Self::Editor => 0usize,
-            Self::Board => 0usize,
             Self::Plugin => 0usize,
         }
     }
@@ -457,16 +427,6 @@ impl AllocationSize for AgentExitOutcome {
             Self::ExitCode(value0) => 0usize.saturating_add(value0.heap_bytes()),
             Self::Signal => 0usize,
             Self::Unknown => 0usize,
-        }
-    }
-}
-
-impl AllocationSize for PromptQueueDelivery {
-    fn heap_bytes(&self) -> usize {
-        match self {
-            Self::Once => 0usize,
-            Self::Times { remaining_runs } => 0usize.saturating_add(remaining_runs.heap_bytes()),
-            Self::Forever => 0usize,
         }
     }
 }
@@ -563,9 +523,6 @@ impl AllocationSize for NodeKind {
                 content,
                 status,
                 title_source,
-                board_storage,
-                scheduled_input,
-                prompt_queue,
                 last_prompt,
                 progress_monitors,
                 launch_cwd,
@@ -575,9 +532,6 @@ impl AllocationSize for NodeKind {
                 .saturating_add(content.heap_bytes())
                 .saturating_add(status.heap_bytes())
                 .saturating_add(title_source.heap_bytes())
-                .saturating_add(board_storage.heap_bytes())
-                .saturating_add(scheduled_input.heap_bytes())
-                .saturating_add(prompt_queue.heap_bytes())
                 .saturating_add(last_prompt.heap_bytes())
                 .saturating_add(progress_monitors.heap_bytes())
                 .saturating_add(launch_cwd.heap_bytes())
@@ -599,14 +553,6 @@ impl AllocationSize for PluginPaneKind {
         self.kind_id.capacity()
     }
 }
-impl AllocationSize for BoardStorage {
-    fn heap_bytes(&self) -> usize {
-        match self {
-            Self::Folder { path } => 0usize.saturating_add(path.heap_bytes()),
-            Self::MarkdownFile { path } => 0usize.saturating_add(path.heap_bytes()),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -626,14 +572,7 @@ mod tests {
         assert!(tree.retained_bytes() >= map_reserved + 65536);
     }
     #[test]
-    fn nested_prompt_and_animation_capacity_is_counted_without_serialization() {
-        let text = String::with_capacity(8192);
-        let prompt = QueuedPrompt {
-            text,
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        assert_eq!(prompt.heap_bytes(), 8192);
+    fn nested_animation_capacity_is_counted_without_serialization() {
         let choice = AnimationValue::Choice {
             index: 0,
             label: String::with_capacity(4096),

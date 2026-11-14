@@ -17,7 +17,15 @@
       "location.observer",
       "gpu.kernels",
       "http:services.swpc.noaa.gov",
-      "http:lichess.org"
+      "http:lichess.org",
+      "http:earthquake.usgs.gov",
+      "http:api.exchange.coinbase.com",
+      "http:api.frankfurter.dev",
+      "http:api.wheretheiss.at",
+      "http:api.drand.sh",
+      "http:meri.digitraffic.fi",
+      "http:opensky-network.org",
+      "http:api.openseafeed.com"
     ]
   },
   "activation": [
@@ -57,14 +65,292 @@
       {
         "id": "stars-overhead",
         "title": "Stars overhead",
+        "uses_location": true,
         "family": "maps-space",
         "modes": [
           "live"
         ],
-        "frame_rate_cap": 10,
+        "frame_rate_cap": 12,
         "settings_schema": {
           "type": "object",
-          "properties": {}
+          "properties": {
+            "projection": {
+              "type": "string",
+              "order": 0,
+              "title": "Projection",
+              "help": "Dome looks straight up with the horizon at the edge, panorama unrolls the sky along the horizon, patch is a window aimed at one spot.",
+              "enum": [
+                "dome",
+                "panorama",
+                "patch"
+              ],
+              "enum_titles": [
+                "Dome (looking up)",
+                "Panorama (horizon strip)",
+                "Patch (aimed window)"
+              ],
+              "default": "dome"
+            },
+            "lens": {
+              "type": "string",
+              "order": 1,
+              "title": "Lens",
+              "help": "Stereographic keeps shapes true and stretches the edges; equidistant fisheye keeps angles proportional to distance.",
+              "enum": [
+                "stereographic",
+                "equidistant"
+              ],
+              "enum_titles": [
+                "Stereographic",
+                "Equidistant fisheye"
+              ],
+              "default": "stereographic",
+              "visible_when": {
+                "key": "projection",
+                "in": [
+                  "dome",
+                  "patch"
+                ]
+              }
+            },
+            "look_azimuth": {
+              "type": "integer",
+              "order": 2,
+              "title": "Look direction",
+              "help": "Compass bearing: 0 is north, 90 east, 180 south, 270 west. It is the direction at the top of the dome, or the centre of the panorama and patch.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": " deg",
+              "default": 0
+            },
+            "look_altitude": {
+              "type": "integer",
+              "order": 3,
+              "title": "Look elevation",
+              "help": "How high above the horizon the patch is aimed; 90 looks at the zenith.",
+              "minimum": 0,
+              "maximum": 90,
+              "step": 5,
+              "unit": " deg",
+              "default": 50,
+              "visible_when": {
+                "key": "projection",
+                "in": [
+                  "patch"
+                ]
+              }
+            },
+            "field_of_view": {
+              "type": "integer",
+              "order": 4,
+              "title": "Field of view",
+              "help": "Angular size of the view: across the panel height for the dome, across its width for panorama and patch. Small values zoom in.",
+              "minimum": 10,
+              "maximum": 180,
+              "step": 5,
+              "unit": " deg",
+              "default": 180
+            },
+            "magnitude_limit": {
+              "type": "integer",
+              "order": 5,
+              "title": "Magnitude limit",
+              "help": "Faintest star drawn, in tenths of a magnitude (50 = magnitude 5.0, 65 = the naked-eye limit of 6.5). Lower shows fewer stars.",
+              "minimum": 10,
+              "maximum": 65,
+              "step": 1,
+              "unit": " /10 mag",
+              "default": 50
+            },
+            "star_style": {
+              "type": "string",
+              "order": 6,
+              "title": "Star style",
+              "help": "Realistic draws bright stars as bigger dot clusters and fades faint ones; monochrome draws every star as one full dot.",
+              "enum": [
+                "realistic",
+                "monochrome"
+              ],
+              "enum_titles": [
+                "Realistic",
+                "Monochrome dots"
+              ],
+              "default": "realistic"
+            },
+            "star_size": {
+              "type": "string",
+              "order": 7,
+              "title": "Star size",
+              "help": "How large the clusters of the brightest stars are.",
+              "enum": [
+                "normal",
+                "small",
+                "large"
+              ],
+              "enum_titles": [
+                "Normal",
+                "Small",
+                "Large"
+              ],
+              "default": "normal",
+              "visible_when": {
+                "key": "star_style",
+                "in": [
+                  "realistic"
+                ]
+              }
+            },
+            "star_colors": {
+              "type": "boolean",
+              "order": 8,
+              "title": "Star colors",
+              "help": "Tint each star with its real color (blue-white to orange-red) instead of the global palette.",
+              "default": true,
+              "visible_when": {
+                "key": "star_style",
+                "in": [
+                  "realistic"
+                ]
+              }
+            },
+            "faint_star_gamma": {
+              "type": "integer",
+              "order": 9,
+              "title": "Faint star gamma",
+              "help": "Contrast curve of the star brightness. Above 100 brightens faint stars, below 100 keeps only the brighter ones prominent.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "twinkle": {
+              "type": "boolean",
+              "order": 10,
+              "title": "Twinkle",
+              "help": "A subtle shimmer of the stars, stronger close to the horizon.",
+              "default": false
+            },
+            "milky_way": {
+              "type": "boolean",
+              "order": 11,
+              "title": "Milky Way",
+              "help": "A faint stippled band along the galactic plane, brightest towards Sagittarius.",
+              "default": true
+            },
+            "horizon": {
+              "type": "boolean",
+              "order": 12,
+              "title": "Horizon line",
+              "help": "On clips the sky at the ground and draws a horizon ring or line. Off includes objects below the horizon and expands the view to fill the panel.",
+              "default": true
+            },
+            "cardinal_marks": {
+              "type": "boolean",
+              "order": 13,
+              "title": "Compass marks",
+              "help": "Ticks at north, east, south and west on the horizon; north has a longer tick and a marker.",
+              "default": true
+            },
+            "constellation_lines": {
+              "type": "boolean",
+              "order": 14,
+              "title": "Constellation lines",
+              "help": "Faint traditional stick figures joining the stars of the main constellations.",
+              "default": false
+            },
+            "moon": {
+              "type": "boolean",
+              "order": 15,
+              "title": "Moon",
+              "help": "Show the Moon with its current phase (low-precision ephemeris, about 0.3 degrees).",
+              "default": true
+            },
+            "planets": {
+              "type": "boolean",
+              "order": 16,
+              "title": "Planets",
+              "help": "Show Mercury, Venus, Mars, Jupiter and Saturn where they really are.",
+              "default": true
+            },
+            "satellites": {
+              "type": "boolean",
+              "order": 17,
+              "title": "Simulated satellites",
+              "help": "Illustrative low-Earth orbit satellites in inclined orbits. These are simulated, not real tracked satellite positions or predictions.",
+              "default": false
+            },
+            "precession": {
+              "type": "boolean",
+              "order": 18,
+              "title": "Precession",
+              "help": "Correct the J2000 catalogue positions for the slow wobble of the Earth's axis up to the date shown.",
+              "default": true
+            },
+            "time_speed": {
+              "type": "string",
+              "order": 19,
+              "title": "Time speed",
+              "help": "Simulated seconds per real second. x1 is the real sky; higher values make the sky visibly turn.",
+              "enum": [
+                "x1",
+                "x10",
+                "x60",
+                "x600",
+                "x3600",
+                "x86400"
+              ],
+              "enum_titles": [
+                "x1 (real time)",
+                "x10",
+                "x60 (1 min/s)",
+                "x600 (10 min/s)",
+                "x3600 (1 h/s)",
+                "x86400 (1 day/s)"
+              ],
+              "default": "x1"
+            },
+            "time_offset": {
+              "type": "integer",
+              "order": 20,
+              "title": "Time offset",
+              "help": "Shift the simulated time by this many hours, to see the sky of earlier or later hours or days.",
+              "minimum": -168,
+              "maximum": 168,
+              "step": 1,
+              "unit": " h",
+              "default": 0
+            },
+            "start_from": {
+              "type": "string",
+              "order": 21,
+              "title": "Start from",
+              "help": "Begin at the real current time or at a fixed date and time.",
+              "enum": [
+                "now",
+                "fixed_time"
+              ],
+              "enum_titles": [
+                "Now",
+                "Fixed date and time"
+              ],
+              "default": "now"
+            },
+            "start_datetime": {
+              "type": "string",
+              "order": 22,
+              "title": "Start date and time",
+              "help": "Universal time to start from, for example 2026-12-21 22:00 (YYYY-MM-DD HH:MM, UTC). Empty means now.",
+              "default": "",
+              "visible_when": {
+                "key": "start_from",
+                "in": [
+                  "fixed_time"
+                ]
+              }
+            }
+          }
         }
       },
       {
@@ -4702,6 +4988,1659 @@
               "maximum": 999,
               "step": 1,
               "default": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "topographic-maps",
+        "title": "Topographic maps",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "order": 0,
+              "title": "World",
+              "help": "Which world to map. Earth, Moon, Mars, Venus, Mercury and Ceres come from NASA and NOAA elevation surveys; the fictional worlds are generated from the seed below.",
+              "enum": [
+                "cycle_all",
+                "cycle_real",
+                "cycle_fictional",
+                "earth",
+                "moon",
+                "mars",
+                "venus",
+                "mercury",
+                "ceres",
+                "aeria",
+                "pangaea",
+                "ridgeworld",
+                "craterlands"
+              ],
+              "enum_titles": [
+                "All worlds in turn",
+                "Real worlds in turn",
+                "Fictional worlds in turn",
+                "Earth",
+                "Moon",
+                "Mars",
+                "Venus",
+                "Mercury",
+                "Ceres",
+                "Aeria (fictional)",
+                "Pangaea Prime (fictional)",
+                "Ridgeworld (fictional)",
+                "Craterlands (fictional)"
+              ],
+              "default": "cycle_all"
+            },
+            "body_seconds": {
+              "type": "integer",
+              "order": 1,
+              "title": "Seconds per world",
+              "help": "How long each world stays on screen when several are in turn. The next world dissolves in over a few seconds.",
+              "minimum": 20,
+              "maximum": 600,
+              "step": 5,
+              "unit": " s",
+              "default": 75
+            },
+            "fictional_seed": {
+              "type": "integer",
+              "order": 2,
+              "title": "Fictional seed",
+              "help": "Seed of the fictional worlds. Each seed gives different continents, mountain belts and craters.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 7
+            },
+            "projection": {
+              "type": "string",
+              "order": 3,
+              "title": "Projection",
+              "help": "A flat world map, or a globe turning in space.",
+              "enum": [
+                "flat",
+                "globe"
+              ],
+              "enum_titles": [
+                "Flat map",
+                "Globe"
+              ],
+              "default": "flat"
+            },
+            "zoom_percent": {
+              "type": "integer",
+              "order": 4,
+              "title": "Zoom",
+              "help": "100% fits the whole world on screen. Higher values show a smaller region in more detail.",
+              "minimum": 50,
+              "maximum": 1600,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "contour_levels": {
+              "type": "integer",
+              "order": 5,
+              "title": "Contour lines",
+              "help": "Number of contour lines across the whole relief of the world, spaced at round elevations. Ignored when a fixed spacing is set.",
+              "minimum": 6,
+              "maximum": 80,
+              "step": 1,
+              "default": 16
+            },
+            "interval_m": {
+              "type": "integer",
+              "order": 6,
+              "title": "Contour spacing",
+              "help": "Fixed elevation step between contour lines in metres. 0 derives the step from the number of contour lines.",
+              "minimum": 0,
+              "maximum": 10000,
+              "step": 50,
+              "unit": " m",
+              "default": 0
+            },
+            "index_every": {
+              "type": "integer",
+              "order": 7,
+              "title": "Index line every",
+              "help": "Every Nth contour is drawn heavier, like the index contours of a survey map. 0 draws none.",
+              "minimum": 0,
+              "maximum": 10,
+              "step": 1,
+              "default": 5
+            },
+            "line_thickness": {
+              "type": "integer",
+              "order": 8,
+              "title": "Line thickness",
+              "help": "Thickness of contour lines in Braille dots.",
+              "minimum": 1,
+              "maximum": 3,
+              "step": 1,
+              "unit": " dots",
+              "default": 1
+            },
+            "below_style": {
+              "type": "string",
+              "order": 9,
+              "title": "Lines below zero",
+              "help": "How contours below the zero level (sea floor, basins) are drawn: solid, dotted or hidden.",
+              "enum": [
+                "solid",
+                "dotted",
+                "hidden"
+              ],
+              "enum_titles": [
+                "Solid",
+                "Dotted",
+                "Hidden"
+              ],
+              "default": "dotted"
+            },
+            "coastline": {
+              "type": "boolean",
+              "order": 10,
+              "title": "Emphasise zero level",
+              "help": "Draw the zero-elevation contour (the shore on Earth) heavier than the rest.",
+              "default": true
+            },
+            "outline": {
+              "type": "boolean",
+              "order": 11,
+              "title": "Map outline",
+              "help": "Draw the edge of the map, or the limb of the globe.",
+              "default": true
+            },
+            "shading_percent": {
+              "type": "integer",
+              "order": 12,
+              "title": "Relief shading",
+              "help": "Sparse dots that light slopes facing the north-west, in addition to the contour lines.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 0
+            },
+            "tint": {
+              "type": "string",
+              "order": 13,
+              "title": "Elevation tints",
+              "help": "Tint the map by elevation, or use the single global colour.",
+              "enum": [
+                "global",
+                "hypsometric",
+                "natural",
+                "heat",
+                "ice"
+              ],
+              "enum_titles": [
+                "Global colour",
+                "Hypsometric tints",
+                "Natural for the world",
+                "Heat",
+                "Ice"
+              ],
+              "default": "natural"
+            },
+            "pan": {
+              "type": "string",
+              "order": 14,
+              "title": "Pan",
+              "help": "How the view travels over the world. The globe turns instead of sliding.",
+              "enum": [
+                "wander",
+                "east",
+                "west",
+                "north",
+                "south",
+                "north_east",
+                "still"
+              ],
+              "enum_titles": [
+                "Wandering route",
+                "East",
+                "West",
+                "North",
+                "South",
+                "North-east",
+                "Still"
+              ],
+              "default": "wander"
+            },
+            "pan_speed": {
+              "type": "integer",
+              "order": 15,
+              "title": "Pan speed",
+              "help": "0 holds the view still; 100 moves about 5 dots per second at any zoom.",
+              "minimum": 0,
+              "maximum": 400,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "center_latitude": {
+              "type": "integer",
+              "order": 16,
+              "title": "Start latitude",
+              "help": "Latitude the view is centred on when it starts and, for a still view, always.",
+              "minimum": -80,
+              "maximum": 80,
+              "step": 5,
+              "unit": "°",
+              "default": 15
+            },
+            "start_longitude": {
+              "type": "integer",
+              "order": 17,
+              "title": "Start longitude",
+              "help": "Longitude the view is centred on when it starts.",
+              "minimum": -180,
+              "maximum": 180,
+              "step": 5,
+              "unit": "°",
+              "default": 0
+            },
+            "zero_shift_m": {
+              "type": "integer",
+              "order": 18,
+              "title": "Zero level shift",
+              "help": "Raise or lower the zero level that the shore line and below-zero style refer to, flooding or draining the world.",
+              "minimum": -3000,
+              "maximum": 3000,
+              "step": 50,
+              "unit": " m",
+              "default": 0
+            },
+            "tide_range_m": {
+              "type": "integer",
+              "order": 19,
+              "title": "Tide range",
+              "help": "Let the sea level rise and fall by this much (peak to peak), so water floods and drains the map. Large values simulate a climate swing. 0 keeps it fixed.",
+              "minimum": 0,
+              "maximum": 20000,
+              "step": 50,
+              "unit": " m",
+              "default": 0
+            },
+            "tide_pattern": {
+              "type": "string",
+              "order": 20,
+              "title": "Tide pattern",
+              "help": "Same everywhere: the whole sea rises and falls together. Travelling bulges: like the real tide, two bulges on opposite sides of the world circle it, so the sea is high in some places while it is low in others.",
+              "enum": [
+                "global",
+                "bulges"
+              ],
+              "enum_titles": [
+                "Same everywhere",
+                "Travelling bulges"
+              ],
+              "default": "global"
+            },
+            "tide_seconds": {
+              "type": "integer",
+              "order": 21,
+              "title": "Tide period",
+              "help": "Seconds for one full rise and fall of the zero level. Used only while the tide range is above 0.",
+              "minimum": 10,
+              "maximum": 600,
+              "step": 10,
+              "unit": " s",
+              "default": 120
+            }
+          }
+        }
+      },
+      {
+        "id": "shoreline",
+        "title": "Wave washing up sand",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "reach_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Tide reach",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "foam_width_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Foam width",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 75
+            },
+            "grain_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Sand grains",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 20
+            },
+            "cycle_seconds": {
+              "type": "integer",
+              "order": 3,
+              "title": "Wash cycle",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 6,
+              "maximum": 30,
+              "step": 1,
+              "unit": "s",
+              "default": 12
+            },
+            "shoreline_style": {
+              "type": "string",
+              "order": 4,
+              "title": "Style",
+              "help": "Classic is the original single wash. Rich adds wave sets, uneven foam, trailing lace and clinging foam.",
+              "enum": [
+                "classic",
+                "rich"
+              ],
+              "enum_titles": [
+                "Classic",
+                "Rich"
+              ],
+              "default": "rich"
+            },
+            "shoreline_wave_sets": {
+              "type": "integer",
+              "order": 5,
+              "title": "Swell trains",
+              "help": "How many overlapping swell trains cross the water, each with its own wavelength, speed and direction.",
+              "minimum": 1,
+              "maximum": 4,
+              "step": 1,
+              "default": 3,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_swell_angle": {
+              "type": "integer",
+              "order": 6,
+              "title": "Swell angle",
+              "help": "How obliquely the swell meets the beach. Larger angles let each wash roll along the shore instead of arriving all at once.",
+              "minimum": 0,
+              "maximum": 60,
+              "step": 5,
+              "unit": "°",
+              "default": 20,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_set_irregularity": {
+              "type": "integer",
+              "order": 7,
+              "title": "Set irregularity",
+              "help": "How unequal successive waves are. Zero repeats one identical wash; higher values mix small and large waves.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_big_wave_every": {
+              "type": "integer",
+              "order": 8,
+              "title": "Big wave every",
+              "help": "Every this many waves, a larger one runs further up the beach. It has no effect at zero irregularity.",
+              "minimum": 2,
+              "maximum": 8,
+              "step": 1,
+              "unit": " waves",
+              "default": 4,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_meander": {
+              "type": "integer",
+              "order": 9,
+              "title": "Shore meander",
+              "help": "How much the wash line wanders, including beach cusps where the water runs further up in some places.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_chop": {
+              "type": "integer",
+              "order": 10,
+              "title": "Water chop",
+              "help": "Short crossing ripples on top of the swell.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_foam_unevenness": {
+              "type": "integer",
+              "order": 11,
+              "title": "Foam unevenness",
+              "help": "How much the foam thickness varies along the line, from an even ribbon to thick clots and thin threads.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 60,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_foam_breakup": {
+              "type": "integer",
+              "order": 12,
+              "title": "Foam breakup",
+              "help": "How much the foam splits into drifting fragments and lets water show through.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 40,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_lace": {
+              "type": "integer",
+              "order": 13,
+              "title": "Trailing lace",
+              "help": "Thin foam threads the retreating water leaves behind on the sand before they fade.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 55,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_stick_amount": {
+              "type": "integer",
+              "order": 14,
+              "title": "Clinging foam",
+              "help": "How many small foam bits cling to the wet sand as the wave recedes.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_stick_linger": {
+              "type": "integer",
+              "order": 15,
+              "title": "Foam linger",
+              "help": "How long clinging foam lasts, as a share of one wash cycle, before it disappears.",
+              "minimum": 5,
+              "maximum": 60,
+              "step": 5,
+              "unit": "%",
+              "default": 20,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_wet_darkness": {
+              "type": "integer",
+              "order": 16,
+              "title": "Wet sand darkness",
+              "help": "How much darker sand looks while it is wet.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 85,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_wet_memory": {
+              "type": "integer",
+              "order": 17,
+              "title": "Wet sand memory",
+              "help": "How long wet sand stays dark after the water leaves, even into the next wave.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_backwash": {
+              "type": "integer",
+              "order": 18,
+              "title": "Backwash streaks",
+              "help": "Fine streaks running down the beach behind the retreating water.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            },
+            "shoreline_sparkle": {
+              "type": "integer",
+              "order": 19,
+              "title": "Sparkle",
+              "help": "Tiny glints on wet sand and near-shore crests.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 30,
+              "visible_when": {
+                "key": "shoreline_style",
+                "in": [
+                  "rich"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "moonlit-water",
+        "title": "Moon over moving water",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "wave_strength_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Wave strength",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "ripple_scale_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Ripple scale",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "reflection_width_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Reflection width",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "moon_size_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Moon size",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            }
+          }
+        }
+      },
+      {
+        "id": "sleeping-ridge",
+        "title": "Clouds over a sleeping ridge",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "cloud_cover_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Cloud cover",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 60
+            },
+            "mist_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Valley mist",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 40
+            },
+            "ridge_height_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Ridge height",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "drift_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Cloud drift",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            }
+          }
+        }
+      },
+      {
+        "id": "windy-hillside",
+        "title": "Hillside brushed by wind",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "plant_density_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Plant density",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "wind_strength_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Wind strength",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "plant_height_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Plant height",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "gust_scale_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Gust breadth",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            }
+          }
+        }
+      },
+      {
+        "id": "tea-steam",
+        "title": "Steam above a tea cup",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "cup_size_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Cup size",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 60,
+              "maximum": 140,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "steam_ribbons": {
+              "type": "integer",
+              "order": 1,
+              "title": "Steam wisps",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 1,
+              "maximum": 6,
+              "step": 1,
+              "default": 4
+            },
+            "curl_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Steam curl",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "steam_height_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Steam height",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            }
+          }
+        }
+      },
+      {
+        "id": "kelp",
+        "title": "Kelp in a gentle current",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "plant_density_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Plant density",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "current_strength_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Current strength",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "leaf_length_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Ribbon length",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 175,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "cluster_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Clustering",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 65
+            }
+          }
+        }
+      },
+      {
+        "id": "stone-caustics",
+        "title": "Water caustics on stone",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "dome_height_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Stone relief",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "caustic_scale_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Light web scale",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "small_stones_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Small stones",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 65
+            },
+            "sand_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Sand grains",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 20
+            }
+          }
+        }
+      },
+      {
+        "id": "cloudlets",
+        "title": "Drifting cloud islands",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "form_count": {
+              "type": "integer",
+              "order": 0,
+              "title": "Cloud islands",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 2,
+              "maximum": 10,
+              "step": 1,
+              "default": 6
+            },
+            "form_size_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Island size",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 175,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "cohesion_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Joining softness",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "orbit_radius_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Drift breadth",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            }
+          }
+        }
+      },
+      {
+        "id": "two-ripples",
+        "title": "Two gentle wave sources",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "source_separation_percent": {
+              "type": "integer",
+              "order": 0,
+              "title": "Source separation",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 10,
+              "maximum": 90,
+              "step": 2,
+              "unit": "%",
+              "default": 54
+            },
+            "wavelength_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Wavelength",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "interference_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Interference",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 65
+            },
+            "damping_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Damping",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 25
+            }
+          }
+        }
+      },
+      {
+        "id": "quiet-pond",
+        "title": "Lily pads on a quiet pond",
+        "family": "classic",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "pad_count": {
+              "type": "integer",
+              "order": 0,
+              "title": "Lily pads",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 3,
+              "maximum": 64,
+              "step": 1,
+              "default": 7
+            },
+            "pad_size_percent": {
+              "type": "integer",
+              "order": 1,
+              "title": "Pad size",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 50,
+              "maximum": 175,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "ripple_strength_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Water ripples",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 70
+            },
+            "drift_percent": {
+              "type": "integer",
+              "order": 3,
+              "title": "Surface drift",
+              "help": "A control of this scene; each scene keeps its own saved values.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "natural_placement": {
+              "type": "boolean",
+              "order": 4,
+              "title": "Rooted placement",
+              "help": "Cluster leaves around underwater root groups, with bounded petiole reach and spacing.",
+              "default": false
+            }
+          }
+        }
+      },
+      {
+        "id": "graph",
+        "title": "Live graphs",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 1,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "order": 0,
+              "title": "Source",
+              "help": "Public observations; successful requests do not guarantee a new measurement. Selecting ISS, Wikipedia or drand from a nonfast source uses one minute only from the default two-hour window; authored windows are retained.",
+              "enum": [
+                "bitcoin-usd",
+                "ethereum-usd",
+                "solana-usd",
+                "litecoin-usd",
+                "dogecoin-usd",
+                "cardano-usd",
+                "xrp-usd",
+                "avalanche-usd",
+                "eur-usd-ecb-daily",
+                "eur-gbp-ecb-daily",
+                "eur-jpy-ecb-daily",
+                "eur-chf-ecb-daily",
+                "eur-cad-ecb-daily",
+                "eur-aud-ecb-daily",
+                "eur-sek-ecb-daily",
+                "eur-nok-ecb-daily",
+                "solar-wind-speed",
+                "solar-wind-density",
+                "solar-wind-temperature",
+                "interplanetary-magnetic-field",
+                "magnetic-field-bx-gsm",
+                "magnetic-field-by-gsm",
+                "magnetic-field-bz-gsm",
+                "iss-altitude",
+                "iss-orbital-speed",
+                "iss-latitude",
+                "iss-longitude",
+                "earthquake-activity",
+                "earthquake-magnitudes",
+                "public-randomness-quicknet",
+                "wikipedia-edit-activity",
+                "wikipedia-bot-share"
+              ],
+              "enum_titles": [
+                "Bitcoin / USD",
+                "Ethereum / USD",
+                "Solana / USD",
+                "Litecoin / USD",
+                "Dogecoin / USD",
+                "Cardano / USD",
+                "XRP / USD",
+                "Avalanche / USD",
+                "EUR / USD (ECB daily)",
+                "EUR / GBP (ECB daily)",
+                "EUR / JPY (ECB daily)",
+                "EUR / CHF (ECB daily)",
+                "EUR / CAD (ECB daily)",
+                "EUR / AUD (ECB daily)",
+                "EUR / SEK (ECB daily)",
+                "EUR / NOK (ECB daily)",
+                "Solar wind speed",
+                "Solar wind density",
+                "Solar wind temperature",
+                "Interplanetary magnetic field",
+                "Magnetic field Bx (GSM)",
+                "Magnetic field By (GSM)",
+                "Magnetic field Bz (GSM)",
+                "ISS altitude",
+                "ISS orbital speed",
+                "ISS latitude",
+                "ISS longitude",
+                "Earthquake activity",
+                "Earthquake magnitudes",
+                "Public randomness (Quicknet)",
+                "Wikipedia edit activity",
+                "Wikipedia bot share"
+              ],
+              "default": "bitcoin-usd"
+            },
+            "mode": {
+              "type": "string",
+              "order": 1,
+              "title": "Chart",
+              "help": "Candles use the provider's actual open, high, low and close, never invented price samples.",
+              "enum": [
+                "line",
+                "bars",
+                "ohlc-candles"
+              ],
+              "enum_titles": [
+                "Line",
+                "Bars",
+                "OHLC candles"
+              ],
+              "default": "line"
+            },
+            "window": {
+              "type": "string",
+              "order": 2,
+              "title": "Time window",
+              "help": "Shows provider timestamps over the selected rolling window. Missing history remains empty; daily reference rates need longer windows.",
+              "enum": [
+                "1-minute",
+                "5-minutes",
+                "30-minutes",
+                "1-hour",
+                "2-hours",
+                "6-hours",
+                "1-day",
+                "1-week",
+                "30-days",
+                "90-days",
+                "1-year"
+              ],
+              "enum_titles": [
+                "1 minute",
+                "5 minutes",
+                "30 minutes",
+                "1 hour",
+                "2 hours",
+                "6 hours",
+                "1 day",
+                "1 week",
+                "30 days",
+                "90 days",
+                "1 year"
+              ],
+              "default": "2-hours"
+            },
+            "poll": {
+              "type": "integer",
+              "order": 3,
+              "title": "Requested refresh",
+              "help": "Source request policies override faster requests. Historical crypto candle plans share a one-minute client floor per pair across local clients and reopened scenes; failed attempts consume the slot. ISS, Wikipedia and randomness support faster updates. Errors retry with bounded backoff.",
+              "minimum": 5,
+              "maximum": 3600,
+              "step": 5,
+              "unit": " s",
+              "default": 60
+            },
+            "ink": {
+              "type": "integer",
+              "order": 4,
+              "title": "Chart ink",
+              "help": "Intensity of chart ink, including the dim axes.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 65
+            },
+            "ink_tint": {
+              "type": "integer",
+              "order": 5,
+              "title": "Chart hue",
+              "help": "Color for lines, bars and axes.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 190
+            },
+            "rising_tint": {
+              "type": "integer",
+              "order": 6,
+              "title": "Rising candle hue",
+              "help": "Close at or above open uses this color; real candle wicks remain visible.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 120,
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "ohlc-candles"
+                ]
+              }
+            },
+            "falling_tint": {
+              "type": "integer",
+              "order": 7,
+              "title": "Falling candle hue",
+              "help": "Close below open uses this color.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 0,
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "ohlc-candles"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "earthquakes",
+        "title": "Live earthquakes",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 8,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "poll": {
+              "type": "integer",
+              "order": 0,
+              "title": "Requested refresh",
+              "help": "Provider request floors override faster requests; failed requests use bounded backoff.",
+              "minimum": 5,
+              "maximum": 3600,
+              "step": 5,
+              "unit": " s",
+              "default": 60
+            },
+            "map_tint": {
+              "type": "integer",
+              "order": 1,
+              "title": "Map hue",
+              "help": "Color of the embedded Natural Earth coastlines.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 210
+            },
+            "map_ink": {
+              "type": "integer",
+              "order": 2,
+              "title": "Map brightness",
+              "help": "Coastline brightness, independent of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "marker_tint": {
+              "type": "integer",
+              "order": 3,
+              "title": "Marker hue",
+              "help": "Color of markers and earthquake magnitude labels.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 35
+            },
+            "marker_ink": {
+              "type": "integer",
+              "order": 4,
+              "title": "Marker brightness",
+              "help": "Brightness of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 90
+            },
+            "labels": {
+              "type": "boolean",
+              "order": 5,
+              "title": "Magnitude labels",
+              "help": "Show reported magnitudes, including zero and negative values; '?' means unknown. Colliding labels are omitted, never event markers.",
+              "default": true
+            }
+          }
+        }
+      },
+      {
+        "id": "aircraft",
+        "title": "Live aircraft",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 1,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "poll": {
+              "type": "integer",
+              "order": 0,
+              "title": "Requested refresh",
+              "help": "Provider request floors override faster requests; failed requests use bounded backoff.",
+              "minimum": 5,
+              "maximum": 3600,
+              "step": 5,
+              "unit": " s",
+              "default": 60
+            },
+            "map_tint": {
+              "type": "integer",
+              "order": 1,
+              "title": "Map hue",
+              "help": "Color of the embedded Natural Earth coastlines.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 210
+            },
+            "map_ink": {
+              "type": "integer",
+              "order": 2,
+              "title": "Map brightness",
+              "help": "Coastline brightness, independent of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "marker_tint": {
+              "type": "integer",
+              "order": 3,
+              "title": "Marker hue",
+              "help": "Color of markers and earthquake magnitude labels.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 35
+            },
+            "marker_ink": {
+              "type": "integer",
+              "order": 4,
+              "title": "Marker brightness",
+              "help": "Brightness of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 90
+            },
+            "heading": {
+              "type": "boolean",
+              "order": 5,
+              "title": "Heading arrows",
+              "help": "Aircraft and boats: draw a heading arrow around each dot. Off draws exactly one dot per reported vehicle.",
+              "default": false
+            }
+          }
+        }
+      },
+      {
+        "id": "boats",
+        "title": "Live boats",
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 1,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "boat_source": {
+              "type": "string",
+              "order": 0,
+              "title": "Boat source",
+              "help": "Selecting a source clears the previous source. Errors retain only that source's last good data.",
+              "enum": [
+                "openseafeed-broader",
+                "digitraffic-finnish"
+              ],
+              "enum_titles": [
+                "OpenSeaFeed (broader)",
+                "Digitraffic (Finnish)"
+              ],
+              "default": "openseafeed-broader"
+            },
+            "poll": {
+              "type": "integer",
+              "order": 1,
+              "title": "Requested refresh",
+              "help": "Provider request floors override faster requests; failed requests use bounded backoff.",
+              "minimum": 5,
+              "maximum": 3600,
+              "step": 5,
+              "unit": " s",
+              "default": 60
+            },
+            "map_tint": {
+              "type": "integer",
+              "order": 2,
+              "title": "Map hue",
+              "help": "Color of the embedded Natural Earth coastlines.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 210
+            },
+            "map_ink": {
+              "type": "integer",
+              "order": 3,
+              "title": "Map brightness",
+              "help": "Coastline brightness, independent of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "marker_tint": {
+              "type": "integer",
+              "order": 4,
+              "title": "Marker hue",
+              "help": "Color of markers and earthquake magnitude labels.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "°",
+              "default": 35
+            },
+            "marker_ink": {
+              "type": "integer",
+              "order": 5,
+              "title": "Marker brightness",
+              "help": "Brightness of reported-object markers.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 90
+            },
+            "heading": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Heading arrows",
+              "help": "Aircraft and boats: draw a heading arrow around each dot. Off draws exactly one dot per reported vehicle.",
+              "default": false
+            },
+            "boat_credit": {
+              "type": "string",
+              "order": 7,
+              "title": "Read credit",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "OpenSeaFeed contributors · CC BY 4.0"
+            },
+            "boat_provider": {
+              "type": "string",
+              "order": 8,
+              "title": "Read provider URL",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "https://openseafeed.com/"
+            },
+            "boat_license": {
+              "type": "string",
+              "order": 9,
+              "title": "Read license URL",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "https://creativecommons.org/licenses/by/4.0/"
+            },
+            "boat_coverage": {
+              "type": "string",
+              "order": 10,
+              "title": "Read coverage",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "Reported AIS positions; incomplete reception; position age unavailable"
+            },
+            "boat_changes": {
+              "type": "string",
+              "order": 11,
+              "title": "Read changes",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "Validity-filtered and projected; known non-vessel/group identities excluded; other unusual identities retained"
+            },
+            "boat_time": {
+              "type": "string",
+              "order": 12,
+              "title": "Read time semantics",
+              "help": "Open to read the complete value. This is a source notice, not an editable setting.",
+              "default": "Position age unavailable. Snapshot build, latest ANY AIS update and network receipt are separate times."
             }
           }
         }

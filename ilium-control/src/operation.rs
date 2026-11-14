@@ -142,15 +142,6 @@ pub enum Operation {
     },
     /// Replace the process of a pane with a shell command line.
     ReplaceCommand { pane: u64, command: String },
-    /// Open a kanban board pane backed by a folder (one column per
-    /// sub-folder) or, with `markdown_file`, by one Markdown file.
-    NewBoard {
-        parent: u64,
-        name: String,
-        path: PathBuf,
-        #[serde(default)]
-        markdown_file: bool,
-    },
     /// Stop a pane's agent and keep the pane as a frozen placeholder that
     /// `resume_command` can restart later.
     Freeze { pane: u64, resume_command: String },
@@ -364,7 +355,6 @@ impl Operation {
             Self::NewGroup { .. } => "new_group",
             Self::NewSplitView { .. } => "new_split_view",
             Self::ReplaceCommand { .. } => "replace_command",
-            Self::NewBoard { .. } => "new_board",
             Self::Freeze { .. } => "freeze",
             Self::Unfreeze { .. } => "unfreeze",
             Self::UpdateSoundSettings { .. } => "update_sound_settings",
@@ -509,26 +499,6 @@ impl Operation {
                         ilium_core::SplitOrientation::Vertical
                     },
                     pane_ids,
-                }
-            }
-            Self::NewBoard {
-                parent,
-                name,
-                path,
-                markdown_file,
-            } => {
-                if name.trim().is_empty() {
-                    return Err(OperationError::Invalid("name must not be empty".into()));
-                }
-                require_absolute(path)?;
-                ClientRequest::NewBoard {
-                    parent_group: require_container(tree, *parent)?,
-                    name: name.clone(),
-                    storage: if *markdown_file {
-                        ilium_core::BoardStorage::MarkdownFile { path: path.clone() }
-                    } else {
-                        ilium_core::BoardStorage::Folder { path: path.clone() }
-                    },
                 }
             }
             Self::Freeze {
@@ -781,7 +751,6 @@ impl Operation {
             Self::NewGroup { .. } => created(Some("group")),
             Self::NewFolder { .. } => created(Some("folder")),
             Self::NewSplitView { .. } => created(Some("split_view")),
-            Self::NewBoard { .. } => created(None),
             Self::NewPane { .. } => created(Some("pane")),
             Self::ChangeProjectFolder { project, path } => {
                 let changed = match &after.get(NodeId(*project))?.kind {
@@ -868,12 +837,6 @@ pub fn examples() -> Vec<Operation> {
         Operation::ReplaceCommand {
             pane: 12,
             command: "htop".into(),
-        },
-        Operation::NewBoard {
-            parent: 5,
-            name: "Tasks".into(),
-            path: PathBuf::from("/abs/path/to/board-folder"),
-            markdown_file: false,
         },
         Operation::Freeze {
             pane: 12,

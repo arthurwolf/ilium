@@ -693,6 +693,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             last_prompt,
         } => {
             app.record_last_prompt(pane_id, last_prompt.as_deref());
+            if let (Some(plugins), Some(text)) = (app.wasm_plugins.as_ref(), last_prompt.as_ref()) {
+                plugins.feed_user_line(pane_id, text.clone());
+            }
             if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
                 tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }
@@ -1081,11 +1084,6 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                     continue;
                 };
                 if app.request_editor_load(pane_id, path, line, column) {
-                    newly_opened_pane = Some(pane_id);
-                }
-            }
-            PaneContentKind::Board => {
-                if app.request_board_load_from_tree(pane_id) {
                     newly_opened_pane = Some(pane_id);
                 }
             }
@@ -2355,39 +2353,6 @@ mod tests {
         assert_eq!(app.selected_node_id(), None);
         assert_eq!(app.active_pane_id(), None);
         assert_eq!(app.focus, crate::app::FocusTarget::Tree);
-    }
-
-    #[test]
-    fn new_board_snapshot_loads_an_existing_markdown_file_without_overwriting_it() {
-        let path = std::env::temp_dir().join(format!(
-            "ilium-existing-board-{}-{}.md",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        let original = "# General\n\n* [ ] Existing task\n";
-        std::fs::write(&path, original).unwrap();
-
-        let mut app = app();
-        let mut tree = ilium_core::Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let board_id = tree
-            .add_board(
-                group,
-                "General".to_string(),
-                ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
-            )
-            .unwrap();
-
-        apply(&mut app, ServerEvent::TreeSnapshot(tree));
-
-        app.settle_filesystem_for_test();
-        let Some(PaneRuntime::Board(board)) = app.panes.get(&board_id) else {
-            panic!("existing Markdown storage should hydrate a board runtime");
-        };
-        assert_eq!(board.columns[0].title, "General");
-        assert_eq!(board.columns[0].cards[0].title, "[ ] Existing task");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-        let _ = std::fs::remove_file(path);
     }
 
     /// Regression test: `NodeId` is never reused (see `ilium_core::Tree`),

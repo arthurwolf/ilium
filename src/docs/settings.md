@@ -132,7 +132,7 @@ Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fulls
 
 ### Icons
 
-Press `L` in Icons to open **Tree layout**. Select Identity, Objective, Activity or Title with Up/Down. Press Enter to move the selected item with Up/Down, then Enter to save or Escape to cancel. Shift+Up/Down moves directly, and Space hides or shows an icon slot. Title is always visible and acts as the divider: items above it appear before the title; items below it align at the right edge. `1` restores the default, `2` places all icons on the right, and `3` keeps Identity left with Objective and Activity right. `R` resets the layout. A labelled dummy tree previews changes using the same layout as the sidebar; narrow dialogs stack the preview below the controls. Bookmark/frozen badges stay with their title; cost indicators and hover actions retain their positions. Blocking errors remain visible even when Activity is hidden.
+Press `L` in Icons to open **Tree layout**, a dialog the Layout plugin draws over the tree. Pick Identity, Objective, Activity or Title in the list with Up/Down, then use the buttons: Up and Down move the picked slot, Show/hide hides or shows an icon slot, Default restores the stock layout, All right places all icons on the right, and Mixed keeps Identity left with Objective and Activity right. Title is always visible and acts as the divider: items above it appear before the title; items below it align at the right edge. A labelled dummy tree previews changes using the same layout as the sidebar, and every change is saved at once. Done (or Escape) keeps the result; Cancel puts back the layout the dialog opened with, and closing the dialog returns to the Icons page. Bookmark/frozen badges stay with their title; cost indicators and hover actions retain their positions. Blocking errors remain visible even when Activity is hidden.
 
 Layouts persist under `[ui.tree_row_layout]` with `order` and `hidden` lists containing `identity`, `objective`, `activity` and `title`. Duplicate/missing order entries are normalized; Title cannot be hidden. Direct moves, visibility and preset changes save immediately.
 
@@ -406,7 +406,6 @@ Accepted spellings for common enumerated values:
 | `ui.sidebar_density` | `compact`, `standard`, `comfortable` |
 | `terminal.new_pane_directory` | `project_root`, `focused_terminal`, `last_used` |
 | `editor.line_display` | `clip`, `wrap` |
-| `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 
 Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `tree_toolbar_always_visible`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
 

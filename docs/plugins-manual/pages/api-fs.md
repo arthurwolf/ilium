@@ -49,6 +49,7 @@ Manifest example for a server side that reads and writes the project and watches
 | `agent-sessions:claude`, `agent-sessions:codex`, `agent-sessions:antigravity`, `agent-sessions:gemini` | `/agent-sessions/<agent>` | the agent's transcript folder | grant, high risk |
 | `agent-config:claude`, `agent-config:codex`, `agent-config:gemini`, `agent-config:antigravity` | `/agent-config/<agent>` | the agent's configuration folder | grant, high risk for read; no write grant (changes are proposed with `agent-config.propose:<agent>`) |
 | `minecraft-saves` | `/minecraft-saves` | the platform's Minecraft saves folder | grant |
+| `minecraft-java` | `/minecraft-java` | the platform's Minecraft Java folder (versions, resource packs), read only | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}`, `{worktrees}`, optionally ending in `/**` | grant |
 
 Every scope except `package` and the `agent-config` scopes can be watched (a watch on `agent-config` is refused with `manifest.grant-scope`), and `picked` only for folders. A path that leaves the scope root through `..` or a symbolic link is refused with `not-permitted`. Synchronous `std::fs` code also works, because the component sees only the preopens.

@@ -157,8 +157,7 @@ fn contextual_text(app: &App) -> Option<String> {
         Mode::Explorer(state, _)
         | Mode::FolderExplorer(state, _)
         | Mode::ProjectFolderExplorer(state, _)
-        | Mode::PluginFilePicker(state, _)
-        | Mode::BoardPathPicker(state) => state.diagnostic_text().map(str::to_owned),
+        | Mode::PluginFilePicker(state, _) => state.diagnostic_text().map(str::to_owned),
         Mode::ValueDialog(host) => match &host.dialog {
             ValueDialogState::Choice(state) => state.notice.clone(),
             ValueDialogState::Number(state) => state.notice.clone().or_else(|| state.error.clone()),

@@ -30,6 +30,7 @@
       "fs.pick",
       "fs.read:picked",
       "editor.read",
+      "ui.panels",
       "services.use:ilium.core.kanban/set-setting",
       "extensions.provide:ilium.core.kanban/card-actions",
       "extensions.provide:ilium.core.kanban/card-moved"
@@ -65,6 +66,11 @@
       {
         "id": "reload",
         "title": "Reload board",
+        "category": "Board"
+      },
+      {
+        "id": "control",
+        "title": "Control a board",
         "category": "Board"
       }
     ],

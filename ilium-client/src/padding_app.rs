@@ -67,10 +67,14 @@ impl App {
                 content: PaneContentKind::Editor,
                 ..
             }) => PaddingPanel::Editor,
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Board,
-                ..
-            }) => PaddingPanel::Board,
+            // The Kanban plugin's board pane keeps the board padding.
+            Some(NodeKind::Pane { .. })
+                if self.tree.plugin_pane_kind(pane_id).is_some_and(|kind| {
+                    kind.kind_id() == crate::plugin_host::commands::BOARD_PANE_KIND
+                }) =>
+            {
+                PaddingPanel::Board
+            }
             _ => PaddingPanel::Terminal,
         }
     }

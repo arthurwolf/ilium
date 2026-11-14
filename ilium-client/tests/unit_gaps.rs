@@ -1,10 +1,6 @@
 //! Unit tests for public ilium-client items named by the coverage inventory.
 //! Each test drives one item through its public signature only.
 
-use ilium_client::agent_config_writer::{
-    read_overrides, AgentConfigTarget, ConfigPaths, FileFingerprint,
-};
-use ilium_client::board::checkbox_occurrences;
 use ilium_client::config::TerminalSettings;
 use ilium_client::cost_history::default_cache_path;
 use ilium_client::cost_model::format_quota;
@@ -304,94 +300,6 @@ fn extract_icon_field_keeps_quote_characters_inside_the_value() {
     let icon =
         extract_icon_field(&parsed, "icon", "tab").expect("quotes are not control characters");
     assert_eq!(icon, "\"x\"");
-}
-
-// --- agent_config_writer::read_overrides / FileFingerprint::same_content ---
-
-#[test]
-fn read_overrides_with_missing_files_yields_no_warnings() {
-    let root = tempfile::tempdir().expect("temporary directory");
-    let paths = ConfigPaths::with_roots(
-        root.path().join("claude"),
-        root.path().join("codex"),
-        root.path().join("locks"),
-    );
-    for target in [
-        AgentConfigTarget::ClaudeAutoCompactWindow,
-        AgentConfigTarget::CodexAutoCompactTokenLimit,
-    ] {
-        assert!(
-            read_overrides(target, &paths).is_empty(),
-            "missing user file must produce no override warnings for {target:?}"
-        );
-    }
-}
-
-fn fingerprint(size: u64, sha256: &str) -> FileFingerprint {
-    FileFingerprint {
-        size,
-        modified: None,
-        sha256: sha256.to_owned(),
-    }
-}
-
-#[test]
-fn same_content_true_for_identical_fingerprints() {
-    let left = fingerprint(12, "abc123");
-    assert!(left.same_content(&fingerprint(12, "abc123")));
-}
-
-#[test]
-fn same_content_false_when_hash_differs_at_same_size() {
-    assert!(!fingerprint(12, "abc123").same_content(&fingerprint(12, "def456")));
-}
-
-#[test]
-fn same_content_false_for_a_trailing_newline_difference() {
-    assert!(!fingerprint(5, "aaa").same_content(&fingerprint(6, "bbb")));
-}
-
-#[test]
-fn same_content_true_for_two_empty_files() {
-    let empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    assert!(fingerprint(0, empty_sha256).same_content(&fingerprint(0, empty_sha256)));
-}
-
-#[test]
-fn same_content_ignores_modification_time() {
-    let touched = FileFingerprint {
-        size: 3,
-        modified: Some(std::time::SystemTime::UNIX_EPOCH),
-        sha256: "same".to_owned(),
-    };
-    assert!(touched.same_content(&fingerprint(3, "same")));
-}
-
-// --- board::checkbox_occurrences ------------------------------------------
-
-#[test]
-fn checkbox_occurrences_empty_title_has_none() {
-    assert!(checkbox_occurrences("").is_empty());
-}
-
-#[test]
-fn checkbox_occurrences_detects_open_and_checked_markers_with_byte_index() {
-    assert_eq!(
-        checkbox_occurrences("[ ] a [x] b [X] c"),
-        vec![(0, false), (6, true), (12, true)]
-    );
-}
-
-#[test]
-fn checkbox_occurrences_keep_byte_indices_after_multibyte_text() {
-    // "é" is two bytes, so the marker starts at byte 2.
-    assert_eq!(checkbox_occurrences("é[ ]"), vec![(2, false)]);
-}
-
-#[test]
-fn checkbox_occurrences_ignores_partial_marker_at_end() {
-    assert!(checkbox_occurrences("a [x").is_empty());
-    assert!(checkbox_occurrences("a [ ").is_empty());
 }
 
 // --- value_config specs and setters ---------------------------------------

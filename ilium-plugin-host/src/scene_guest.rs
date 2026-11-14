@@ -30,9 +30,15 @@ use crate::calls::{deadline_for, CallClass, ResolvedLimits, Trap};
 use crate::engine::{CompiledComponent, PluginEngine};
 use crate::error::HostError;
 use crate::imports::generated_dispatch::ImportSet;
-use crate::linker::build_runtime_linker;
+use crate::linker::{build_runtime_linker, RuntimeLinker};
 use crate::store_data::{GuestIdentity, StoreData};
-use crate::wasm_guest::{block_on, lift, trap, WasmGuest};
+use crate::wasm_guest::{block_on, lift, lower, trap, WasmGuest};
+use crate::wiring::scene::SceneBackground;
+use ilium_plugin_api::generated::types::events::Event;
+
+/// The event export a scene may add to receive what its imports deliver as events (audio
+/// frames, request completions). The `ilium:anim/base` world does not list it.
+pub const HANDLER: &str = "ilium:exports/handler@0.1.0";
 
 /// The renderer export of a scene component.
 pub const RENDERER: &str = "ilium:exports/renderer@0.1.0";
@@ -671,7 +677,38 @@ pub struct SceneGuest {
     limits: ResolvedLimits,
     surface: Arc<Mutex<SceneSurface>>,
     renderer: Option<ResourceAny>,
+    /// The jobs and the event queue of this scene instance, when it was equipped by
+    /// `wiring::scene`. Dropped before the store, which cancels the scene's jobs.
+    background: Option<SceneBackground>,
     traits: SceneTraits,
+}
+
+/// What one [`SceneGuest::pump_background`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScenePump {
+    /// Jobs the scene started since the last pump that now run in their own instance.
+    pub jobs_started: usize,
+    /// Events delivered to the scene's `handler` export.
+    pub events_delivered: usize,
+    /// Events dropped because the scene exports no `handler`.
+    pub events_dropped: usize,
+}
+
+/// The linker a scene component (and each of its job instances) is instantiated on: the
+/// runtime linker of every host interface plus the `frame-surface` resource over `surface`;
+/// anything else the component imports instantiates and traps when called.
+pub(crate) fn scene_linker(
+    engine: &Arc<PluginEngine>,
+    compiled: &CompiledComponent,
+    surface: &Arc<Mutex<SceneSurface>>,
+) -> Result<RuntimeLinker, HostError> {
+    let mut linker = build_runtime_linker(engine)?;
+    define_frame_surface(linker.linker_mut(), surface)?;
+    linker
+        .linker_mut()
+        .define_unknown_imports_as_traps(&compiled.component)
+        .map_err(|error| HostError::EngineError(error.to_string()))?;
+    Ok(linker)
 }
 
 impl std::fmt::Debug for SceneGuest {
@@ -686,23 +723,21 @@ impl std::fmt::Debug for SceneGuest {
 impl SceneGuest {
     /// Instantiates a scene component and constructs its renderer from `spec_json` (the
     /// scene id, its settings, the palette and the mode). The component must export
-    /// [`RENDERER`]. Imports follow the same grant checks as every other guest; imports this
-    /// process does not implement (fonts) instantiate and trap when called.
+    /// [`RENDERER`]. Imports follow the same grant checks as every other guest: an import the
+    /// granted capabilities do not unlock is removed from `imports` before the store is built,
+    /// and a component that imports it is refused. An import left out of `imports` traps with
+    /// `host.engine-error` when called; `wiring::scene` builds the set a plugin scene gets.
     pub fn instantiate(
         engine: Arc<PluginEngine>,
         compiled: &CompiledComponent,
         limits: ResolvedLimits,
-        imports: ImportSet,
+        mut imports: ImportSet,
         identity: GuestIdentity,
         spec_json: &str,
     ) -> Result<Self, HostError> {
+        crate::runtime::restrict_to_grants(&mut imports, &identity.granted);
         let surface = Arc::new(Mutex::new(SceneSurface::default()));
-        let mut linker = build_runtime_linker(&engine)?;
-        define_frame_surface(linker.linker_mut(), &surface)?;
-        linker
-            .linker_mut()
-            .define_unknown_imports_as_traps(&compiled.component)
-            .map_err(|error| HostError::EngineError(error.to_string()))?;
+        let linker = scene_linker(&engine, compiled, &surface)?;
         let (engine, store, instance, limits) =
             WasmGuest::instantiate_linked(engine, compiled, limits, &linker, imports, identity)?
                 .into_parts();
@@ -713,6 +748,7 @@ impl SceneGuest {
             limits,
             surface,
             renderer: None,
+            background: None,
             traits: SceneTraits {
                 frames_per_second: 12,
                 wants_pointer: false,
@@ -904,19 +940,97 @@ impl SceneGuest {
         arguments: Vec<Val>,
         result_count: usize,
     ) -> Result<Vec<Val>, Trap> {
-        let invalid = || trap("trap.abi", RENDERER, function);
+        self.call_in(RENDERER, function, class, arguments, result_count)
+    }
+
+    /// The exported function `function` of `interface`, `None` when the component lacks it.
+    fn export_func(
+        &mut self,
+        interface: &str,
+        function: &str,
+    ) -> Option<wasmtime::component::Func> {
         let interface = self
             .instance
-            .get_export_index(&mut self.store, None, RENDERER)
-            .ok_or_else(invalid)?;
+            .get_export_index(&mut self.store, None, interface)?;
         let index = self
             .instance
-            .get_export_index(&mut self.store, Some(&interface), function)
+            .get_export_index(&mut self.store, Some(&interface), function)?;
+        self.instance.get_func(&mut self.store, index)
+    }
+
+    /// Hands the scene the jobs and event queue `wiring::scene` built with its imports.
+    #[must_use]
+    pub fn with_background(mut self, background: SceneBackground) -> Self {
+        self.background = Some(background);
+        self
+    }
+
+    /// Whether the component exports [`HANDLER`] and so receives import events.
+    pub fn handles_events(&mut self) -> bool {
+        self.export_func(HANDLER, "on-events").is_some()
+    }
+
+    /// Runs the background work of the scene between frames: starts every job the scene queued
+    /// through `jobs.start` in a fresh job instance of the same component (on a worker thread,
+    /// with the job's deadline and memory cap), then delivers what the scene's imports queued as
+    /// events (audio frames, request completions, job progress) to its [`HANDLER`] export, in
+    /// batches of at most `MAX_EVENTS_PER_BATCH`. A scene without the export loses those events;
+    /// it still polls `http.take-response`, `jobs.take-output` and `media` itself. A trap of the
+    /// handler is returned like a trap of `render`.
+    pub fn pump_background(&mut self) -> Result<ScenePump, Trap> {
+        let Some(background) = self.background.as_ref() else {
+            return Ok(ScenePump::default());
+        };
+        let jobs_started = background.start_queued_jobs();
+        let events = background.take_events();
+        let mut pump = ScenePump {
+            jobs_started,
+            ..ScenePump::default()
+        };
+        if events.is_empty() {
+            return Ok(pump);
+        }
+        if !self.handles_events() {
+            pump.events_dropped = events.len();
+            return Ok(pump);
+        }
+        for batch in events.chunks(ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH) {
+            self.deliver_events(batch)?;
+            pump.events_delivered += batch.len();
+        }
+        Ok(pump)
+    }
+
+    /// Calls `handler.on-events` with one batch; the submissions it returns are ignored, since a
+    /// scene has no intents to submit.
+    fn deliver_events(&mut self, batch: &[Event]) -> Result<(), Trap> {
+        const FUNCTION: &str = "on-events";
+        let invalid = || trap("trap.abi", HANDLER, FUNCTION);
+        let export = self.export_func(HANDLER, FUNCTION).ok_or_else(invalid)?;
+        let parameter = export
+            .ty(&self.store)
+            .params()
+            .next()
+            .map(|(_, ty)| ty)
             .ok_or_else(invalid)?;
-        let export = self
-            .instance
-            .get_func(&mut self.store, index)
-            .ok_or_else(invalid)?;
+        let encoded = serde_json::to_value(batch).map_err(|_| invalid())?;
+        let argument = lower(&encoded, &parameter).map_err(|_| invalid())?;
+        self.call_in(HANDLER, FUNCTION, CallClass::Event, vec![argument], 1)
+            .map(|_| ())
+    }
+
+    /// Calls one exported function of `interface` with `result_count` results, under the class
+    /// deadline.
+    fn call_in(
+        &mut self,
+        interface: &str,
+        function: &str,
+        class: CallClass,
+        arguments: Vec<Val>,
+        result_count: usize,
+    ) -> Result<Vec<Val>, Trap> {
+        let invalid = || trap("trap.abi", interface, function);
+        let export = self.export_func(interface, function).ok_or_else(invalid)?;
         let signature = export.ty(&self.store);
         if signature.params().count() != arguments.len()
             || signature.results().count() != result_count
@@ -946,7 +1060,7 @@ impl SceneGuest {
                         None => "trap.abi",
                     }
                 });
-                Err(trap(code, RENDERER, function))
+                Err(trap(code, interface, function))
             }
         }
     }
@@ -970,6 +1084,9 @@ impl SceneGuest {
 
 impl Drop for SceneGuest {
     fn drop(&mut self) {
+        // The scene's jobs are cancelled first, so no job instance outlives the scene by more
+        // than the moment it takes to notice.
+        drop(self.background.take());
         // Runs the guest's destructor of the renderer; a trap there changes nothing for the
         // host, which drops the whole store next.
         if let Some(renderer) = self.renderer.take() {

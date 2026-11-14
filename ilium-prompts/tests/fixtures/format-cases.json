@@ -281,13 +281,6 @@
     "sha256": "dec6e56b6dec07873f85b7909e07b6bd629d09ee889c1287335189e2f65cd21e"
   },
   {
-    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "75f67c9e2863d058d3e421ee8a061ef7e93d6bc0365e0517e128d770d34bc401"
-  },
-  {
     "name": "voice/policy/board-has-no-column",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"

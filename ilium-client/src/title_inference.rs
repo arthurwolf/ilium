@@ -120,7 +120,7 @@ pub fn session_title_input(
     class.provider()?;
     let terminal_screen = match app.panes.get(&pane_id) {
         Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
-        Some(PaneRuntime::Editor(_) | PaneRuntime::Board(_)) | None => String::new(),
+        Some(PaneRuntime::Editor(_)) | None => String::new(),
     };
     let project_name = app
         .tree

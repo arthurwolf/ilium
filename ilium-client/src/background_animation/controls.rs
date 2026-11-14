@@ -3,9 +3,6 @@
 //! Every editable value in the Animations tab is an `ilium_ambient::Control`:
 //! * common controls (Background, Speed, Density, Dither, palette, Playback,
 //!   Loop seconds) are stored on `AnimationSettings` and routed here;
-//! * built-in scenes expose their four named sliders as `scene_control_N`
-//!   controls (their persisted YAML field names are unchanged); the shoreline
-//!   appends a style choice and, in the Rich style, its extra sliders;
 //! * hosted `ilium-ambient` scenes forward to `AmbientSettings::controls` and
 //!   `AmbientSettings::set_control`.
 
@@ -14,17 +11,6 @@ use super::{
 };
 use ilium_ambient::control::{self, Control, ControlValue, SceneSettings};
 use ilium_ambient::style::ColorMode;
-
-/// Stable ids of the four named sliders of a built-in scene.
-pub const LEGACY_CONTROL_IDS: [&str; 4] = [
-    "scene_control_0",
-    "scene_control_1",
-    "scene_control_2",
-    "scene_control_3",
-];
-
-const LEGACY_CONTROL_HELP: &str =
-    "A named control of the selected scene. Each scene keeps its own saved values.";
 
 /// Ids of the appearance rows (`look_*`), in display order, for every mode.
 fn appearance_ids() -> Vec<&'static str> {
@@ -85,35 +71,8 @@ impl AnimationSettings {
         if let Some(kind) = self.kind.ambient() {
             return self.ambient.controls(kind);
         }
-        let mut controls: Vec<Control> = self
-            .scene_sliders()
-            .iter()
-            .zip(LEGACY_CONTROL_IDS)
-            .map(|(slider, id)| {
-                Control::slider(
-                    id,
-                    slider.label,
-                    i32::from(slider.value),
-                    (
-                        i32::from(slider.minimum),
-                        i32::from(slider.maximum),
-                        i32::from(slider.step),
-                    ),
-                    slider.unit,
-                    LEGACY_CONTROL_HELP,
-                )
-            })
-            .collect();
-        // A scene may list more controls than its four legacy sliders.
-        if self.kind == AnimationKind::Shoreline {
-            controls.extend(self.shoreline.extra_controls());
-        }
-        if self.kind == AnimationKind::QuietPond {
-            controls.push(Control::toggle("natural_placement", "Rooted placement",
-                self.quiet_pond.natural_placement,
-                "Cluster leaves around underwater root groups, with bounded petiole reach and spacing."));
-        }
-        controls
+        // Every other scene is a plugin scene: its rows come from its own manifest.
+        Vec::new()
     }
 
     pub fn scene_control(&self, id: &str) -> Option<Control> {
@@ -349,42 +308,7 @@ impl AnimationSettings {
         if let Some(kind) = self.kind.ambient() {
             return self.ambient.set_control(kind, id, value);
         }
-        if self.kind == AnimationKind::QuietPond && id == "natural_placement" {
-            let ControlValue::Bool(enabled) = value else {
-                return Ok(false);
-            };
-            let changed = self.quiet_pond.natural_placement != enabled;
-            self.quiet_pond.natural_placement = enabled;
-            return Ok(changed);
-        }
-        if self.kind == AnimationKind::Shoreline {
-            let before = self.shoreline;
-            if let Some(accepted) = self.shoreline.set_extra(id, &value) {
-                return Ok(accepted && self.shoreline != before);
-            }
-        }
-        let Some(slot) = LEGACY_CONTROL_IDS.iter().position(|known| *known == id) else {
-            return Ok(false);
-        };
-        let Some(number) = control::number(&value) else {
-            return Ok(false);
-        };
-        let before = self.clone();
-        let number = number.clamp(0, i32::from(u16::MAX)) as u16;
-        match self.kind {
-            AnimationKind::Shoreline => self.shoreline.set(slot, number),
-            AnimationKind::MoonlitWater => self.moonlit_water.set(slot, number),
-            AnimationKind::SleepingRidge => self.sleeping_ridge.set(slot, number),
-            AnimationKind::WindyHillside => self.windy_hillside.set(slot, number),
-            AnimationKind::TeaSteam => self.tea_steam.set(slot, number),
-            AnimationKind::Kelp => self.kelp.set(slot, number),
-            AnimationKind::StoneCaustics => self.stone_caustics.set(slot, number),
-            AnimationKind::Cloudlets => self.cloudlets.set(slot, number),
-            AnimationKind::TwoRipples => self.two_ripples.set(slot, number),
-            AnimationKind::QuietPond => self.quiet_pond.set(slot, number),
-            _ => return Ok(false),
-        }
-        Ok(*self != before)
+        Ok(false)
     }
 }
 

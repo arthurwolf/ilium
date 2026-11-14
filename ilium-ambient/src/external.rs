@@ -74,6 +74,11 @@ pub trait ExternalSceneFactory: Send + Sync {
     ) -> Result<bool, String> {
         Ok(false)
     }
+    /// Whether the scene shows the shared observer location, so the settings list offers the
+    /// Location row for it.
+    fn uses_location(&self) -> bool {
+        false
+    }
     /// Builds a fresh scene showing `values`. `env.palette` holds the shared palette to follow.
     fn create(&self, env: &SceneEnv, values: &SceneValues) -> Box<dyn Scene>;
 }
@@ -165,6 +170,13 @@ impl ExternalScenes {
             return Some(wanted.to_owned());
         }
         self.factories.keys().next().cloned()
+    }
+
+    /// Whether the external scene `id` shows the shared observer location.
+    pub fn uses_location(&self, id: &str) -> bool {
+        self.factories
+            .get(id)
+            .is_some_and(|factory| factory.uses_location())
     }
 
     /// The scene controls of one external scene showing `values`; empty for an unknown id.

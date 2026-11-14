@@ -10,9 +10,8 @@ use ilium_ipc::ClientRequest;
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
-    AgentToolbarModelSubmenuState, App, AppearanceRow, BoardRenameTarget, BoardStorageKind,
-    ClientExitReason, CreateBoardState, FocusTarget, KanbanBoardRow, Mode, ProjectFolderSelection,
-    SettingsState, SettingsTab, SoundRow,
+    AgentToolbarModelSubmenuState, App, AppearanceRow, ClientExitReason, FocusTarget, Mode,
+    ProjectFolderSelection, SettingsState, SettingsTab, SoundRow,
 };
 use crate::explorer_overlay::ExplorerOutcome;
 #[cfg(test)]
@@ -237,23 +236,9 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
             }
         }
         Mode::PluginPopup(state) => handle_plugin_popup_event(app, state, &event),
-        Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
-        Mode::BoardPathPicker(overlay) => handle_board_path_picker_event(app, overlay, &event),
         Mode::PluginFilePicker(overlay, pick) => {
             let escape = is_escape(&event);
             app.plugin_file_picker_event(overlay, pick, &event, escape)
-        }
-        Mode::BoardCardPrompt(pane_id, state) => {
-            handle_board_card_prompt(app, pane_id, state, &event)
-        }
-        Mode::BoardColumnPrompt(pane_id, state) => {
-            handle_board_column_prompt(app, pane_id, state, &event)
-        }
-        Mode::BoardRenamePrompt(pane_id, target, state) => {
-            handle_board_rename_prompt(app, pane_id, target, state, &event)
-        }
-        Mode::BoardDeleteConfirm(pane_id, target) => {
-            handle_board_delete_confirm(app, pane_id, target, &event)
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
         Mode::ConfirmRemoveWorkspace(target) => {
@@ -537,163 +522,6 @@ fn handle_session_recovery_event(app: &mut App, pane_count: usize, event: &Event
     }
 }
 
-fn handle_board_column_prompt(
-    app: &mut App,
-    pane_id: NodeId,
-    mut state: TextPromptState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::BoardColumnPrompt(pane_id, state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::BoardColumnPrompt(pane_id, state);
-        return;
-    }
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit => {
-            app.mode = Mode::BoardColumnPrompt(pane_id, state.clone());
-            app.commit_board_column(pane_id, state.buf);
-        }
-        PromptOutcome::Cancel => app.mode = Mode::Normal,
-        PromptOutcome::Continue => app.mode = Mode::BoardColumnPrompt(pane_id, state),
-    }
-}
-
-fn handle_create_board_event(app: &mut App, mut state: CreateBoardState, event: &Event) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::CreateBoard(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::CreateBoard(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Tab => state.editing_path = !state.editing_path,
-        KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.begin_board_storage_dialog(state);
-            return;
-        }
-        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.open_board_path_picker(state);
-            return;
-        }
-        KeyCode::Left | KeyCode::Right if !state.editing_path => {
-            state.storage_kind = match state.storage_kind {
-                BoardStorageKind::Folder => BoardStorageKind::MarkdownFile,
-                BoardStorageKind::MarkdownFile => BoardStorageKind::Folder,
-            }
-        }
-        KeyCode::Enter => {
-            app.commit_create_board(&state);
-            return;
-        }
-        _ => {
-            let prompt = if state.editing_path {
-                &mut state.path
-            } else {
-                &mut state.name
-            };
-            let _ = text_prompt::handle_key(prompt, key.code);
-        }
-    }
-    app.mode = Mode::CreateBoard(state);
-}
-
-fn handle_board_path_picker_event(
-    app: &mut App,
-    mut overlay: Box<crate::explorer_overlay::ExplorerOverlay>,
-    event: &Event,
-) {
-    match overlay.handle(event, app.layout.screen_area) {
-        Ok(ExplorerOutcome::Picked(path)) => app.return_to_create_board(Some(path)),
-        // Only an Esc the overlay did not consume (e.g. one closing its
-        // manual-path field) cancels the picker.
-        Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.return_to_create_board(None),
-        Ok(_) => app.mode = Mode::BoardPathPicker(overlay),
-        Err(error) => {
-            app.status_message = Some(format!("Board path picker error: {error}"));
-            app.mode = Mode::BoardPathPicker(overlay);
-        }
-    }
-}
-
-fn handle_board_card_prompt(
-    app: &mut App,
-    pane_id: NodeId,
-    mut state: TextPromptState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::BoardCardPrompt(pane_id, state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::BoardCardPrompt(pane_id, state);
-        return;
-    }
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit => {
-            app.mode = Mode::BoardCardPrompt(pane_id, state.clone());
-            app.commit_board_card(pane_id, state.buf);
-        }
-        PromptOutcome::Cancel => app.mode = Mode::Normal,
-        PromptOutcome::Continue => app.mode = Mode::BoardCardPrompt(pane_id, state),
-    }
-}
-
-fn handle_board_rename_prompt(
-    app: &mut App,
-    pane_id: NodeId,
-    target: BoardRenameTarget,
-    mut state: TextPromptState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::BoardRenamePrompt(pane_id, target, state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::BoardRenamePrompt(pane_id, target, state);
-        return;
-    }
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit => {
-            app.mode = Mode::BoardRenamePrompt(pane_id, target, state.clone());
-            app.commit_board_rename(pane_id, target, state.buf);
-        }
-        PromptOutcome::Cancel => app.mode = Mode::Normal,
-        PromptOutcome::Continue => app.mode = Mode::BoardRenamePrompt(pane_id, target, state),
-    }
-}
-
-fn handle_board_delete_confirm(
-    app: &mut App,
-    pane_id: NodeId,
-    target: crate::app::BoardDeleteTarget,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::BoardDeleteConfirm(pane_id, target);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::BoardDeleteConfirm(pane_id, target);
-        return;
-    }
-    match key.code {
-        KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
-            app.mode = Mode::BoardDeleteConfirm(pane_id, target);
-            app.commit_board_delete(pane_id, target);
-        }
-        KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
-        _ => app.mode = Mode::BoardDeleteConfirm(pane_id, target),
-    }
-}
-
 /// `Mode::Normal` / leader-pending dispatch: leader-key detection and key
 /// lookup, falling through to ordinary tree-navigation or
 /// pane-input handling otherwise.
@@ -838,7 +666,9 @@ fn execute_action(app: &mut App, action: Action) {
             app.git_settings.default_where == crate::config::GitDefaultWhere::ExistingWorktree,
         ),
         Action::NewEditor => app.action_new_editor(),
-        Action::NewBoard => app.open_create_board_dialog(),
+        Action::NewBoard => {
+            app.action_new_board(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
+        }
         Action::ClosePane => app.action_close_selected(),
         Action::NewGroup => {
             let preselected = app.create_group_preselect_target();
@@ -1103,7 +933,11 @@ fn handle_explorer_file_menu_event(
     }
     match key.code {
         KeyCode::Enter => {
-            app.request_new_markdown_board(menu.target_group, menu.file_path);
+            app.action_new_markdown_board(
+                menu.target_group,
+                &menu.file_path,
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            );
             app.close_modal_flow();
         }
         KeyCode::Esc => app.pop_modal(),
@@ -2140,10 +1974,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         app.mode = Mode::Settings(Box::new(state));
         return;
     }
-    if state.tab == SettingsTab::Icons
-        && crate::tree_layout_settings::handle_key(app, &mut state, *key)
-    {
+    if state.tab == SettingsTab::Icons && key.code == KeyCode::Char('L') {
+        // The Layout plugin draws the tree layout editor over the settings screen; closing it
+        // brings this page back.
         app.mode = Mode::Settings(Box::new(state));
+        app.action_tree_layout(ilium_plugin_api::generated::types::CommandOrigin::Menu);
         return;
     }
     state.animation_slider_drag = None;
@@ -2671,9 +2506,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_reset_agent_setup_path(*feature);
             }
         }
-        KeyCode::Char('L') if state.tab == SettingsTab::Icons => {
-            state.tree_layout_editor = Some(Default::default());
-        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Icons => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -3157,11 +2989,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_adjust_editor_row(row, 1);
             }
         }
-        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Session => {
-            if let Some(row) = crate::app::SessionRow::ALL.get(state.selected_row).copied() {
-                app.settings_adjust_session_row(row, -1);
-            }
-        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Git => {
             state.selected_row = state.selected_row.saturating_sub(1)
         }
@@ -3199,13 +3026,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     return;
                 }
                 app.settings_adjust_git_row(row, 1);
-            }
-        }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
-            if state.tab == SettingsTab::Session =>
-        {
-            if let Some(row) = crate::app::SessionRow::ALL.get(state.selected_row).copied() {
-                app.settings_adjust_session_row(row, 1);
             }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Keyboard => {
@@ -3255,25 +3075,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Char('2') if state.tab == SettingsTab::Keyboard => {
             app.settings_apply_keymap_preset(crate::keymap::KeymapPreset::Tmux);
-        }
-        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::KanbanBoard => {
-            state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::KanbanBoard => {
-            state.selected_row =
-                (state.selected_row + 1).min(KanbanBoardRow::ALL.len().saturating_sub(1));
-        }
-        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::KanbanBoard => {
-            if let Some(row) = KanbanBoardRow::ALL.get(state.selected_row).copied() {
-                app.settings_adjust_kanban_board_row(row, -1);
-            }
-        }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
-            if state.tab == SettingsTab::KanbanBoard =>
-        {
-            if let Some(row) = KanbanBoardRow::ALL.get(state.selected_row).copied() {
-                app.settings_adjust_kanban_board_row(row, 1);
-            }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Sound => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -3741,7 +3542,7 @@ mod indent_outdent_tests {
         let next_group = app.tree.add_group(ROOT_ID, "next").unwrap();
         let next = app
             .tree
-            .add_pane(next_group, "next", ilium_core::PaneContentKind::Board)
+            .add_pane(next_group, "next", ilium_core::PaneContentKind::Editor)
             .unwrap();
         app.focus_pane(first);
         app.take_outbound_requests();
@@ -3795,49 +3596,6 @@ mod indent_outdent_tests {
             requests.contains("[2]") || requests.contains("\\u{2}") || requests.contains("\\x02"),
             "expected one literal Ctrl+B byte to reach the pane, got {requests}"
         );
-    }
-
-    #[test]
-    fn board_dialog_types_plain_p_and_reserves_control_p_for_browse() {
-        // A real directory: Ctrl+P opens a browser rooted at this path's
-        // parent, and a literal `/tmp` does not exist on Windows, so the
-        // browser would fail to open before the assertion under test ran.
-        let temporary_dir = std::env::temp_dir();
-        let mut app = App::new("test".to_string(), temporary_dir.clone());
-        app.mode = Mode::CreateBoard(CreateBoardState {
-            parent_group: ilium_core::ROOT_ID,
-            name: crate::text_prompt::TextPromptState::new(""),
-            path: crate::text_prompt::TextPromptState::new(
-                temporary_dir.join("board.md").to_string_lossy().as_ref(),
-            ),
-            storage_kind: BoardStorageKind::MarkdownFile,
-            editing_path: false,
-        });
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
-        );
-        let Mode::CreateBoard(state) = &app.mode else {
-            panic!("plain p should keep editing the board form");
-        };
-        assert_eq!(state.name.buf, "p");
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
-        );
-        assert!(matches!(app.mode, Mode::BoardPathPicker(_)));
-        assert!(
-            matches!(app.modal_stack.as_slice(), [Mode::CreateBoard(state)] if state.name.buf == "p")
-        );
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        );
-        assert!(matches!(&app.mode, Mode::CreateBoard(state) if state.name.buf == "p"));
-        assert!(app.modal_stack.is_empty());
     }
 
     #[test]
@@ -4847,167 +4605,5 @@ mod indent_outdent_tests {
         // `group` is already top-level, so outdenting `pane` out of it
         // would leave the pane parentless at the root -- rejected.
         assert_eq!(compute_outdent_target(&tree, pane), None);
-    }
-}
-
-#[cfg(test)]
-mod board_storage_catalog_submission_tests {
-    use super::*;
-
-    fn fixture(
-        storage_kind: BoardStorageKind,
-        relative_path: &str,
-    ) -> (tempfile::TempDir, App, CreateBoardState, std::path::PathBuf) {
-        let directory = tempfile::tempdir().unwrap();
-        let project = ilium_platform::paths::canonicalize(directory.path()).unwrap();
-        let expected_path = project.join(relative_path);
-        let mut app = App::new("board-selector".into(), project);
-        let parent_group = app.tree.add_group(ROOT_ID, "Captured destination").unwrap();
-        let mut draft = CreateBoardState {
-            parent_group,
-            name: TextPromptState::new("Authored λ board"),
-            path: TextPromptState::new(relative_path),
-            storage_kind,
-            editing_path: true,
-        };
-        draft.name.cursor = 3;
-        draft.path.cursor = 7;
-        app.mode = Mode::CreateBoard(draft.clone());
-        (directory, app, draft, expected_path)
-    }
-
-    fn press(app: &mut App, code: KeyCode) {
-        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-    }
-
-    fn open_catalog(app: &mut App) {
-        handle_event(
-            app,
-            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
-        );
-        assert!(matches!(app.mode, Mode::ValueDialog(_)));
-    }
-
-    fn assert_authored_fields(current: &CreateBoardState, original: &CreateBoardState) {
-        assert_eq!(current.name, original.name);
-        assert_eq!(current.path, original.path);
-        assert_eq!(current.editing_path, original.editing_path);
-    }
-
-    #[test]
-    fn chosen_board_storage_reaches_submission_and_disk_readback() {
-        // Losing the catalog choice before submission must fail the file and request assertions.
-        for (initial, chosen, selection_key, relative_path) in [
-            (
-                BoardStorageKind::MarkdownFile,
-                BoardStorageKind::Folder,
-                KeyCode::Up,
-                "plans/authored folder",
-            ),
-            (
-                BoardStorageKind::Folder,
-                BoardStorageKind::MarkdownFile,
-                KeyCode::Down,
-                "plans/authored plan.md",
-            ),
-        ] {
-            let (_directory, mut app, draft, expected_path) = fixture(initial, relative_path);
-            open_catalog(&mut app);
-            press(&mut app, selection_key);
-            press(&mut app, KeyCode::Enter);
-            let Mode::CreateBoard(parent) = &app.mode else {
-                panic!("accepted storage catalog did not restore Create Board");
-            };
-            assert_authored_fields(parent, &draft);
-            assert_eq!(parent.parent_group, draft.parent_group);
-            assert_eq!(parent.storage_kind, chosen);
-            assert!(app.take_outbound_requests().is_empty());
-            assert!(
-                !expected_path.exists(),
-                "choosing storage must not create a board"
-            );
-
-            press(&mut app, KeyCode::Enter);
-            app.settle_filesystem_for_test();
-            assert!(matches!(app.mode, Mode::Normal));
-            let expected_storage = match chosen {
-                BoardStorageKind::Folder => ilium_core::BoardStorage::Folder {
-                    path: expected_path.clone(),
-                },
-                BoardStorageKind::MarkdownFile => ilium_core::BoardStorage::MarkdownFile {
-                    path: expected_path.clone(),
-                },
-            };
-            let requests = app.take_outbound_requests();
-            let [ClientRequest::NewBoard {
-                parent_group,
-                name,
-                storage,
-            }] = requests.as_slice()
-            else {
-                panic!("expected one board creation request, got {requests:?}");
-            };
-            assert_eq!(*parent_group, draft.parent_group);
-            assert_eq!(name, &draft.name.buf);
-            assert_eq!(storage, &expected_storage);
-            assert_eq!(expected_path.is_dir(), chosen == BoardStorageKind::Folder);
-            assert_eq!(
-                expected_path.is_file(),
-                chosen == BoardStorageKind::MarkdownFile
-            );
-
-            let reloaded = crate::board::BoardPane::load(storage.clone()).unwrap();
-            assert_eq!(reloaded.storage, expected_storage);
-            let mut titles = reloaded
-                .columns
-                .iter()
-                .map(|column| column.title.as_str())
-                .collect::<Vec<_>>();
-            titles.sort();
-            assert_eq!(titles, vec!["Doing", "Done", "To do"]);
-        }
-    }
-
-    #[test]
-    fn stale_board_storage_catalog_keeps_the_draft_without_creating_storage() {
-        // Removing the destination fence must not apply the choice to a replacement parent.
-        let (_directory, mut app, draft, expected_path) =
-            fixture(BoardStorageKind::Folder, "plans/authored plan.md");
-        let changed_destination = app.tree.add_group(ROOT_ID, "Changed destination").unwrap();
-        open_catalog(&mut app);
-        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last_mut() else {
-            panic!("storage catalog lost its Create Board parent");
-        };
-        parent.parent_group = changed_destination;
-        press(&mut app, KeyCode::Down);
-        press(&mut app, KeyCode::Enter);
-
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("stale destination incorrectly accepted the storage choice");
-        };
-        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("storage catalog changed kind");
-        };
-        assert!(choice
-            .notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("destination changed")));
-        let Some(Mode::CreateBoard(parent)) = app.modal_stack.last() else {
-            panic!("stale catalog lost its authored parent");
-        };
-        assert_authored_fields(parent, &draft);
-        assert_eq!(parent.parent_group, changed_destination);
-        assert_eq!(parent.storage_kind, draft.storage_kind);
-        app.settle_filesystem_for_test();
-        assert!(app.take_outbound_requests().is_empty());
-        assert!(!expected_path.exists());
-
-        press(&mut app, KeyCode::Esc);
-        let Mode::CreateBoard(parent) = &app.mode else {
-            panic!("cancelling stale catalog did not restore the authored form");
-        };
-        assert_authored_fields(parent, &draft);
-        assert_eq!(parent.parent_group, changed_destination);
-        assert_eq!(parent.storage_kind, draft.storage_kind);
     }
 }

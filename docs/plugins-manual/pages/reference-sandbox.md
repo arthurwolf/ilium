@@ -180,6 +180,7 @@ The authoritative scope table. Other pages link here.
 | `agent-sessions:<agent>` | H | refused | H | all | Transcript folders, read only |
 | `agent-config:<agent>` | H | refused; changes go through `agent-config.propose:<agent>` (H) | refused | all | Configuration folders, credential files excluded ([SEC-063]); the host writes only the changes the user accepts in a proposal |
 | `minecraft-saves` | normal | H | normal | all | The game's saves folder, for the Minecraft scenes |
+| `minecraft-java` | normal | refused | normal | all | The game's installation folder (versions, resource packs), read only, for the Minecraft scenes |
 | `path:{project}` / `{data}` / `{cache}` | normal | H | normal | all | Same as the named scope |
 | `path:{config}` | H | H | H | all | The Ilium configuration folder; the deny set still applies |
 | `path:{home}/...` | normal below a sensitive path-free subtree, H otherwise ([SEC-061], [SEC-062]) | H | same as read | all | Template with `{home}` |

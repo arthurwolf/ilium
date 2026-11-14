@@ -14,7 +14,6 @@ impl App {
 
     pub(crate) async fn drain_filesystem(&mut self) -> std::io::Result<()> {
         self.pending_editor_loads.clear();
-        self.pending_board_loads.clear();
         self.editor_load_retry_positions.clear();
         // These are replaceable reads, not accepted writes. Release their
         // original decoded paths before releasing the incoming allocation.
@@ -31,14 +30,10 @@ impl App {
         if let Some(files) = &mut self.editor_files {
             files.close_admission();
         }
-        if let Some(boards) = &mut self.board_files {
-            boards.close_admission();
-        }
         if let Some(configurations) = &mut self.configuration_files {
             configurations.close_admission();
         }
         let editor_notification = self.editor_files.as_ref().map(|files| files.notification());
-        let board_notification = self.board_files.as_ref().map(|files| files.notification());
         let configuration_notification = self
             .configuration_files
             .as_ref()
@@ -58,7 +53,6 @@ impl App {
                 // Register every dependency before observing progress. A
                 // release between collection and awaiting cannot be lost.
                 let editor_ready = editor_notification.as_deref().unwrap_or(&absent).notified();
-                let board_ready = board_notification.as_deref().unwrap_or(&absent).notified();
                 let configuration_ready = configuration_notification
                     .as_deref()
                     .unwrap_or(&absent)
@@ -72,7 +66,6 @@ impl App {
                 let execution_ready = execution_admission.notified();
                 tokio::pin!(
                     editor_ready,
-                    board_ready,
                     configuration_ready,
                     integration_ready,
                     animation_ready,
@@ -80,7 +73,6 @@ impl App {
                     execution_ready
                 );
                 editor_ready.as_mut().enable();
-                board_ready.as_mut().enable();
                 configuration_ready.as_mut().enable();
                 integration_ready.as_mut().enable();
                 animation_ready.as_mut().enable();
@@ -92,10 +84,6 @@ impl App {
                     .editor_files
                     .as_ref()
                     .is_none_or(|files| files.pending() == 0)
-                    && self
-                        .board_files
-                        .as_ref()
-                        .is_none_or(|files| files.pending() == 0)
                     && self
                         .configuration_files
                         .as_ref()
@@ -109,7 +97,6 @@ impl App {
                 }
                 tokio::select! {
                     _=editor_ready=>{},
-                    _=board_ready=>{},
                     _=configuration_ready=>{},
                     _=integration_ready=>{},
                     _=animation_ready=>{},
@@ -148,13 +135,8 @@ impl App {
                     .is_none_or(|files| !files.pending())
                 && !self.explorer_preparation_pending()
                 && self.pending_editor_loads.is_empty()
-                && self.pending_board_loads.is_empty()
                 && self
                     .editor_files
-                    .as_ref()
-                    .is_none_or(|files| files.pending() == 0)
-                && self
-                    .board_files
                     .as_ref()
                     .is_none_or(|files| files.pending() == 0)
                 && self
@@ -355,7 +337,6 @@ impl App {
         self.frozen_screen_restore_identities
             .retain(|pane, _| frozen_panes.contains(pane) && tree.get(*pane).is_some());
         let configuration_changed = self.collect_configuration_files()
-            | self.collect_board_files()
             | self.collect_explorers()
             | self.collect_sidebar_files()
             | self.collect_integration_files()
@@ -770,8 +751,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::PluginFilePicker(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.close_preparation(),
+                | Mode::PluginFilePicker(overlay, _) => overlay.close_preparation(),
                 _ => {}
             }
         }
@@ -788,8 +768,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::PluginFilePicker(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.preparation_pending(),
+                | Mode::PluginFilePicker(overlay, _) => overlay.preparation_pending(),
                 _ => false,
             }
         }
@@ -801,8 +780,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::PluginFilePicker(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.poll(),
+                | Mode::PluginFilePicker(overlay, _) => overlay.poll(),
                 _ => false,
             }
         }
@@ -811,207 +789,5 @@ impl App {
             changed |= poll_mode(mode);
         }
         changed
-    }
-}
-
-#[cfg(test)]
-mod shutdown_drain_tests {
-    use super::*;
-    use ilium_execution::{
-        ClientLimits, Execution, ExecutionConfig, Job, JobContext, JobCost, Lane, LaneConfig,
-        QuotaGroup, QuotaLimits, ShutdownMode,
-    };
-    use std::sync::{mpsc, Arc};
-    use std::time::{Duration, Instant};
-
-    struct BlockingIo {
-        entered: mpsc::SyncSender<()>,
-        release: mpsc::Receiver<()>,
-    }
-
-    impl Job for BlockingIo {
-        type Output = ();
-        type Error = ();
-
-        fn run(self, _context: JobContext) -> Result<(), ()> {
-            self.entered.send(()).unwrap();
-            self.release.recv().unwrap();
-            Ok(())
-        }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn filesystem_shutdown_keeps_accepted_board_write_until_disk_readback() {
-        filesystem_shutdown_board_case(false).await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn filesystem_shutdown_reports_failed_accepted_write_without_claiming_saved() {
-        filesystem_shutdown_board_case(true).await;
-    }
-
-    async fn filesystem_shutdown_board_case(fail_publication: bool) {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("accepted-board.md");
-        let quota = QuotaGroup::new(QuotaLimits {
-            clients: 2,
-            jobs: 8,
-            service_jobs: 0,
-            input_bytes: 128 * 1024 * 1024,
-            result_bytes: 64 * 1024 * 1024,
-            worker_threads: 1,
-            worker_bytes: 32 * 1024 * 1024,
-        });
-        let disabled = LaneConfig {
-            threads: 0,
-            queue_slots: 0,
-            priority: None,
-            resident_bytes_per_thread: 0,
-        };
-        let mut execution = Execution::start(
-            quota.clone(),
-            ExecutionConfig {
-                cpu: disabled,
-                io: LaneConfig {
-                    threads: 1,
-                    queue_slots: 4,
-                    priority: None,
-                    resident_bytes_per_thread: 1024 * 1024,
-                },
-                service: disabled,
-            },
-        )
-        .unwrap();
-        let client = execution
-            .client(ClientLimits {
-                jobs: 4,
-                service_jobs: 0,
-                input_bytes: 64 * 1024 * 1024,
-                result_bytes: 16 * 1024 * 1024,
-            })
-            .unwrap();
-        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
-        let (release_sender, release_receiver) = mpsc::sync_channel(1);
-        let mut blocker = client
-            .try_submit(
-                Lane::Io,
-                JobCost {
-                    input_bytes: 1024,
-                    result_bytes: 1024,
-                },
-                BlockingIo {
-                    entered: entered_sender,
-                    release: release_receiver,
-                },
-            )
-            .unwrap();
-        entered_receiver
-            .recv_timeout(Duration::from_secs(3))
-            .expect("the single I/O worker is blocked");
-
-        let mut app = App::new(
-            "filesystem-shutdown-fixture".into(),
-            directory.path().into(),
-        );
-        app.editor_files = None;
-        app.board_files = None;
-        app.configuration_files = None;
-        app.integration_files = None;
-        let mut board_files = crate::filesystem::boards::BoardFiles::new(
-            client,
-            Arc::new(tokio::sync::Notify::new()),
-        );
-        board_files.set_storage_quota(quota);
-        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
-        let source = crate::board::read_source(storage, true).unwrap();
-        let mut board = board_files.attach(source).unwrap();
-        board.add_column("Accepted during shutdown".into()).unwrap();
-        app.board_files = Some(board_files);
-        if fail_publication {
-            // read_source(create=true) already created this isolated fixture
-            // file. Replace it after acceptance so publication fails against
-            // an external directory, without altering the retained draft.
-            std::fs::remove_file(&path).unwrap();
-            std::fs::create_dir(&path).unwrap();
-        }
-
-        // Release independently of the async test runtime so even the original
-        // deadline failure cannot strand the owned I/O thread.
-        let releaser = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(if fail_publication {
-                1
-            } else {
-                5100
-            }));
-            release_sender.send(()).unwrap();
-        });
-        let drain = app.drain_filesystem().await;
-        releaser.join().unwrap();
-        assert!(
-            drain.is_ok(),
-            "shutdown must retain the accepted writer past its warning deadline: {drain:?}"
-        );
-        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
-        if fail_publication {
-            assert!(
-                path.is_dir(),
-                "failed publication must leave the conflicting entry intact"
-            );
-            let status = app
-                .status_message
-                .as_deref()
-                .expect("accepted save failure is reported");
-            assert!(
-                status.starts_with("Board edits remain unsaved:"),
-                "{status}"
-            );
-            assert!(status.contains("failed authored data retained"), "{status}");
-            assert!(board
-                .columns
-                .iter()
-                .any(|column| column.title == "Accepted during shutdown"));
-        } else {
-            assert!(path.is_file(), "accepted board save must reach disk");
-            let saved = crate::board::read_source(
-                ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
-                false,
-            )
-            .unwrap();
-            assert!(saved
-                .columns
-                .iter()
-                .any(|column| column.title == "Accepted during shutdown"));
-            drop(saved);
-        }
-
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            match blocker.try_take() {
-                ilium_execution::JobPoll::Pending => {
-                    assert!(Instant::now() < deadline, "blocking I/O job did not settle");
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                ilium_execution::JobPoll::Ready(outcome) => {
-                    assert!(matches!(
-                        outcome.view(),
-                        ilium_execution::JobOutcome::Finished(Ok(()))
-                    ));
-                    break;
-                }
-                ilium_execution::JobPoll::Lost | ilium_execution::JobPoll::Taken => {
-                    panic!("blocking I/O receipt was lost")
-                }
-            }
-        }
-        drop(blocker);
-        drop(board);
-        drop(app);
-        execution.request_shutdown(ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
     }
 }

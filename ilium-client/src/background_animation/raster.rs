@@ -2,4 +2,4 @@
 //! legacy scenes and the hosted ambient scenes share one implementation (and
 //! one fidelity test suite). This module only re-exports them.
 
-pub(super) use ilium_ambient::raster::{hash, smoothstep, threshold, Raster};
+pub(super) use ilium_ambient::raster::{threshold, Raster};

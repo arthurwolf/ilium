@@ -1510,7 +1510,6 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
             Some(match content {
                 PaneContentKind::Terminal => "ilium.terminal".to_owned(),
                 PaneContentKind::Editor => "ilium.editor".to_owned(),
-                PaneContentKind::Board => "ilium.board".to_owned(),
                 // The same global kind id the server facade reports for this node.
                 PaneContentKind::Plugin => plugin_pane
                     .as_ref()
@@ -1684,6 +1683,8 @@ pub(crate) struct ClientPlugins {
     scene_engine: Arc<PluginEngine>,
     /// The scene-side catalogue (`ClientPluginStart::scenes`) behind the same re-registration.
     scene_catalogue: Vec<CataloguePlugin>,
+    /// What each plugin scene instance's host imports are built from.
+    scene_services: wiring::scene::SceneImportServices,
     /// Contributions of the server sides, as the server last reported them.
     server_entries: BTreeMap<String, Entry>,
     /// Plugin states as the server last reported them.
@@ -1801,11 +1802,36 @@ impl ClientPlugins {
         if let Ok(mut hidden) = shared.disabled.lock() {
             hidden.extend(disabled.iter().map(ToString::to_string));
         }
-        let scenes = super::plugin_scenes::register_bundled(&engine, &start.scenes, &disabled);
+        let log: Arc<dyn LogSink> = Arc::new(TracingLog);
+        // Plugin scenes run on the ambient worker with their own instances, equipped from the
+        // scene side of their manifests: the plugin's private fs scopes and storage under the
+        // same data folder, the Minecraft saves folder (read only, `fs.read:minecraft-saves`),
+        // ffmpeg video and the sound devices. No picker, clipboard or project folder.
+        let scene_services = wiring::scene::SceneImportServices::new(
+            &start.data_dir,
+            StorageContext {
+                project: Some(session_cwd.to_path_buf()),
+                session: Some(session_name.to_owned()),
+                ..StorageContext::default()
+            },
+            Arc::clone(&log),
+            wiring::scene::SceneBackendInputs {
+                audio: Some(Arc::new(super::audio_backend::ClientAudio)),
+                media: Some(Arc::new(super::media_backend::FfmpegMedia::new())),
+                minecraft_saves: ilium_platform::minecraft::java_directory()
+                    .map(|directory| directory.join("saves")),
+                minecraft_java: ilium_platform::minecraft::java_directory(),
+            },
+        );
+        let scenes = super::plugin_scenes::register_bundled(
+            &engine,
+            &scene_services,
+            &start.scenes,
+            &disabled,
+        );
         tracing::info!("{scenes} plugin scenes registered");
         let scene_engine = Arc::clone(&engine);
         let scene_catalogue = start.scenes;
-        let log: Arc<dyn LogSink> = Arc::new(TracingLog);
         let port = OutputPort {
             shared: Arc::downgrade(&shared),
         };
@@ -1904,6 +1930,7 @@ impl ClientPlugins {
             catalogue: manifests,
             scene_engine,
             scene_catalogue,
+            scene_services,
             server_entries: BTreeMap::new(),
             server_states: BTreeMap::new(),
             known: BTreeMap::new(),
@@ -2165,6 +2192,7 @@ impl ClientPlugins {
                     // Its background scenes appear in or leave the animation list at once.
                     super::plugin_scenes::set_plugin_enabled(
                         &self.scene_engine,
+                        &self.scene_services,
                         &self.scene_catalogue,
                         &target,
                         enabled,
@@ -2373,6 +2401,30 @@ impl ClientPlugins {
             if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(closed)]) {
                 tracing::debug!("popup close not delivered to {plugin}: {error}");
             }
+            log_errors("pump", runtime.pump());
+        });
+    }
+
+    /// Hands one `user-line-submitted` event to the plugins that hold `agent.read-prompts` and
+    /// to no other plugin: the line is private to the plugins the user allowed to read prompts.
+    pub(crate) fn feed_user_line(&self, pane: ilium_core::NodeId, text: String) {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        let batch = vec![Event::UserLineSubmitted(
+            ilium_plugin_api::generated::types::events::UserLineEvent {
+                pane: to_plugin(pane),
+                text,
+                at: ilium_plugin_api::generated::types::EpochMs(at),
+            },
+        )];
+        self.shared.post(move |runtime| {
+            log_errors(
+                "user-line-submitted delivery",
+                runtime.broadcast_to_holders(&batch, &["agent.read-prompts"]),
+            );
             log_errors("pump", runtime.pump());
         });
     }

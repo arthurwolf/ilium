@@ -825,7 +825,7 @@ mod tests {
             ..Default::default()
         };
         let settings = AnimationSettings {
-            kind: super::super::AnimationKind::Stars,
+            kind: super::super::AnimationKind::NightLights,
             ..Default::default()
         };
         // Full admission retains the exact initial configuration for retry.
@@ -1122,7 +1122,7 @@ mod tests {
                 self.applied
                     .lock()
                     .unwrap()
-                    .push(settings.stars.start_datetime.clone());
+                    .push(settings.location.label.clone());
                 true
             }
         }
@@ -1141,7 +1141,7 @@ mod tests {
                     .applied
                     .lock()
                     .unwrap()
-                    .push(settings.stars.start_datetime.clone());
+                    .push(settings.location.label.clone());
                 Box::new(scene)
             })),
             ..Default::default()
@@ -1151,7 +1151,7 @@ mod tests {
             ..Default::default()
         };
         let mut settings = AnimationSettings {
-            kind: super::super::AnimationKind::Stars,
+            kind: super::super::AnimationKind::NightLights,
             ..Default::default()
         };
         let result = surface.request(&settings, 2, 1, Duration::ZERO, None);
@@ -1162,7 +1162,7 @@ mod tests {
             "2026-10-02 00:00:00",
             "2026-10-03 00:00:00",
         ] {
-            settings.ambient.stars.start_datetime = date.into();
+            settings.ambient.location.label = date.into();
             surface
                 .request(&settings, 2, 1, Duration::ZERO, None)
                 .unwrap();

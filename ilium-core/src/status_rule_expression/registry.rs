@@ -164,7 +164,6 @@ impl Condition {
                     PaneKind::PlainShell => "a plain terminal",
                     PaneKind::AgentUnavailable => "a lost agent",
                     PaneKind::Editor => "an editor",
-                    PaneKind::Board => "a board",
                 }
             ),
             Self::EditorDirty => "editor has unsaved changes".into(),
@@ -257,7 +256,7 @@ impl Condition {
     pub const fn explain(&self) -> &'static str {
         match self {
             Self::Always => "Matches every pane. Use it as the last rule to pick a fallback icon.",
-            Self::PaneKind(_) => "The kind of pane: a live agent, a plain terminal, a lost agent, an editor or a board. Custom icons apply to agent and terminal panes.",
+            Self::PaneKind(_) => "The kind of pane: a live agent, a plain terminal, a lost agent or an editor. Custom icons apply to agent and terminal panes.",
             Self::EditorDirty => "The editor pane has unsaved changes. Unknown for any other pane kind.",
             Self::PaneFrozen => "You froze the pane's screen. Known only for panes the client is currently displaying.",
             Self::PaneFocused => "The pane's terminal holds keyboard focus. False for every pane while focus is on the tree, a dialog or Settings.",
@@ -314,7 +313,6 @@ pub fn condition_catalog() -> Vec<Condition> {
         Condition::PaneKind(PaneKind::PlainShell),
         Condition::PaneKind(PaneKind::Editor),
         Condition::EditorDirty,
-        Condition::PaneKind(PaneKind::Board),
         Condition::PaneBookmarked,
         Condition::ScheduledInput,
         Condition::PromptsQueued,

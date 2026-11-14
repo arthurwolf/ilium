@@ -1,6 +1,6 @@
 //! Ordered typed configuration commands; file locks, merge, serialization,
 //! atomic replacement and durability all execute in the finite I/O bank.
-use crate::config::{AgentSetupSettings, SessionSettings};
+use crate::config::AgentSetupSettings;
 use ilium_execution::{Job, JobContext, JobCost};
 use std::path::PathBuf;
 
@@ -30,7 +30,6 @@ pub enum ConfigurationChange {
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
-    Kanban(crate::config::KanbanBoardSettings),
     Padding(crate::padding::PaddingSettings),
     Sound(ilium_sound::SoundSettings),
     Notifications(ilium_sound::NotificationSettings),
@@ -43,10 +42,6 @@ pub enum ConfigurationChange {
         crate::config::KeyboardSettings,
         Vec<crate::keymap::KeyBinding>,
     ),
-    Session {
-        previous: SessionSettings,
-        desired: SessionSettings,
-    },
     AgentSetup {
         previous: AgentSetupSettings,
         desired: AgentSetupSettings,
@@ -65,7 +60,6 @@ pub enum ConfigurationChange {
 pub enum ConfigurationSaved {
     NumberRead(String),
     Plain,
-    Session(SessionSettings),
     AgentSetup(AgentSetupSettings),
     CustomAgents(crate::config::CustomAgentSettings),
     Animation(Box<crate::background_animation::AnimationSettings>),
@@ -76,7 +70,6 @@ pub struct ConfigurationFailure {
     pub message: String,
     /// A durability failure may follow successful replacement. Readback is
     /// observation, never a durable-success acknowledgement or retry licence.
-    pub observed_session: Option<SessionSettings>,
     pub observed_agent_setup: Option<AgentSetupSettings>,
 }
 pub struct ConfigurationWrite {
@@ -101,7 +94,6 @@ impl Job for ConfigurationWrite {
                     .map(ConfigurationSaved::NumberRead)
                     .map_err(|message| ConfigurationFailure {
                         message,
-                        observed_session: None,
                         observed_agent_setup: None,
                     });
             }
@@ -121,8 +113,6 @@ impl Job for ConfigurationWrite {
             Onboarding(value) => crate::config::save_onboarding_progress(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Keyboard(value) => crate::config::save_keyboard_settings(directory, &value)
-                .map(|()| ConfigurationSaved::Plain),
-            Kanban(value) => crate::config::save_kanban_board_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Padding(value) => crate::config::save_padding_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -144,10 +134,6 @@ impl Job for ConfigurationWrite {
                 crate::config::save_keymap_settings(directory, &keyboard, &bindings)
                     .map(|()| ConfigurationSaved::Plain)
             }
-            Session { previous, desired } => {
-                crate::config::save_session_settings(directory, &previous, &desired)
-                    .map(ConfigurationSaved::Session)
-            }
             AgentSetup { previous, desired } => {
                 crate::config::update_agent_setup_settings(directory, &previous, &desired)
                     .map(ConfigurationSaved::AgentSetup)
@@ -161,7 +147,6 @@ impl Job for ConfigurationWrite {
                     .map(|()| ConfigurationSaved::Animation(settings))
                     .map_err(|error| ConfigurationFailure {
                         message: error.to_string(),
-                        observed_session: None,
                         observed_agent_setup: None,
                     });
             }
@@ -170,7 +155,6 @@ impl Job for ConfigurationWrite {
                     .map(|()| ConfigurationSaved::Separators(value))
                     .map_err(|error| ConfigurationFailure {
                         message: error.to_string(),
-                        observed_session: None,
                         observed_agent_setup: None,
                     });
             }
@@ -179,7 +163,6 @@ impl Job for ConfigurationWrite {
                     return Err(ConfigurationFailure {
                         message: "Automatic project naming decision changed before persistence"
                             .into(),
-                        observed_session: None,
                         observed_agent_setup: None,
                     });
                 }
@@ -191,7 +174,6 @@ impl Job for ConfigurationWrite {
                 .map(ConfigurationSaved::ProjectName)
                 .map_err(|error| ConfigurationFailure {
                     message: error.to_string(),
-                    observed_session: None,
                     observed_agent_setup: None,
                 });
             }
@@ -200,7 +182,6 @@ impl Job for ConfigurationWrite {
             let observed = crate::config::load(directory).ok();
             ConfigurationFailure {
                 message: error.to_string(),
-                observed_session: observed.as_ref().map(|config| config.session),
                 observed_agent_setup: observed.map(|config| config.agent_setup),
             }
         })
@@ -298,14 +279,7 @@ impl ConfigurationChange {
                 serialized_bound(value)?
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
-            Terminal(_)
-            | Editor(_)
-            | Session { .. }
-            | Keyboard(_)
-            | Kanban(_)
-            | Padding(_)
-            | Separators(_)
-            | NumberRead(_) => 0,
+            Terminal(_) | Editor(_) | Keyboard(_) | Padding(_) | Separators(_) | NumberRead(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {

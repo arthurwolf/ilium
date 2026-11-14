@@ -60,8 +60,6 @@ pub struct ClientConfig {
     /// User-global desktop-notification switches. The client persists
     /// changes; running servers pick them up through their config watcher.
     pub notifications: NotificationSettings,
-    /// Board presentation settings shown in the Kanban Board tab.
-    pub kanban_board: KanbanBoardSettings,
     /// Panel padding shown in the Padding tab.
     pub padding: crate::padding::PaddingSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
@@ -76,8 +74,6 @@ pub struct ClientConfig {
     pub terminal: TerminalSettings,
     /// Defaults applied when a local editor buffer is opened.
     pub editor: EditorSettings,
-    /// Policy the detached server reads the next time it starts this session.
-    pub session: SessionSettings,
     /// Worktree creation and branch presentation defaults.
     pub git: GitSettings,
     /// OpenAI Realtime voice-controller settings. The API key remains on the
@@ -101,7 +97,6 @@ impl Default for ClientConfig {
             ui: UiSettings::default(),
             sound: SoundSettings::default(),
             notifications: NotificationSettings::default(),
-            kanban_board: KanbanBoardSettings::default(),
             padding: crate::padding::PaddingSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
@@ -109,7 +104,6 @@ impl Default for ClientConfig {
             custom_agents: CustomAgentSettings::default(),
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
-            session: SessionSettings::default(),
             git: GitSettings::default(),
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
@@ -555,45 +549,6 @@ impl EditorSettings {
     }
 }
 
-/// Server startup behavior for a persisted project-session snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SessionRecoveryPolicy {
-    #[default]
-    RestoreAutomatically,
-    AskBeforeRestore,
-    StartFresh,
-}
-impl SessionRecoveryPolicy {
-    pub const ALL: [Self; 3] = [
-        Self::RestoreAutomatically,
-        Self::AskBeforeRestore,
-        Self::StartFresh,
-    ];
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::RestoreAutomatically => "Restore automatically",
-            Self::AskBeforeRestore => "Ask before restoring",
-            Self::StartFresh => "Start fresh",
-        }
-    }
-    pub fn stepped(self, direction: i32) -> Self {
-        stepped_value(&Self::ALL, self, direction)
-    }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SessionSettings {
-    pub recovery_policy: SessionRecoveryPolicy,
-    pub backups_enabled: bool,
-}
-impl Default for SessionSettings {
-    fn default() -> Self {
-        Self {
-            recovery_policy: SessionRecoveryPolicy::default(),
-            backups_enabled: true,
-        }
-    }
-}
-
 /// `[keyboard]` settings, validated before they reach input dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyboardSettings {
@@ -612,34 +567,12 @@ impl Default for KeyboardSettings {
     }
 }
 
-pub const MIN_CARD_PREVIEW_LINES: u16 = 1;
-pub const MAX_CARD_PREVIEW_LINES: u16 = 10;
-pub const DEFAULT_CARD_PREVIEW_LINES: u16 = 4;
-pub const MIN_BOARD_COLUMN_WIDTH: u16 = 10;
-pub const MAX_BOARD_COLUMN_WIDTH: u16 = 80;
-pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 45;
 pub const MIN_LAST_PROMPT_MAX_LINES: u8 = 1;
 pub const MAX_LAST_PROMPT_MAX_LINES: u8 = 20;
 pub const DEFAULT_LAST_PROMPT_MAX_LINES: u8 = 4;
 pub const MIN_PROGRESS_MAX_LINES: u8 = 1;
 pub const MAX_PROGRESS_MAX_LINES: u8 = 20;
 pub const DEFAULT_PROGRESS_MAX_LINES: u8 = 4;
-
-/// `[kanban_board]` settings, validated before they reach board layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KanbanBoardSettings {
-    pub card_preview_lines: u16,
-    pub minimum_column_width: u16,
-}
-
-impl Default for KanbanBoardSettings {
-    fn default() -> Self {
-        Self {
-            card_preview_lines: DEFAULT_CARD_PREVIEW_LINES,
-            minimum_column_width: DEFAULT_BOARD_COLUMN_WIDTH,
-        }
-    }
-}
 
 /// How a detected agent's type is identified in the left tree panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1259,8 +1192,6 @@ struct RawClientConfig {
     #[serde(default)]
     notifications: NotificationSettings,
     #[serde(default)]
-    kanban_board: RawKanbanBoardConfig,
-    #[serde(default)]
     padding: crate::padding::PaddingSettings,
     #[serde(default)]
     inference: InferenceSettings,
@@ -1274,8 +1205,6 @@ struct RawClientConfig {
     terminal: RawTerminalConfig,
     #[serde(default)]
     editor: RawEditorConfig,
-    #[serde(default)]
-    session: RawSessionConfig,
     #[serde(default)]
     git: GitSettings,
     #[serde(default)]
@@ -1295,13 +1224,6 @@ struct RawClientConfig {
 struct RawKeyboardConfig {
     shortcut_base: Option<String>,
     navigation_shortcut_base: Option<String>,
-}
-
-/// `[kanban_board]`'s optional on-disk shape.
-#[derive(Debug, Default, Deserialize)]
-struct RawKanbanBoardConfig {
-    card_preview_lines: Option<u16>,
-    minimum_column_width: Option<u16>,
 }
 
 /// `[ui]`'s raw, possibly-partial on-disk shape -- see [`UiSettings`] for
@@ -1381,11 +1303,6 @@ struct RawEditorConfig {
     autosave_enabled: Option<bool>,
     autosave_delay_ms: Option<u16>,
     markdown_rendered_by_default: Option<bool>,
-}
-#[derive(Debug, Default, Deserialize)]
-struct RawSessionConfig {
-    recovery_policy: Option<String>,
-    backups_enabled: Option<bool>,
 }
 
 /// `[theme]`'s color overrides, each an optional `"#rrggbb"` (or `rrggbb`)
@@ -1509,18 +1426,6 @@ pub enum ConfigLoadError {
     InvalidNewPaneDirectory(String),
     #[error("editor.line_display = {0:?} must be \"clip\" or \"wrap\"")]
     InvalidEditorLineDisplay(String),
-    #[error("session.recovery_policy = {0:?} is not supported")]
-    InvalidSessionRecoveryPolicy(String),
-    /// `kanban_board.card_preview_lines` is outside the supported range.
-    #[error(
-        "kanban_board.card_preview_lines = {0} must be between {MIN_CARD_PREVIEW_LINES} and {MAX_CARD_PREVIEW_LINES}"
-    )]
-    InvalidCardPreviewLines(u16),
-    /// `kanban_board.minimum_column_width` is outside the supported range.
-    #[error(
-        "kanban_board.minimum_column_width = {0} must be between {MIN_BOARD_COLUMN_WIDTH} and {MAX_BOARD_COLUMN_WIDTH}"
-    )]
-    InvalidBoardColumnWidth(u16),
     /// A `[padding]` value is outside its supported range.
     #[error("{0}")]
     InvalidPadding(String),
@@ -1566,8 +1471,6 @@ pub enum ConfigSaveError {
     Serialize(#[from] toml::ser::Error),
     #[error("failed to write config file: {0}")]
     Write(std::io::Error),
-    #[error("existing [session] config is not a TOML table")]
-    InvalidSessionTable,
 }
 
 /// Loads `<config_dir>/config.toml`'s `[keybindings]`, `[keyboard]`, `[theme]`,
@@ -1645,11 +1548,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
-    let kanban_board =
-        merge_kanban_board(raw.kanban_board).map_err(|source| ClientError::ConfigLoad {
-            path: path.clone(),
-            source,
-        })?;
     raw.padding
         .validate()
         .map_err(|message| ClientError::ConfigLoad {
@@ -1661,10 +1559,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         source,
     })?;
     let editor = merge_editor(raw.editor).map_err(|source| ClientError::ConfigLoad {
-        path: path.clone(),
-        source,
-    })?;
-    let session = merge_session(raw.session).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source,
     })?;
@@ -1693,7 +1587,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         ui,
         sound: raw.sound,
         notifications: raw.notifications.normalized(),
-        kanban_board,
         padding: raw.padding,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
@@ -1701,7 +1594,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         custom_agents: raw.custom_agents,
         terminal,
         editor,
-        session,
         git: raw.git,
         voice: raw.voice,
         debug: raw.debug,
@@ -1736,24 +1628,6 @@ fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoad
     Ok(KeyboardSettings {
         shortcut_base,
         navigation_shortcut_base,
-    })
-}
-
-/// Applies the optional board preview height over [`DEFAULT_CARD_PREVIEW_LINES`].
-fn merge_kanban_board(raw: RawKanbanBoardConfig) -> Result<KanbanBoardSettings, ConfigLoadError> {
-    let card_preview_lines = match raw.card_preview_lines {
-        Some(lines) if (MIN_CARD_PREVIEW_LINES..=MAX_CARD_PREVIEW_LINES).contains(&lines) => lines,
-        Some(lines) => return Err(ConfigLoadError::InvalidCardPreviewLines(lines)),
-        None => DEFAULT_CARD_PREVIEW_LINES,
-    };
-    let minimum_column_width = match raw.minimum_column_width {
-        Some(width) if (MIN_BOARD_COLUMN_WIDTH..=MAX_BOARD_COLUMN_WIDTH).contains(&width) => width,
-        Some(width) => return Err(ConfigLoadError::InvalidBoardColumnWidth(width)),
-        None => DEFAULT_BOARD_COLUMN_WIDTH,
-    };
-    Ok(KanbanBoardSettings {
-        card_preview_lines,
-        minimum_column_width,
     })
 }
 
@@ -2046,17 +1920,6 @@ fn merge_editor(raw: RawEditorConfig) -> Result<EditorSettings, ConfigLoadError>
             .unwrap_or(defaults.markdown_rendered_by_default),
     })
 }
-fn merge_session(raw: RawSessionConfig) -> Result<SessionSettings, ConfigLoadError> {
-    Ok(SessionSettings {
-        recovery_policy: raw
-            .recovery_policy
-            .as_deref()
-            .map(parse_session_recovery_policy)
-            .transpose()?
-            .unwrap_or_default(),
-        backups_enabled: raw.backups_enabled.unwrap_or(true),
-    })
-}
 
 fn validated_left_panel_width(
     field: &'static str,
@@ -2121,16 +1984,6 @@ fn parse_line_display(value: &str) -> Result<LineDisplay, ConfigLoadError> {
         "clip" => Ok(LineDisplay::Clip),
         "wrap" => Ok(LineDisplay::Wrap),
         _ => Err(ConfigLoadError::InvalidEditorLineDisplay(value.to_string())),
-    }
-}
-fn parse_session_recovery_policy(value: &str) -> Result<SessionRecoveryPolicy, ConfigLoadError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "restore_automatically" => Ok(SessionRecoveryPolicy::RestoreAutomatically),
-        "ask_before_restore" => Ok(SessionRecoveryPolicy::AskBeforeRestore),
-        "start_fresh" => Ok(SessionRecoveryPolicy::StartFresh),
-        _ => Err(ConfigLoadError::InvalidSessionRecoveryPolicy(
-            value.to_string(),
-        )),
     }
 }
 
@@ -2443,56 +2296,6 @@ pub fn save_editor_settings(
 ) -> Result<(), ClientError> {
     save_table(config_dir, "editor", editor_settings_to_toml(settings))
 }
-pub fn save_session_settings(
-    config_dir: &Path,
-    previous: &SessionSettings,
-    desired: &SessionSettings,
-) -> Result<SessionSettings, ClientError> {
-    let path = config_dir.join("config.toml");
-    let mut document = read_toml_document(&path)?;
-    let session_value = document
-        .as_table_mut()
-        .expect("a TOML document's root is always a table")
-        .entry("session".to_string())
-        .or_insert_with(|| session_settings_to_toml(&SessionSettings::default()));
-    let session_table = session_value
-        .as_table_mut()
-        .ok_or_else(|| ClientError::ConfigSave {
-            path: path.clone(),
-            source: Box::new(ConfigSaveError::InvalidSessionTable),
-        })?;
-
-    if desired.recovery_policy != previous.recovery_policy {
-        let value = match desired.recovery_policy {
-            SessionRecoveryPolicy::RestoreAutomatically => "restore_automatically",
-            SessionRecoveryPolicy::AskBeforeRestore => "ask_before_restore",
-            SessionRecoveryPolicy::StartFresh => "start_fresh",
-        };
-        session_table.insert(
-            "recovery_policy".to_string(),
-            toml::Value::String(value.to_owned()),
-        );
-    }
-    if desired.backups_enabled != previous.backups_enabled {
-        session_table.insert(
-            "backups_enabled".to_string(),
-            toml::Value::Boolean(desired.backups_enabled),
-        );
-    }
-
-    let raw: RawSessionConfig = toml::Value::Table(session_table.clone())
-        .try_into()
-        .map_err(|source| ClientError::ConfigSave {
-            path: path.clone(),
-            source: Box::new(ConfigSaveError::Parse(source)),
-        })?;
-    let saved = merge_session(raw).map_err(|source| ClientError::ConfigLoad {
-        path: path.clone(),
-        source,
-    })?;
-    write_toml_document(&path, &document)?;
-    Ok(saved)
-}
 /// Saves wizard progress alongside provider settings while retaining every
 /// unrelated table, including server-owned configuration.
 pub fn save_onboarding_progress(
@@ -2555,23 +2358,6 @@ pub fn save_keymap_settings(
         );
     }
     table.insert("keybindings".to_string(), toml::Value::Table(keybindings));
-    write_toml_document(&path, &document)
-}
-
-/// Persists `[kanban_board]` while preserving every unrelated config table.
-pub fn save_kanban_board_settings(
-    config_dir: &Path,
-    kanban_board: &KanbanBoardSettings,
-) -> Result<(), ClientError> {
-    let path = config_dir.join("config.toml");
-    let mut document = read_toml_document(&path)?;
-    let table = document
-        .as_table_mut()
-        .expect("a TOML document's root is always a table");
-    table.insert(
-        "kanban_board".to_string(),
-        kanban_board_settings_to_toml(kanban_board),
-    );
     write_toml_document(&path, &document)
 }
 
@@ -3364,39 +3150,6 @@ fn editor_settings_to_toml(settings: &EditorSettings) -> toml::Value {
     );
     toml::Value::Table(table)
 }
-fn session_settings_to_toml(settings: &SessionSettings) -> toml::Value {
-    let mut table = toml::value::Table::new();
-    table.insert(
-        "recovery_policy".into(),
-        toml::Value::String(
-            match settings.recovery_policy {
-                SessionRecoveryPolicy::RestoreAutomatically => "restore_automatically",
-                SessionRecoveryPolicy::AskBeforeRestore => "ask_before_restore",
-                SessionRecoveryPolicy::StartFresh => "start_fresh",
-            }
-            .into(),
-        ),
-    );
-    table.insert(
-        "backups_enabled".into(),
-        toml::Value::Boolean(settings.backups_enabled),
-    );
-    toml::Value::Table(table)
-}
-
-/// Builds the complete `[kanban_board]` table written by the settings UI.
-fn kanban_board_settings_to_toml(settings: &KanbanBoardSettings) -> toml::Value {
-    let mut table = toml::value::Table::new();
-    table.insert(
-        "card_preview_lines".to_string(),
-        toml::Value::Integer(i64::from(settings.card_preview_lines)),
-    );
-    table.insert(
-        "minimum_column_width".to_string(),
-        toml::Value::Integer(i64::from(settings.minimum_column_width)),
-    );
-    toml::Value::Table(table)
-}
 
 /// Builds the complete `[keyboard]` table written by the settings screen.
 fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
@@ -3827,8 +3580,6 @@ mod tests {
             ilium_inference::TitleStyle::Labeling
         );
         assert_eq!(config.terminal.scrollback_budget_mib, 8);
-        assert_eq!(config.kanban_board.card_preview_lines, 4);
-        assert_eq!(config.kanban_board.minimum_column_width, 45);
         assert!(!config.voice.enabled);
         assert!(config.voice.api_key.is_empty());
     }
@@ -3840,7 +3591,7 @@ mod tests {
         let dir = scratch_dir();
         std::fs::write(
             dir.join("config.toml"),
-            "[ui]\ncolor_scheme = \"dark\"\n[keyboard]\n[terminal]\n[kanban_board]\n[triggers]\n",
+            "[ui]\ncolor_scheme = \"dark\"\n[keyboard]\n[terminal]\n[triggers]\n",
         )
         .unwrap();
         let partial = load(&dir).expect("partial config loads");
@@ -3848,7 +3599,6 @@ mod tests {
         assert_eq!(partial.ui, defaults.ui);
         assert_eq!(partial.keyboard, defaults.keyboard);
         assert_eq!(partial.terminal, defaults.terminal);
-        assert_eq!(partial.kanban_board, defaults.kanban_board);
         assert_eq!(partial.triggers, defaults.triggers);
         assert_eq!(partial.keybindings, defaults.keybindings);
     }
@@ -5281,56 +5031,6 @@ mod tests {
     }
 
     #[test]
-    fn kanban_board_uses_four_preview_lines_and_forty_five_column_width_by_default() {
-        let dir = scratch_dir();
-
-        let config = load(&dir).expect("missing config should use defaults");
-
-        assert_eq!(config.kanban_board.card_preview_lines, 4);
-        assert_eq!(config.kanban_board.minimum_column_width, 45);
-    }
-
-    #[test]
-    fn kanban_board_preview_lines_validate_and_round_trip() {
-        let dir = scratch_dir();
-        let settings = KanbanBoardSettings {
-            card_preview_lines: 10,
-            minimum_column_width: 37,
-        };
-
-        save_kanban_board_settings(&dir, &settings).expect("board settings should save");
-        let config = load(&dir).expect("saved board settings should load");
-
-        assert_eq!(config.kanban_board, settings);
-
-        std::fs::write(
-            dir.join("config.toml"),
-            "[kanban_board]\ncard_preview_lines = 11\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            load(&dir),
-            Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::InvalidCardPreviewLines(11),
-                ..
-            })
-        ));
-
-        std::fs::write(
-            dir.join("config.toml"),
-            "[kanban_board]\nminimum_column_width = 9\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            load(&dir),
-            Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::InvalidBoardColumnWidth(9),
-                ..
-            })
-        ));
-    }
-
-    #[test]
     fn git_settings_round_trip_and_preserve_other_tables() {
         let dir = scratch_dir();
         std::fs::write(
@@ -5386,36 +5086,6 @@ mod tests {
             keymap::action_for_table(&config.keybindings, BindingKey::Character('z')),
             Some(keymap::Action::Quit)
         );
-    }
-
-    #[test]
-    fn session_backups_default_on_and_stale_writers_merge_independent_fields() {
-        let dir = scratch_dir();
-        let baseline = load(&dir).expect("missing config uses defaults").session;
-        assert!(baseline.backups_enabled);
-
-        let disable_backups = SessionSettings {
-            backups_enabled: false,
-            ..baseline
-        };
-        save_session_settings(&dir, &baseline, &disable_backups)
-            .expect("disable automatic backups");
-
-        // A second client still has the original in-memory settings. Its
-        // recovery-policy edit must merge only that field into current disk
-        // state instead of re-enabling backups from its stale copy.
-        let stale_recovery_change = SessionSettings {
-            recovery_policy: SessionRecoveryPolicy::AskBeforeRestore,
-            ..baseline
-        };
-        let saved = save_session_settings(&dir, &baseline, &stale_recovery_change)
-            .expect("merge the independent recovery-policy edit");
-        assert!(!saved.backups_enabled);
-        assert_eq!(
-            saved.recovery_policy,
-            SessionRecoveryPolicy::AskBeforeRestore
-        );
-        assert_eq!(load(&dir).expect("read merged settings").session, saved);
     }
 
     #[test]

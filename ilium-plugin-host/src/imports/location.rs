@@ -1,10 +1,17 @@
-//! Host implementation of `ilium:host/location` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/location`.
 //!
-//! Written once by the skeleton lane from the generated `HostLocation` trait; hand-owned afterwards.
+//! [`LocationImport`] has no observer position and always answers `none`. [`ObserverLocation`]
+//! answers with the observer position the host holds (the shared location row of the ambient
+//! look), and only to an instance holding `location.observer`.
 
 use ilium_plugin_api::generated::host::location::HostLocation;
 
-/// Host side of the `location` interface.
+use super::env::ImportEnv;
+
+/// The grant that lets an instance read the observer position (api-location).
+pub const OBSERVER_GRANT: &str = "location.observer";
+
+/// Host side of the `location` interface without any observer position.
 #[derive(Debug)]
 pub struct LocationImport;
 
@@ -16,10 +23,68 @@ impl HostLocation for LocationImport {
     }
 }
 
+/// `location` of one instance, backed by the observer position the host gave it.
+#[derive(Debug, Clone)]
+pub struct ObserverLocation {
+    env: ImportEnv,
+    position: Option<(f64, f64)>,
+}
+
+impl ObserverLocation {
+    /// The import of the instance `env` describes. A position that is not finite or lies outside
+    /// latitude -90..=90 and longitude -180..=180 is dropped, so `current` reports none rather
+    /// than a corrected position the user never set.
+    pub fn new(env: ImportEnv, position: Option<(f64, f64)>) -> Self {
+        let position = position.filter(|(latitude, longitude)| {
+            latitude.is_finite()
+                && longitude.is_finite()
+                && (-90.0..=90.0).contains(latitude)
+                && (-180.0..=180.0).contains(longitude)
+        });
+        Self { env, position }
+    }
+}
+
+impl HostLocation for ObserverLocation {
+    fn current(&mut self) -> Option<(f64, f64)> {
+        // The grant is checked on every call, not only when the interface is linked.
+        if !self.env.holds(OBSERVER_GRANT) {
+            return None;
+        }
+        self.position
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::LocationImport;
+    use super::{LocationImport, ObserverLocation};
+    use crate::imports::env::ImportEnv;
     use ilium_plugin_api::generated::host::location::HostLocation;
+
+    #[test]
+    fn the_observer_position_reaches_only_an_instance_holding_the_grant() {
+        let granted = ImportEnv::unrestricted().with_grants(vec!["location.observer".to_owned()]);
+        let mut location = ObserverLocation::new(granted, Some((38.72, -9.14)));
+        assert_eq!(location.current(), Some((38.72, -9.14)));
+        let refused = ImportEnv::unrestricted().with_grants(vec!["http".to_owned()]);
+        let mut location = ObserverLocation::new(refused, Some((38.72, -9.14)));
+        assert_eq!(location.current(), None);
+    }
+
+    #[test]
+    fn an_observer_position_out_of_range_is_reported_as_none() {
+        for position in [
+            (91.0, 0.0),
+            (0.0, 181.0),
+            (f64::NAN, 0.0),
+            (0.0, f64::INFINITY),
+        ] {
+            let mut location = ObserverLocation::new(ImportEnv::unrestricted(), Some(position));
+            assert_eq!(location.current(), None, "{position:?}");
+        }
+        let mut unset = ObserverLocation::new(ImportEnv::unrestricted(), None);
+        assert_eq!(unset.current(), None);
+    }
 
     /// Largest absolute latitude in decimal degrees, WGS 84 (api-location, "Surface" table).
     const MAX_LATITUDE_DEGREES: f64 = 90.0;

@@ -42,7 +42,6 @@ pub enum SettingsChoice {
     GitDefaultBase,
     GitBranchLine,
     GitClosePolicy,
-    SessionRecovery,
 }
 
 fn sound_file_id(path: &std::path::Path) -> String {
@@ -190,7 +189,7 @@ fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 32] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -223,7 +222,6 @@ impl SettingsChoice {
         Self::GitDefaultBase,
         Self::GitBranchLine,
         Self::GitClosePolicy,
-        Self::SessionRecovery,
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -235,12 +233,6 @@ impl SettingsChoice {
                 Some(crate::app::GitRow::DefaultClosePolicy) => Some(Self::GitClosePolicy),
                 _ => None,
             },
-            SettingsTab::Session
-                if crate::app::SessionRow::ALL.get(row)
-                    == Some(&crate::app::SessionRow::RecoveryPolicy) =>
-            {
-                Some(Self::SessionRecovery)
-            }
             SettingsTab::Inference => {
                 match crate::settings_ui::inference_rows(&app.inference_settings).get(row) {
                     Some(crate::app::InferenceRow::Provider) => Some(Self::InferenceProvider),
@@ -322,7 +314,6 @@ impl SettingsChoice {
             Self::GitDefaultBase => "Default base",
             Self::GitBranchLine => "Branch line",
             Self::GitClosePolicy => "Close policy",
-            Self::SessionRecovery => "Recovery policy",
             Self::ProgressFillStyle => "Progress fill style",
             Self::InferenceProvider => "Provider",
             Self::KiloModel => "Kilo model",
@@ -374,11 +365,6 @@ impl SettingsChoice {
             Self::GitClosePolicy => catalog(
                 &crate::config::GitClosePolicy::ALL,
                 app.git_settings.default_close_policy,
-                |value| value.label().into(),
-            ),
-            Self::SessionRecovery => catalog(
-                &crate::config::SessionRecoveryPolicy::ALL,
-                app.session_settings.recovery_policy,
                 |value| value.label().into(),
             ),
             Self::ProgressFillStyle => {
@@ -564,93 +550,6 @@ impl SettingsChoice {
 }
 
 impl App {
-    fn save_session_choice(
-        &mut self,
-        id: &str,
-        directory: std::path::PathBuf,
-        token: Option<std::sync::Arc<()>>,
-        baseline: crate::config::SessionSettings,
-    ) -> Result<(), String> {
-        use crate::filesystem::configuration::ConfigurationChange;
-        use crate::filesystem::configurations::ConfigurationIntent;
-        let mut previous = self.session_settings;
-        previous.recovery_policy = baseline.recovery_policy;
-        let mut desired = self.session_settings;
-        desired.recovery_policy = crate::config::SessionRecoveryPolicy::ALL
-            .into_iter()
-            .find(|value| format!("{value:?}") == id)
-            .ok_or("This recovery policy is no longer available")?;
-        let intent = token.map_or(ConfigurationIntent::Session { desired }, |token| {
-            ConfigurationIntent::SessionValueDialog { desired, token }
-        });
-        self.enqueue_configuration(
-            directory,
-            ConfigurationChange::Session { previous, desired },
-            intent,
-        )?;
-        self.apply_session_settings(desired);
-        Ok(())
-    }
-
-    /// Session writes merge against their original snapshot. A durable receipt
-    /// may include a concurrent backup-setting edit and must reconcile it before
-    /// closing the matching choice child. Observed readback is never success.
-    pub(crate) fn collect_session_choice_configuration(
-        &mut self,
-        desired: crate::config::SessionSettings,
-        token: &std::sync::Arc<()>,
-        completion: crate::filesystem::ordered::WriteCompletion<
-            crate::filesystem::configuration::ConfigurationWrite,
-        >,
-    ) {
-        use crate::filesystem::configuration::ConfigurationSaved;
-        use crate::filesystem::ordered::WriteCompletion;
-        use ilium_execution::JobOutcome;
-        match completion {
-            WriteCompletion::Outcome { outcome, .. } => {
-                let _retained = outcome.map(|outcome| {
-                    let result = match outcome {
-                        JobOutcome::Finished(Ok(ConfigurationSaved::Session(saved))) => {
-                            if self.session_settings == desired {
-                                self.apply_session_settings(saved);
-                                Ok(())
-                            } else {
-                                Err("Session settings changed; reopen this dialog".into())
-                            }
-                        }
-                        JobOutcome::Finished(Err(failure)) => {
-                            if self.session_settings == desired {
-                                if let Some(observed) = failure.observed_session {
-                                    self.apply_session_settings(observed);
-                                }
-                            }
-                            Err(failure.message)
-                        }
-                        JobOutcome::Finished(Ok(_)) => {
-                            Err("Unexpected session receipt; publication is unconfirmed".into())
-                        }
-                        JobOutcome::NotStarted { .. } | JobOutcome::Panicked => Err(
-                            "Session settings worker did not complete; publication is unconfirmed"
-                                .into(),
-                        ),
-                    };
-                    self.finish_value_dialog_save(token, result);
-                });
-            }
-            WriteCompletion::Rejected { rejection, .. } => self.finish_value_dialog_save(
-                token,
-                Err(format!(
-                    "Session settings remain unsaved: {:?}",
-                    rejection.reason
-                )),
-            ),
-            WriteCompletion::Lost { .. } => self.finish_value_dialog_save(
-                token,
-                Err("Session settings receipt lost; publication is unconfirmed".into()),
-            ),
-        }
-    }
-
     pub(crate) fn begin_settings_choice_dialog(&mut self, field: SettingsChoice) {
         let result = self
             .config_dir
@@ -674,7 +573,6 @@ impl App {
             field,
             directory,
             inference_revision,
-            session_previous,
         } = &host.target
         else {
             return Err("This is not a settings choice dialog".into());
@@ -698,11 +596,7 @@ impl App {
             return Err("Choose an option for this setting".into());
         };
         let token = std::sync::Arc::new(());
-        if let Some(previous) = session_previous {
-            self.save_session_choice(id, directory.clone(), Some(token.clone()), *previous)?;
-        } else {
-            self.save_settings_choice(*field, id, directory.clone(), Some(token.clone()))?;
-        }
+        self.save_settings_choice(*field, id, directory.clone(), Some(token.clone()))?;
         if let crate::value_dialog_host::ValueTarget::SettingsChoice {
             inference_revision: Some(revision),
             ..
@@ -752,9 +646,6 @@ impl App {
     ) -> Result<(), String> {
         use crate::filesystem::configuration::ConfigurationChange;
         use crate::filesystem::configurations::ConfigurationIntent;
-        if field == SettingsChoice::SessionRecovery {
-            return self.save_session_choice(id, directory, token, self.session_settings);
-        }
         let (options, _) = field.options(self);
         let option = options
             .iter()
@@ -834,9 +725,6 @@ impl App {
             }
             SettingsChoice::GitClosePolicy => {
                 select!(crate::config::GitClosePolicy::ALL, git.default_close_policy)
-            }
-            SettingsChoice::SessionRecovery => {
-                return Err("Session choice was not dispatched".into());
             }
             SettingsChoice::InferenceProvider
             | SettingsChoice::TitleStyle
@@ -1671,7 +1559,6 @@ mod tests {
             crate::config::GitDefaultBase::ALL.len(),
             crate::config::GitBranchLine::ALL.len(),
             crate::config::GitClosePolicy::ALL.len(),
-            crate::config::SessionRecoveryPolicy::ALL.len(),
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
@@ -2006,7 +1893,7 @@ mod tests {
         assert_eq!(config.terminal.scrollback_budget_mib, 17);
     }
     #[test]
-    fn git_and_session_catalogs_keep_authored_fields_and_persist_every_option() {
+    fn git_catalogs_keep_authored_fields_and_persist_every_option() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "synthetic-remaining-settings".into(),
@@ -2024,7 +1911,6 @@ mod tests {
             SettingsChoice::GitDefaultBase,
             SettingsChoice::GitBranchLine,
             SettingsChoice::GitClosePolicy,
-            SettingsChoice::SessionRecovery,
         ] {
             let (options, selected) = field.options(&app);
             assert!(options.len() >= 2);
@@ -2051,102 +1937,11 @@ mod tests {
                     SettingsChoice::GitClosePolicy => {
                         format!("{:?}", disk.git.default_close_policy)
                     }
-                    SettingsChoice::SessionRecovery => {
-                        format!("{:?}", disk.session.recovery_policy)
-                    }
                     _ => unreachable!(),
                 };
                 assert_eq!(expected, option.id);
             }
         }
-    }
-
-    #[test]
-    fn session_catalog_durable_merge_keeps_concurrent_backup_setting_and_closes_own_child() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("synthetic-session-merge".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        let previous = app.session_settings;
-        let mut concurrent = previous;
-        concurrent.backups_enabled = !previous.backups_enabled;
-        crate::config::save_session_settings(directory.path(), &previous, &concurrent).unwrap();
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Session,
-            selected_row: 0,
-            ..SettingsState::default()
-        }));
-        app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("choice child");
-        };
-        app.finish_value_dialog(host, DialogOutcome::Choose("StartFresh".into()));
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        assert_eq!(
-            app.session_settings.backups_enabled,
-            previous.backups_enabled
-        );
-        app.settle_filesystem_for_test();
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        assert_eq!(
-            app.session_settings.recovery_policy,
-            crate::config::SessionRecoveryPolicy::StartFresh
-        );
-        assert_eq!(
-            app.session_settings.backups_enabled,
-            concurrent.backups_enabled
-        );
-        assert_eq!(
-            crate::config::load(directory.path()).unwrap().session,
-            app.session_settings
-        );
-        assert!(app
-            .status_message
-            .as_deref()
-            .unwrap()
-            .contains("server next starts"));
-    }
-
-    #[test]
-    fn session_catalog_failed_write_retains_selection_then_retries_without_silent_success() {
-        let directory = tempfile::tempdir().unwrap();
-        let config_path = directory.path().join("config.toml");
-        std::fs::create_dir(&config_path).unwrap();
-        let mut app = App::new("synthetic-session-failure".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Session,
-            selected_row: 0,
-            ..SettingsState::default()
-        }));
-        app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("choice child");
-        };
-        app.finish_value_dialog(host, DialogOutcome::Choose("AskBeforeRestore".into()));
-        app.settle_filesystem_for_test();
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("failed child retained");
-        };
-        assert!(!host.is_saving());
-        let ValueDialogState::Choice(dialog) = &host.dialog else {
-            panic!("choice");
-        };
-        assert!(dialog.notice.is_some());
-        assert_eq!(dialog.selected_id.as_deref(), Some("RestoreAutomatically"));
-        std::fs::remove_dir(&config_path).unwrap();
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("choice child");
-        };
-        app.finish_value_dialog(host, DialogOutcome::Choose("AskBeforeRestore".into()));
-        app.settle_filesystem_for_test();
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .session
-                .recovery_policy,
-            crate::config::SessionRecoveryPolicy::AskBeforeRestore
-        );
     }
 
     #[test]
@@ -2171,66 +1966,5 @@ mod tests {
         assert_eq!(app.git_settings, original);
         assert_eq!(app.configuration_admission.attempts, attempts);
         app.configuration_files = None;
-        let original = app.session_settings;
-        assert!(app
-            .save_settings_choice(
-                SettingsChoice::SessionRecovery,
-                "StartFresh",
-                directory.path().into(),
-                None
-            )
-            .is_err());
-        assert_eq!(app.session_settings, original);
-    }
-    #[test]
-    fn lost_session_receipt_keeps_matching_child_and_obsolete_token_cannot_finish_reopen() {
-        use crate::filesystem::ordered::{WriteCompletion, WriteId};
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "synthetic-lost-session-receipt".into(),
-            directory.path().into(),
-        );
-        app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Session,
-            selected_row: 0,
-            ..SettingsState::default()
-        }));
-        app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
-        let old = std::sync::Arc::new(());
-        if let Mode::ValueDialog(host) = &mut app.mode {
-            host.begin_save(old.clone());
-        }
-        app.collect_session_choice_configuration(
-            app.session_settings,
-            &old,
-            WriteCompletion::Lost { id: WriteId(73) },
-        );
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("lost child retained");
-        };
-        assert!(!host.is_saving());
-        let ValueDialogState::Choice(dialog) = &host.dialog else {
-            panic!("choice");
-        };
-        assert!(dialog.notice.as_deref().unwrap().contains("unconfirmed"));
-        app.pop_modal();
-        app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
-        let new = std::sync::Arc::new(());
-        if let Mode::ValueDialog(host) = &mut app.mode {
-            host.begin_save(new.clone());
-        }
-        app.collect_session_choice_configuration(
-            app.session_settings,
-            &old,
-            WriteCompletion::Lost { id: WriteId(73) },
-        );
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        app.collect_session_choice_configuration(
-            app.session_settings,
-            &new,
-            WriteCompletion::Lost { id: WriteId(74) },
-        );
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if !host.is_saving()));
     }
 }

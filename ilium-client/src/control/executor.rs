@@ -9,14 +9,9 @@ use ilium_core::{
 use ilium_ipc::{ClientRequest, PromptSubmissionSource, WorkspaceCreateSpec};
 use serde::Serialize;
 
-use crate::text_prompt::TextPromptState;
 use serde_json::{json, Value};
 
-use crate::app::{
-    App, BoardStorageKind, ClientExitReason, CreateBoardState, Mode, PaneRuntime, SettingsState,
-    SettingsTab,
-};
-use crate::board::BoardPane;
+use crate::app::{App, ClientExitReason, Mode, PaneRuntime, SettingsState, SettingsTab};
 
 use super::command::*;
 use super::resolver::{resolve_node, resolve_parent};
@@ -397,28 +392,22 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             let parent_group = resolve_parent(app, &command.parent)?;
             let name = required_nonempty(command.name, "name")?;
             let path = required_nonempty(command.path, "path")?;
-            let storage_kind = match command.storage.unwrap_or(BoardStorageChoice::Markdown) {
-                BoardStorageChoice::Markdown => BoardStorageKind::MarkdownFile,
-                BoardStorageChoice::Folder => BoardStorageKind::Folder,
+            let kind = match command.storage.unwrap_or(BoardStorageChoice::Markdown) {
+                BoardStorageChoice::Markdown => "markdown",
+                BoardStorageChoice::Folder => "folder",
             };
-            app.commit_create_board(&CreateBoardState {
-                parent_group,
-                name: TextPromptState::new(name),
-                path: TextPromptState::new(path),
-                storage_kind,
-                editing_path: false,
-            });
-            if matches!(app.mode, Mode::CreateBoard(_)) {
-                // `commit_create_board` re-opens the interactive dialog on
-                // failure for the keyboard flow. The voice flow reports the
-                // failure through this receipt instead, so close the dialog
-                // rather than leaving a modal the user never opened -- one a
-                // corrected voice retry would clobber mid-edit anyway.
-                app.mode = Mode::Normal;
-                return Err(app.status_message.clone().unwrap_or_else(|| {
-                    ilium_prompts::voice::VOICE_EXECUTOR_BOARD_CREATION_FAILED.to_owned()
-                }));
-            }
+            // The Kanban plugin owns board storage; the kernel only hands over the request.
+            app.invoke_plugin_command(
+                crate::plugin_host::commands::NEW_BOARD_COMMAND,
+                json!({
+                    "parent": parent_group.0,
+                    "name": name,
+                    "path": path,
+                    "kind": kind,
+                })
+                .to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::Voice,
+            );
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CREATING_THE_BOARD,
             ))
@@ -724,126 +713,38 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
     Ok(ExecutionReceipt::immediate(message))
 }
 
+/// Hands a board command to the Kanban plugin. The board's contents live in the plugin, so the
+/// kernel only resolves the pane, checks it is one of the plugin's boards and forwards the
+/// action; the plugin validates the indices and writes the board.
 fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceipt, String> {
     let pane_id = resolve_node(app, &command.target)?;
-    let Some(PaneRuntime::Board(board)) = app.panes.get_mut(&pane_id) else {
+    let is_board = app
+        .tree
+        .plugin_pane_kind(pane_id)
+        .is_some_and(|kind| kind.kind_id() == crate::plugin_host::commands::BOARD_PANE_KIND);
+    if !is_board {
         return Err(ilium_prompts::voice::VOICE_POLICY_TARGET_IS_NOT_A_BOARD_PANE.to_owned());
-    };
-    let content_revision_before = board.content_revision();
-    let intent_revision_before = board.intent_revision();
-    match command.action {
-        BoardAction::SelectColumn => select_column(
-            board,
-            command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-        )?,
-        BoardAction::SelectCard => select_card(
-            board,
-            command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            command
-                .card
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?,
-        )?,
-        BoardAction::OpenCard => {
-            // `BoardPane::open_card_details` no-ops on out-of-range indices;
-            // validate through `select_card` first so a bad index fails
-            // loudly instead of reporting success while nothing opened.
-            let column = command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?;
-            let card = command
-                .card
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?;
-            select_card(board, column, card)?;
-            board.open_card_details(column, card);
-        }
-        BoardAction::CloseCard => board.close_card_details(),
-        BoardAction::AddColumn => board.add_column(required_nonempty(command.title, "title")?)?,
-        BoardAction::AddCard => {
-            if let Some(column) = command.column {
-                select_column(board, column)?;
-            }
-            board.add_card(required_nonempty(command.title, "title")?)?;
-        }
-        BoardAction::UpdateCard => board.update_card(
-            command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            command
-                .card
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?,
-            command.title,
-            command.body,
-        )?,
-        BoardAction::RenameColumn => {
-            select_column(
-                board,
-                command
-                    .column
-                    .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            )?;
-            board.rename_selected_column(required_nonempty(command.title, "title")?)?;
-        }
-        BoardAction::MoveCard => board.move_card(
-            command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            command
-                .card
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?,
-            command
-                .destination_column
-                .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_DESTINATION_COLUMN_IS_REQUIRED)?,
-            command.destination_card.unwrap_or(usize::MAX),
-        )?,
-        BoardAction::ToggleCheckbox => board.toggle_card_checkbox(
-            command
-                .column
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            command
-                .card
-                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?,
-            command
-                .checkbox
-                .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_CHECKBOX_IS_REQUIRED)?,
-        )?,
-        BoardAction::DeleteCard => {
-            select_card(
-                board,
-                command
-                    .column
-                    .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-                command
-                    .card
-                    .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?,
-            )?;
-            board.delete_selected_card()?;
-        }
-        BoardAction::DeleteColumn => {
-            select_column(
-                board,
-                command
-                    .column
-                    .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?,
-            )?;
-            board.delete_selected_column()?;
-        }
     }
-    if board.intent_revision() != intent_revision_before && board.pending_writes() != 0 {
-        return Ok(ExecutionReceipt::local_write_pending(
-            "Board",
-            json!({"pane_id":pane_id.0}),
-            board.intent_revision(),
-        ));
-    }
-    let did_change_content = board.content_revision() != content_revision_before;
-    if did_change_content {
-        app.record_client_node_activity(pane_id);
-    }
-    Ok(ExecutionReceipt::immediate("Board command completed"))
+    let arguments = json!({
+        "pane": pane_id.0,
+        "action": command.action,
+        "title": command.title,
+        "body": command.body,
+        "column": command.column,
+        "card": command.card,
+        "destination_column": command.destination_column,
+        "destination_card": command.destination_card,
+        "checkbox": command.checkbox,
+    })
+    .to_string();
+    app.invoke_plugin_command(
+        crate::plugin_host::commands::BOARD_CONTROL_COMMAND,
+        arguments,
+        ilium_plugin_api::generated::types::CommandOrigin::Voice,
+    );
+    Ok(ExecutionReceipt::queued(
+        "Board command sent to the Kanban plugin",
+    ))
 }
 
 fn execute_session(app: &mut App, command: SessionCommand) -> Result<ExecutionReceipt, String> {
@@ -915,42 +816,6 @@ fn resolve_filesystem_path(app: &App, path: String) -> PathBuf {
         path
     } else {
         app.session_cwd.join(path)
-    }
-}
-
-/// Selects `column_index`, failing loudly instead of silently keeping the
-/// board's previous selection. `BoardPane::select_column` no-ops on an
-/// out-of-range index, which would otherwise let a caller that trusts the
-/// selection afterward (delete/rename/add) act on whichever column was
-/// selected before this command instead of the one actually requested.
-fn select_column(board: &mut BoardPane, column_index: usize) -> Result<(), String> {
-    board.select_column(column_index);
-    if board.selected_column == column_index {
-        Ok(())
-    } else {
-        Err(ilium_prompts::render_value(
-            "voice/policy/board-has-no-column",
-            &serde_json::json!({"v0": (column_index).to_string()}),
-        ))
-    }
-}
-
-/// Selects `(column_index, card_index)`; see `select_column` for why this
-/// must fail rather than leave a stale prior selection in place for a
-/// subsequent destructive operation to act on.
-fn select_card(
-    board: &mut BoardPane,
-    column_index: usize,
-    card_index: usize,
-) -> Result<(), String> {
-    board.select_card(column_index, card_index);
-    if board.selected_column == column_index && board.selected_card == Some(card_index) {
-        Ok(())
-    } else {
-        Err(ilium_prompts::render_value(
-            "voice/policy/board-has-no-card-v0-in-column",
-            &serde_json::json!({"v0": (card_index).to_string(), "v1": (column_index).to_string()}),
-        ))
     }
 }
 

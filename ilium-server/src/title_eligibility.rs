@@ -519,7 +519,7 @@ pub(crate) fn accepted_title_grant(
     match &node.kind {
         NodeKind::Folder { .. }
         | NodeKind::Pane {
-            content: PaneContentKind::Editor | PaneContentKind::Board | PaneContentKind::Plugin,
+            content: PaneContentKind::Editor | PaneContentKind::Plugin,
             ..
         } => {}
         NodeKind::Pane {

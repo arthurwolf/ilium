@@ -8,6 +8,7 @@
 pub mod new_split;
 pub mod padding;
 pub mod padding_rows;
+pub mod tree_layout_dialog;
 pub mod tree_layout_rows;
 
 use std::cell::RefCell;
@@ -16,10 +17,10 @@ use std::collections::HashMap;
 use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
-    Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, MessageSpec, MessageTarget,
-    NodeFlags, NodeId, OpenViewSpec, Outcome, Padding, ParagraphSpec, PluginError, PluginId,
-    PluginSide, PointerKind, RequestRef, ResizePaneSpec, Span, SplitDirection, Style, Submission,
-    TitlePosition, UiNode, UiTree, ViewTarget, Widget,
+    Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, InvokeCommandSpec,
+    MessageSpec, MessageTarget, NodeFlags, NodeId, OpenViewSpec, Outcome, Padding, ParagraphSpec,
+    PluginError, PluginId, PluginSide, PointerKind, RequestRef, ResizePaneSpec, Span,
+    SplitDirection, Style, Submission, TitlePosition, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
 
@@ -218,6 +219,8 @@ struct ClientState {
     hidden: bool,
     /// The open "New split view" dialog.
     dialog: Option<new_split::Dialog>,
+    /// The open tree row layout editor.
+    tree_layout: Option<tree_layout_dialog::Dialog>,
 }
 
 impl ClientState {
@@ -295,6 +298,31 @@ impl Handler for LayoutClient {
                             focus: true,
                         })));
                     }
+                }
+                Event::CommandInvoked(invoked)
+                    if invoked.command == tree_layout_dialog::COMMAND =>
+                {
+                    // Arguments without the layout and the specimen glyphs open nothing.
+                    if let Some(request) =
+                        tree_layout_dialog::Request::from_arguments(&invoked.arguments_json)
+                    {
+                        CLIENT.with(|cell| {
+                            cell.borrow_mut().tree_layout =
+                                Some(tree_layout_dialog::Dialog::new(request));
+                        });
+                        submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: tree_layout_dialog::view(),
+                            focus: true,
+                        })));
+                    }
+                }
+                Event::UiAction(action) if action.view == tree_layout_dialog::view() => {
+                    submissions.extend(tree_layout_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
                 }
                 Event::UiAction(action) if action.view == new_split::view() => {
                     submissions.extend(new_split_action(
@@ -387,6 +415,47 @@ fn new_split_action(
     }
 }
 
+/// Applies one action of the tree row layout editor. A change goes to the kernel at once; the
+/// end of the dialog closes the popup (a popup the kernel closed itself is already gone).
+fn tree_layout_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = CLIENT.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let step = state
+            .tree_layout
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(tree_layout_dialog::Step::Done | tree_layout_dialog::Step::Cancel(_))
+        ) {
+            state.tree_layout = None;
+        }
+        step
+    });
+    let set_layout = |layout: &tree_layout_rows::TreeRowLayout| {
+        Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+            command: tree_layout_dialog::SET_LAYOUT_COMMAND.to_owned(),
+            arguments_json: tree_layout_dialog::set_layout_arguments(layout),
+        }))
+    };
+    let close = || Submission::new(Intent::CloseView(tree_layout_dialog::view()));
+    match step {
+        Some(tree_layout_dialog::Step::Set(layout)) => vec![set_layout(&layout)],
+        Some(tree_layout_dialog::Step::Done) if kind != ActionKind::Closed => vec![close()],
+        Some(tree_layout_dialog::Step::Cancel(restore)) => restore
+            .iter()
+            .map(set_layout)
+            .chain((kind != ActionKind::Closed).then(close))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn is_preview(view: &ViewTarget) -> bool {
     matches!(view, ViewTarget::Panel(name) if name == "layout.presets")
 }
@@ -420,8 +489,9 @@ impl Views for LayoutClient {
     fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
         CLIENT.with(|cell| {
             let state = cell.borrow();
-            match &state.dialog {
-                Some(dialog) if view == new_split::view() => dialog.render(),
+            match (&state.dialog, &state.tree_layout) {
+                (Some(dialog), _) if view == new_split::view() => dialog.render(),
+                (_, Some(dialog)) if view == tree_layout_dialog::view() => dialog.render(),
                 _ => build_preview(&state, usize::from(area.columns)),
             }
         })
@@ -677,6 +747,7 @@ mod spec_tests {
             [
                 "command:ilium.core.layout/preset",
                 "command:ilium.core.layout/new-split",
+                "command:ilium.core.layout/tree-layout",
                 "view:ilium.core.layout/presets"
             ]
         );
@@ -692,7 +763,7 @@ mod spec_tests {
             .iter()
             .map(|command| command["id"].as_str().expect("a command id").to_owned())
             .collect();
-        assert_eq!(commands, ["preset", "new-split"]);
+        assert_eq!(commands, ["preset", "new-split", "tree-layout"]);
     }
 
     /// REQ: COR-050

@@ -416,10 +416,6 @@
     "sha256": "e93da11fa32e705a4e15ccff40504e057a642f1aaee81d6a5608316f42453489"
   },
   {
-    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically",
-    "sha256": "15746ee6570fb5222609946924088ceacb15cf146401ef39fd8aa41ac5e9f027"
-  },
-  {
     "name": "voice/policy/board-has-no-column",
     "sha256": "f40513ae11c6ed547d371f6d38db2244bb93c39ad53758da0d2c608a887e9464"
   },
@@ -446,22 +442,6 @@
   {
     "name": "voice/policy/press-enter-and-submit-what-you-see",
     "sha256": "179f0965edc213fb51bf23e85f24c86e91384015e7fb1ed53dd7450aaf27860b"
-  },
-  {
-    "name": "voice/policy/schedule-this-terminal-input-for-automatic-submission",
-    "sha256": "29d28944872428c60dea60c12d809dbc694bb8da466831e2fd42a1774b7a7f74"
-  },
-  {
-    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically-2",
-    "sha256": "7ee97ee72aee15a4dc761fbf9101bda0b583de67e8fd71048043536aa9e1f829"
-  },
-  {
-    "name": "voice/policy/runs-is-required-and-must-be-positive",
-    "sha256": "442833dbacf24b4f9ec61ed7352f387e4821b0d70dd518127326aa05233ab011"
-  },
-  {
-    "name": "voice/policy/queue-this-prompt-for-automatic-submission-after",
-    "sha256": "bec2de31beb02571432ca4b772d83def5005d4e3422170e5c38b644ced7ae45c"
   },
   {
     "name": "voice/policy/kill-the-entire-ilium-session-and-every",
@@ -730,18 +710,6 @@
   {
     "name": "voice/executor/returned-to-live-terminal-output",
     "sha256": "05bc33b74a96837eed054202d7d8a7004ac5bf6e8b382a3f7ce3f98d95cd8c98"
-  },
-  {
-    "name": "voice/executor/scheduled-terminal-input",
-    "sha256": "9d7e9e7299e81b78604abd9a714ab5b04cdd06e4e72fbe6ad51b9bfa3644be93"
-  },
-  {
-    "name": "voice/executor/queued-the-prompt-for-the-agent-s",
-    "sha256": "100fc183840f92931e620f4b6e147f4a0e0bbf9b10fc11317479add5d972a46f"
-  },
-  {
-    "name": "voice/executor/clearing-the-pane-s-prompt-queue",
-    "sha256": "ac5d79cda119b8d12d98832c0b44a32681a0161cd1df2f13b7d05b5dc3ee2536"
   },
   {
     "name": "voice/executor/target-is-not-an-editor-pane",
@@ -1054,10 +1022,6 @@
   {
     "name": "voice/settings/invalid-new-pane-directory-policy",
     "sha256": "922dc5039981c3a1119dca26e7c94f83f4c7ae2c04a81f4460a7adb0047e2b0b"
-  },
-  {
-    "name": "voice/settings/invalid-session-recovery-policy",
-    "sha256": "05d57dd4be46f0faa7ac68a78f1cbc95896932b79b0e8da25f86e9edf68c9998"
   },
   {
     "name": "voice/settings/invalid-inference-provider",

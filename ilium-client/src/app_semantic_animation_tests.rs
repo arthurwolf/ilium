@@ -43,23 +43,29 @@ fn paris() -> AnimationRecommendation {
         ],
     )
 }
-/// The Graph source id the recommendation `carpet(index)` selects.
-fn graph_source_id(index: usize) -> String {
+/// The contrast value the recommendation `carpet(index)` selects.
+fn contrast_for(index: usize) -> i32 {
     let mut settings = ilium_ambient::AmbientSettings::default();
     settings
         .set_control(
-            ilium_ambient::AmbientKind::Graph,
-            "source",
-            ControlValue::Index(index),
+            ilium_ambient::AmbientKind::Clouds,
+            "contrast_percent",
+            ControlValue::Number(contrast_value(index)),
         )
         .unwrap();
-    settings.graph.source_id
+    settings.clouds.contrast_percent
 }
-/// A distinct Graph recommendation per `source`, standing in for a scene with several looks.
+fn contrast_value(index: usize) -> i32 {
+    100 + 10 * i32::try_from(index).unwrap_or(0)
+}
+/// A distinct Clouds recommendation per `mode`, standing in for a scene with several looks.
 fn carpet(mode: usize) -> AnimationRecommendation {
     recommendation(
-        AnimationKind::Graph,
-        vec![("source", ControlValue::Index(mode))],
+        AnimationKind::Clouds,
+        vec![(
+            "contrast_percent",
+            ControlValue::Number(contrast_value(mode)),
+        )],
     )
 }
 fn snapshot_recommendation(
@@ -197,9 +203,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .graph
-            .source_id,
-        graph_source_id(1)
+            .clouds
+            .contrast_percent,
+        contrast_for(1)
     );
     fixture.app.select_node(fixture.group);
     assert_eq!(
@@ -208,9 +214,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .graph
-            .source_id,
-        graph_source_id(0)
+            .clouds
+            .contrast_percent,
+        contrast_for(0)
     );
     let mut virtual_path = fixture.app.path_to(fixture.group);
     virtual_path.push(NodeId(u64::MAX));
@@ -221,9 +227,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .graph
-            .source_id,
-        graph_source_id(0)
+            .clouds
+            .contrast_percent,
+        contrast_for(0)
     );
     fixture.app.tree_state.select(Vec::new());
     // The authored animation is one global setting: the other project is
@@ -235,9 +241,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .graph
-            .source_id,
-        graph_source_id(5)
+            .clouds
+            .contrast_percent,
+        contrast_for(5)
     );
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
     assert_eq!(
@@ -274,9 +280,9 @@ fn semantic_cache_revalidates_snapshots_without_rebuilding_equivalent_hosts() {
             .last()
             .unwrap()
             .1
-            .graph
-            .source_id,
-        graph_source_id(2)
+            .clouds
+            .contrast_percent,
+        contrast_for(2)
     );
 }
 #[test]
@@ -451,9 +457,9 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .graph
-            .source_id,
-        graph_source_id(4)
+            .clouds
+            .contrast_percent,
+        contrast_for(4)
     );
     let accepted = server_tree.clone();
     assert!(server_tree

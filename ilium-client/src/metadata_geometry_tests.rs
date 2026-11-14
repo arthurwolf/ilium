@@ -590,7 +590,7 @@ fn genuine_outer_terminal_resize_updates_the_child_geometry() {
 
 #[test]
 fn editors_and_boards_do_not_inherit_terminal_metadata_slots() {
-    for kind in [PaneContentKind::Editor, PaneContentKind::Board] {
+    for kind in [PaneContentKind::Editor] {
         let mut app = App::new("nonterminal-geometry".into(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "test").unwrap();
         let pane_id = app.tree.add_pane(group, "nonterminal", kind).unwrap();

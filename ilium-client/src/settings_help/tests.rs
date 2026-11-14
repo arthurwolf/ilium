@@ -127,9 +127,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 3);
     add_range(&mut ids, "ED", 1, 6);
-    add_range(&mut ids, "SES", 1, 2);
     add_range(&mut ids, "GIT", 1, 7);
-    add_range(&mut ids, "KAN", 1, 2);
     add_range(&mut ids, "PAD", 1, 3);
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
@@ -169,49 +167,14 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "{id} explains its range/default"
         );
     }
-    // Every built-in scene's four named controls are explained by the shared
-    // numbered scene-control topics AN-39..AN-42.
-    for kind in AnimationKind::ALL
-        .into_iter()
-        .filter(|kind| !kind.is_ambient() && *kind != AnimationKind::Wikipedia)
-    {
-        let selected = AnimationSettings {
-            kind,
-            ..settings.clone()
-        };
-        for (index, slider) in selected.scene_sliders().iter().enumerate() {
-            let id = format!("AN-{:02}", index + 39);
-            let topic = catalog::by_id(&id).expect("scene-control help topic exists");
-            assert!(
-                topic.specimen.contains(slider.label),
-                "{id} explains {} for {}",
-                slider.label,
-                kind.label()
-            );
-        }
-    }
     // Scene rows map one-to-one onto AN-01.. in catalog order and name their scene.
     for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
-        let id = if kind == AnimationKind::VoxelLandscape {
-            "AN-52".to_owned()
-        } else if kind == AnimationKind::Wikipedia {
+        let id = if kind == AnimationKind::Wikipedia {
             "AN-54".to_owned()
         } else if kind == AnimationKind::OpenStreetMap {
             "AN-55".to_owned()
-        } else if kind == AnimationKind::TopographicMaps {
-            "AN-56".to_owned()
-        } else if kind == AnimationKind::Graph {
-            "AN-57".to_owned()
-        } else if kind == AnimationKind::Earthquakes {
-            "AN-59".to_owned()
-        } else if kind == AnimationKind::Aircraft {
-            "AN-60".to_owned()
-        } else if kind == AnimationKind::Boats {
-            "AN-61".to_owned()
         } else if kind == AnimationKind::Semantic {
             "AN-64".to_owned()
-        } else if kind == AnimationKind::Stars {
-            "AN-12".to_owned()
         } else if kind == AnimationKind::NightLights {
             "AN-13".to_owned()
         } else if kind == AnimationKind::Clouds {
@@ -338,7 +301,7 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("status-help-fixture".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
         let supplied = report.clone();
         *app.animation_frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
             Box::new(ReportScene(supplied.clone()))

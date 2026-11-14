@@ -345,13 +345,6 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
                 count.string(title);
             }
         },
-        R::NewBoard { name, storage, .. } => {
-            count.string(name);
-            match storage {
-                ilium_core::BoardStorage::Folder { path }
-                | ilium_core::BoardStorage::MarkdownFile { path } => count.path(path),
-            }
-        }
         R::CreateSplitView { name, pane_ids, .. } => {
             count.string(name);
             count.vector(pane_ids);

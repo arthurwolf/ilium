@@ -13,12 +13,14 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use ilium_plugin_sdk::host;
 use ilium_plugin_sdk::host::{Bucket, GrabSpec, HostFs, HostKeys, HostSettings, HostStorage};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, CreatePaneSpec, Event, GrabId, Intent, KeyEvent, NodeId, Submission,
-    ToastSpec, Tone, UiAction, ViewTarget,
+    ActionKind, ActionValue, CreatePaneSpec, Event, GrabId, Intent, KeyEvent, NodeId, OpenViewSpec,
+    Submission, ToastSpec, Tone, UiAction, ViewTarget,
 };
 use serde_json::{json, Value};
 
 use crate::board::BoardColumn;
+use crate::control;
+use crate::create_dialog;
 use crate::io::{self, FolderProgress, FolderRun};
 use crate::model::{default_columns, Board, CardEditorField, Edit, Storage};
 use crate::view::{self, Prompt, Settings};
@@ -105,6 +107,8 @@ struct State {
     requests: HashMap<u64, (u64, Purpose)>,
     pending: VecDeque<Binding>,
     settings: Settings,
+    /// The open "New board" dialog.
+    dialog: Option<create_dialog::Dialog>,
 }
 
 thread_local! {
@@ -148,6 +152,19 @@ pub fn render(node: u64, area: ilium_plugin_sdk::types::Area) -> ilium_plugin_sd
             Some(board) => view::render(board, entry.prompt.as_ref(), settings, area),
             None => view::message_tree(&entry.note),
         }
+    })
+}
+
+/// The tree of the popup `view`: the "New board" dialog while it is open.
+pub fn render_popup(view: &ViewTarget) -> Option<ilium_plugin_sdk::types::UiTree> {
+    if *view != create_dialog::view() {
+        return None;
+    }
+    STATE.with(|cell| {
+        cell.borrow()
+            .dialog
+            .as_ref()
+            .map(create_dialog::Dialog::render)
     })
 }
 
@@ -805,6 +822,107 @@ impl State {
         self.entries.insert(node, entry);
     }
 
+    /// Opens a new board pane bound to `storage`. A board file is owned by one pane at a time:
+    /// each pane would otherwise keep its own copy and could overwrite the other's edits.
+    fn create(
+        &mut self,
+        parent: Option<u64>,
+        title: String,
+        storage: Storage,
+        out: &mut Vec<Submission>,
+    ) {
+        let taken = self
+            .entries
+            .values()
+            .map(|entry| &entry.storage)
+            .chain(self.pending.iter().map(|binding| &binding.storage))
+            .any(|existing| existing.path() == storage.path());
+        if taken {
+            out.push(error_toast("That board storage is already open"));
+            return;
+        }
+        self.pending.push_back(Binding { storage });
+        out.push(Submission::new(Intent::CreatePane(CreatePaneSpec {
+            parent: parent.map(NodeId),
+            title,
+            content_kind: KIND.to_string(),
+            cwd: None,
+            command: None,
+            initial_input: None,
+        })));
+    }
+
+    /// Applies one action of the "New board" dialog.
+    fn on_dialog_action(&mut self, action: &UiAction, out: &mut Vec<Submission>) {
+        let Some(mut dialog) = self.dialog.take() else {
+            return;
+        };
+        let step = dialog.act(
+            &action.key,
+            &action.action_id,
+            action.kind,
+            action.value.clone(),
+        );
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        let close = || Submission::new(Intent::CloseView(create_dialog::view()));
+        match step {
+            create_dialog::Step::Stay => self.dialog = Some(dialog),
+            create_dialog::Step::Cancel => {
+                if action.kind != ActionKind::Closed {
+                    out.push(close());
+                }
+            }
+            create_dialog::Step::Create(created) => {
+                out.push(close());
+                self.create(created.parent, created.name, created.storage, out);
+            }
+        }
+    }
+
+    /// Applies one control command of an agent to the board of pane `node`.
+    fn control(&mut self, node: u64, command: &control::Command, out: &mut Vec<Submission>) {
+        if !self
+            .entries
+            .get(&node)
+            .is_some_and(|entry| entry.board.is_some())
+        {
+            out.push(error_toast("That pane is not a loaded board"));
+            return;
+        }
+        match command.action {
+            control::Action::RenameColumn | control::Action::DeleteColumn => {
+                let mut selected = false;
+                self.edit(node, out, |board, _| {
+                    let chosen = command
+                        .column
+                        .ok_or_else(|| "A column is required".to_string())
+                        .and_then(|column| control::select_column(board, column));
+                    match chosen {
+                        Ok(()) => {
+                            selected = true;
+                            Outcome::Quiet
+                        }
+                        Err(message) => Outcome::Failed(message),
+                    }
+                });
+                if !selected {
+                    return;
+                }
+                if command.action == control::Action::RenameColumn {
+                    match control::title_of(command) {
+                        Ok(title) => self.rename_column(node, title, out),
+                        Err(message) => out.push(error_toast(&message)),
+                    }
+                } else {
+                    self.delete_column(node, out);
+                }
+            }
+            _ => self.edit(node, out, |board, _| {
+                edit_outcome(control::apply(board, command))
+            }),
+        }
+    }
+
     fn reload(&mut self, node: u64, out: &mut Vec<Submission>) {
         let Some(mut entry) = self.entries.remove(&node) else {
             return;
@@ -929,25 +1047,40 @@ pub fn on_events(batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
             match event {
                 Event::CommandInvoked(invoked) if invoked.command == NEW_COMMAND => {
-                    match binding_from_arguments(&invoked.arguments_json) {
-                        Ok(binding) => {
-                            let title = pane_title(&binding.storage);
-                            let parent = serde_json::from_str::<Value>(&invoked.arguments_json)
-                                .ok()
-                                .and_then(|value| value["parent"].as_u64())
-                                .map(NodeId);
-                            state.pending.push_back(binding);
-                            out.push(Submission::new(Intent::CreatePane(CreatePaneSpec {
-                                parent,
-                                title,
-                                content_kind: KIND.to_string(),
-                                cwd: None,
-                                command: None,
-                                initial_input: None,
-                            })));
+                    let arguments = serde_json::from_str::<Value>(&invoked.arguments_json)
+                        .unwrap_or(Value::Null);
+                    let parent = arguments["parent"].as_u64();
+                    let has_path = arguments["path"]
+                        .as_str()
+                        .is_some_and(|path| !path.trim().is_empty());
+                    if has_path {
+                        match binding_from_arguments(&invoked.arguments_json) {
+                            Ok(binding) => {
+                                let title = arguments["name"]
+                                    .as_str()
+                                    .map(str::trim)
+                                    .filter(|name| !name.is_empty())
+                                    .map_or_else(|| pane_title(&binding.storage), str::to_string);
+                                state.create(parent, title, binding.storage, &mut out);
+                            }
+                            Err(message) => out.push(error_toast(&message)),
                         }
+                    } else {
+                        state.dialog = Some(create_dialog::Dialog::new(parent));
+                        out.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: create_dialog::view(),
+                            focus: true,
+                        })));
+                    }
+                }
+                Event::CommandInvoked(invoked) if invoked.command == control::COMMAND => {
+                    match control::parse(&invoked.arguments_json) {
+                        Ok((pane, command)) => state.control(pane, &command, &mut out),
                         Err(message) => out.push(error_toast(&message)),
                     }
+                }
+                Event::UiAction(action) if action.view == create_dialog::view() => {
+                    state.on_dialog_action(&action, &mut out);
                 }
                 Event::CommandInvoked(invoked) if invoked.command == RELOAD_COMMAND => {
                     if let Some(pane) = invoked.context.pane {

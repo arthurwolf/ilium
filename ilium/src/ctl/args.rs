@@ -178,18 +178,6 @@ pub(crate) enum CtlCommand {
     },
     /// Replace the process of a pane with a shell command line.
     ReplaceCommand { id: u64, command: String },
-    /// Open a kanban board pane backed by a folder or a Markdown file.
-    NewBoard {
-        name: String,
-        path: PathBuf,
-        /// The path is one Markdown file instead of a folder of columns.
-        #[arg(long)]
-        markdown: bool,
-        #[arg(long, conflicts_with = "parent")]
-        project: Option<String>,
-        #[arg(long)]
-        parent: Option<u64>,
-    },
     /// Stop a pane's agent, keeping a frozen placeholder that RESUME restarts.
     Freeze { id: u64, resume_command: String },
     /// Restart a frozen pane with its resume command.

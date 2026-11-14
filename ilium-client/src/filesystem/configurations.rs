@@ -53,13 +53,6 @@ pub(crate) enum ConfigurationIntent {
         label: &'static str,
         success: Option<&'static str>,
     },
-    Session {
-        desired: crate::config::SessionSettings,
-    },
-    SessionValueDialog {
-        desired: crate::config::SessionSettings,
-        token: Arc<()>,
-    },
     AgentSetup {
         desired: crate::config::AgentSetupSettings,
         dialog: Option<AgentSetupDialog>,

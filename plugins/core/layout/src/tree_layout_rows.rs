@@ -1,10 +1,9 @@
 //! The tree row layout: which of the identity, objective, activity and title slots a tree row
 //! shows, in which order, and the keys of the settings editor that changes both.
 //!
-//! Port of the pure parts of `ilium-client/src/tree_row_layout.rs` (the model and the slot
-//! widths) and of `EditorState::apply` in `tree_layout_settings.rs` (the key handling). The
-//! ratatui drawing of the editor and the specimen stays in the kernel (port-keep until the popup
-//! views can edit text, foundation gap G8).
+//! Port of the pure parts of `ilium-client/src/tree_row_layout.rs` (the model and the
+//! slot widths) and of the key handling of the former kernel tree layout editor. The dialog that
+//! drives it is `tree_layout_dialog`.
 
 use serde::{Deserialize, Serialize};
 

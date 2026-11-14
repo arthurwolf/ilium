@@ -17,7 +17,10 @@
 //! the agent's configuration folder. It also applies the three changes of a transcript compaction to an
 //! agent's session folder: the replacement of an existing transcript whose content still matches the
 //! revision the plugin read, the creation of a `<transcript>.pre-compaction-<stamp>.bak` backup beside it and
-//! the removal of such a backup. Every other proposed file is rejected with a reason.
+//! the removal of such a backup. It also applies a change of the agent's own settings file (`settings.json` of
+//! Claude Code, `config.toml` of Codex): the whole new text, replacing the existing file only while it still has
+//! the revision the plugin read (a missing file is never created). Every other proposed file is rejected with a
+//! reason.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -776,6 +779,9 @@ fn apply_session_change(
     root: Option<&Path>,
     change: &ConfigChange,
 ) -> Result<(), String> {
+    if let Some(file_name) = agent_settings_file_name(agent, &change.path) {
+        return apply_agent_settings_file(root, file_name, change);
+    }
     // A whole new Claude Code transcript keeps its own, stricter path.
     if agent == "claude" && change.revision.is_none() && change.content.is_some() {
         if new_transcript_parts(&change.path).is_some() {
@@ -843,6 +849,48 @@ fn apply_session_change(
     }
 }
 
+/// The file name of the agent's own settings file when `path` names it: `settings.json` for Claude Code,
+/// `config.toml` for Codex.
+fn agent_settings_file_name(agent: &str, path: &str) -> Option<&'static str> {
+    match (agent, path) {
+        ("claude", "settings.json") => Some("settings.json"),
+        ("codex", "config.toml") => Some("config.toml"),
+        _ => None,
+    }
+}
+
+/// Largest settings file one proposal may write.
+const SETTINGS_FILE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Applies one change of the agent's own settings file: the whole new text replaces the existing file while it
+/// still has the revision the plugin read (a link to a file elsewhere is followed, the file is the user's own).
+/// A change without a revision is refused: the file is never created. The old file's permissions are kept.
+fn apply_agent_settings_file(
+    root: Option<&Path>,
+    file_name: &str,
+    change: &ConfigChange,
+) -> Result<(), String> {
+    let root = root.ok_or("the agent's configuration folder is not available")?;
+    let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let content = change
+        .content
+        .as_deref()
+        .ok_or("the settings file is replaced, never removed")?;
+    let token = change
+        .revision
+        .as_deref()
+        .ok_or("the settings file is replaced with its revision, never created")?;
+    if content.len() > SETTINGS_FILE_MAX_BYTES {
+        return Err(format!(
+            "the settings file of {} bytes is over the {SETTINGS_FILE_MAX_BYTES} byte cap",
+            content.len()
+        ));
+    }
+    let resolved = fs::canonicalize(canonical_root.join(file_name))
+        .map_err(|_| "conflict: the settings file no longer exists".to_owned())?;
+    replace_regular_file(&resolved, content, token, "the settings file")
+}
+
 /// Replaces an existing session transcript with `content` when its current bytes still have the revision
 /// `token` the plugin read; the replacement is a sibling temporary file renamed over the transcript.
 fn replace_session_transcript(target: &Path, content: &[u8], token: &str) -> Result<(), String> {
@@ -852,17 +900,29 @@ fn replace_session_transcript(target: &Path, content: &[u8], token: &str) -> Res
             content.len()
         ));
     }
-    match fs::symlink_metadata(target) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Err("the transcript is not a regular file".to_owned()),
+    replace_regular_file(target, content, token, "the transcript")
+}
+
+/// Replaces the regular file `target` with `content` when its current bytes still have the revision `token`;
+/// the replacement is a sibling temporary file (with the old permissions) renamed over the file. `what` names
+/// the file in the refusal texts.
+fn replace_regular_file(
+    target: &Path,
+    content: &[u8],
+    token: &str,
+    what: &str,
+) -> Result<(), String> {
+    let permissions = match fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.is_file() => metadata.permissions(),
+        Ok(_) => return Err(format!("{what} is not a regular file")),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err("conflict: the transcript no longer exists".to_owned())
+            return Err(format!("conflict: {what} no longer exists"))
         }
         Err(error) => return Err(error.to_string()),
-    }
+    };
     let current = fs::read(target).map_err(|error| error.to_string())?;
     if revision_of(&current) != token {
-        return Err("conflict: the transcript changed since it was read".to_owned());
+        return Err(format!("conflict: {what} changed since it was read"));
     }
     let file_name = target
         .file_name()
@@ -875,6 +935,7 @@ fn replace_session_transcript(target: &Path, content: &[u8], token: &str) -> Res
         target.with_file_name(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
     let outcome = fs::File::create(&temporary)
         .and_then(|mut file| file.write_all(content).and_then(|()| file.sync_all()))
+        .and_then(|()| fs::set_permissions(&temporary, permissions))
         .and_then(|()| fs::rename(&temporary, target));
     if outcome.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -2464,10 +2525,55 @@ mod tests {
         }
 
         #[test]
+        fn a_settings_file_is_replaced_only_while_its_revision_matches_and_never_created() {
+            let root = tempfile::tempdir().expect("root");
+            let settings = root.path().join("config.toml");
+            let missing = apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change("config.toml", Some(b"a = 1\n"), Some(revision_of(b""))),
+            );
+            assert!(missing.unwrap_err().starts_with("conflict"));
+            assert!(apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change("config.toml", Some(b"a = 1\n"), None)
+            )
+            .is_err());
+            assert!(!settings.exists());
+            std::fs::write(&settings, b"a = 1\n").unwrap();
+            let stale = apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change("config.toml", Some(b"c = 3\n"), Some(revision_of(b"other"))),
+            );
+            assert!(stale.unwrap_err().starts_with("conflict"));
+            assert_eq!(std::fs::read(&settings).unwrap(), b"a = 1\n");
+            apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change(
+                    "config.toml",
+                    Some(b"c = 3\n"),
+                    Some(revision_of(b"a = 1\n")),
+                ),
+            )
+            .unwrap();
+            assert_eq!(std::fs::read(&settings).unwrap(), b"c = 3\n");
+            assert!(apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change("config.toml", None, Some(revision_of(b"c = 3\n")))
+            )
+            .is_err());
+        }
+
+        #[test]
         fn paths_outside_the_session_shapes_are_rejected() {
             let root = tempfile::tempdir().expect("root");
             for (agent, path) in [
-                ("claude", "settings.json"),
+                ("claude", "hooks.json"),
+                ("codex", "settings.json"),
                 ("claude", "projects/../x.jsonl"),
                 ("claude", "projects/p/evil.sh"),
                 ("codex", "sessions/2026/11/rollout.jsonl"),

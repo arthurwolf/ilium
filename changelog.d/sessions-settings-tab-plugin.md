@@ -1,0 +1,2 @@
+### Changed
+- The Session settings tab (crash recovery policy and automatic snapshot backups) is now contributed by the Sessions plugin as a settings page bound to the same `[session]` table in `config.toml`, instead of being built into the client. Disabling the Sessions plugin removes the tab, and the `session.recovery_policy` and `session.backups_enabled` voice and control paths are gone with it. The server still reads the same two keys, so no stored setting moves.

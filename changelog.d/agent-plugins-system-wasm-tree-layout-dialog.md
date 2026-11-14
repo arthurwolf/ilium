@@ -1,0 +1,2 @@
+### Changed
+- The tree row layout editor (Settings, Icons page, `L`) is now the Layout plugin's `tree-layout` dialog: a slot list with Up, Down, Show/hide, Default, All right and Mixed buttons, a dummy-tree specimen, and Done/Cancel (Cancel restores the layout the dialog opened with). The kernel keeps only `kernel.set-tree-row-layout` and the row geometry. A plugin popup opened from a Settings page now returns to that page when it closes.

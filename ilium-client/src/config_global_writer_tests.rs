@@ -103,14 +103,6 @@ fn all_client_savers_share_the_document_owner() {
         ("editor", |dir| {
             save_editor_settings(dir, &EditorSettings::default())
         }),
-        ("session", |dir| {
-            save_session_settings(
-                dir,
-                &SessionSettings::default(),
-                &SessionSettings::default(),
-            )
-            .map(|_| ())
-        }),
         ("onboarding", |dir| {
             save_onboarding_progress(
                 dir,
@@ -122,9 +114,6 @@ fn all_client_savers_share_the_document_owner() {
         }),
         ("keymap", |dir| {
             save_keymap_settings(dir, &KeyboardSettings::default(), LEADER_BINDINGS)
-        }),
-        ("kanban", |dir| {
-            save_kanban_board_settings(dir, &KanbanBoardSettings::default())
         }),
         ("sound", |dir| {
             save_sound_settings(dir, &SoundSettings::default())

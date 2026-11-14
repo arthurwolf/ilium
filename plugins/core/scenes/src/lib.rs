@@ -6,12 +6,13 @@
 //! stay with the shared look of the host.
 //!
 //! `dithered-waves` is ported from the former built-in scene and draws for real (module
-//! `dithered_waves`). The other ids of the catalogue (`waves`, `clock`, `stars-overhead`) are
+//! `dithered_waves`). The other ids of the catalogue (`waves`, `clock`) are
 //! still the tests-first skeleton: they follow the palette and draw nothing yet.
 
 pub mod atlantic_dusk;
 pub mod box_machine;
 pub mod carpet;
+pub mod classic;
 pub mod cube_clock;
 pub mod dither_water;
 pub mod dithered_waves;
@@ -22,6 +23,7 @@ pub mod growth;
 pub mod hex_expedition;
 pub mod kit;
 pub mod live_chess;
+pub mod live_data;
 pub mod machine_screen;
 pub mod pi_digits;
 pub mod pipes;
@@ -30,12 +32,15 @@ pub mod registry;
 pub mod scenes2;
 pub mod scenes_c2;
 pub mod solar_system;
+pub mod stars;
+pub mod topographic_maps;
 pub mod vector_td;
+pub mod voxel_landscape;
 pub mod wind;
 
 // The kit modules at the crate root, so the scenes moved here keep their `crate::raster::...`
 // style paths.
-pub use kit::{control, debug, dither, raster, scene, style};
+pub use kit::{control, debug, dither, raster, scene, style, worldmap};
 
 use dithered_waves::{DitheredWaves, DitheredWavesSettings};
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
@@ -101,7 +106,6 @@ fn frames_per_second_of(scene_id: &str) -> u32 {
     match scene_id {
         "waves" => 24,
         "clock" => 2,
-        "stars-overhead" => 10,
         DITHERED_WAVES_ID => dithered_waves::FRAMES_PER_SECOND,
         _ => SCENE_FRAMES_PER_SECOND,
     }
@@ -478,15 +482,24 @@ mod spec_tests {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        assert_eq!(
-            grants,
-            vec![
-                json!("media.video"),
-                json!("location.observer"),
-                json!("gpu.kernels"),
-                json!("http:services.swpc.noaa.gov"),
-            ]
-        );
+        for needed in [
+            "media.video",
+            "location.observer",
+            "gpu.kernels",
+            "http:services.swpc.noaa.gov",
+            "http:lichess.org",
+            // The live-data scenes (graph, earthquakes, aircraft, boats) and their providers.
+            "http:earthquake.usgs.gov",
+            "http:api.exchange.coinbase.com",
+            "http:api.frankfurter.dev",
+            "http:api.wheretheiss.at",
+            "http:api.drand.sh",
+            "http:meri.digitraffic.fi",
+            "http:opensky-network.org",
+            "http:api.openseafeed.com",
+        ] {
+            assert!(grants.contains(&json!(needed)), "{needed}");
+        }
     }
 
     /// REQ: COR-011
@@ -499,7 +512,7 @@ mod spec_tests {
                 .expect("settings_schema.properties is an object");
             let is_skeleton = matches!(
                 scene["id"].as_str(),
-                Some("waves" | "clock" | "stars-overhead")
+                Some("waves" | "clock")
             );
             if !is_skeleton {
                 assert!(

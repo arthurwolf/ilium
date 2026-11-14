@@ -529,14 +529,11 @@ mod tests {
     #[test]
     fn every_catalogue_condition_is_observed_true_and_false_somewhere() {
         // Screen patterns need the client's regex engine; `always` is never
-        // false; editors and boards never get custom status icons, so their
+        // false; editors never get custom status icons, so their
         // kinds are only ever false here and the dirty flag is never observed.
         let skipped = [Condition::EditorDirty];
         let only_true = [Condition::Always];
-        let never_true = [
-            Condition::PaneKind(PaneKind::Editor),
-            Condition::PaneKind(PaneKind::Board),
-        ];
+        let never_true = [Condition::PaneKind(PaneKind::Editor)];
         let situations = demo_situations();
         for condition in condition_catalog() {
             if matches!(condition, Condition::ScreenMatches(_)) || skipped.contains(&condition) {

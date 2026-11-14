@@ -76,15 +76,19 @@ fn history_reply(pane: NodeId) -> Submission {
     let now = host().now_unix_millis();
     let since = EpochMs(now.saturating_sub(HISTORY_WINDOW_MS));
     let mut api = host();
-    let rows: Vec<serde_json::Value> = HostJournal::read(&mut *api, Some(pane), since, HISTORY_LIMIT)
-        .into_iter()
-        .map(|entry| {
-            let detail = serde_json::from_str::<String>(&entry.payload_json)
-                .unwrap_or(entry.payload_json);
-            json!({ "at": entry.at.0, "kind": entry.kind, "detail": detail })
-        })
-        .collect();
-    client_message("history", serde_json::Value::Array(rows).to_string().into_bytes())
+    let rows: Vec<serde_json::Value> =
+        HostJournal::read(&mut *api, Some(pane), since, HISTORY_LIMIT)
+            .into_iter()
+            .map(|entry| {
+                let detail = serde_json::from_str::<String>(&entry.payload_json)
+                    .unwrap_or(entry.payload_json);
+                json!({ "at": entry.at.0, "kind": entry.kind, "detail": detail })
+            })
+            .collect();
+    client_message(
+        "history",
+        serde_json::Value::Array(rows).to_string().into_bytes(),
+    )
 }
 
 impl AgentToolbarServer {

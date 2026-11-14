@@ -35,7 +35,6 @@ pub const ROOT_ID: NodeId = NodeId(0);
 pub enum PaneContentKind {
     Terminal,
     Editor,
-    Board,
     /// A pane whose body a plugin draws: a pane kind a plugin contributes in its manifest's
     /// `pane_kinds`. The node's `plugin_pane` names the kind. Appended last so every earlier
     /// variant keeps its bincode index.
@@ -462,26 +461,6 @@ fn validate_bounded_text(
         return Err(ProgressValidationError::ControlCharacter { field });
     }
     Ok(())
-}
-
-/// The user-owned document backing a kanban board.  The server persists this
-/// descriptor with the tree, while the client owns the local file I/O needed
-/// to render and mutate the board.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BoardStorage {
-    /// Each immediate child directory is one column; Markdown files inside
-    /// it are cards.
-    Folder { path: PathBuf },
-    /// Headings are columns and direct bullet-list items are cards.
-    MarkdownFile { path: PathBuf },
-}
-
-impl BoardStorage {
-    pub fn path(&self) -> &std::path::Path {
-        match self {
-            Self::Folder { path } | Self::MarkdownFile { path } => path,
-        }
-    }
 }
 
 /// Direction used by tree-row move controls. The domain owns the boundary
@@ -981,8 +960,6 @@ pub enum PaneStatus {
     Agent(AgentState),
     /// Editor pane; `true` means it has unsaved changes.
     Editor { dirty: bool },
-    /// A client-local kanban board backed by a user-selected path.
-    Board,
     /// Historical agent data without a currently authorized live composer.
     AgentUnavailable(Box<AgentRecovery>),
     /// A pane a plugin draws ([`PaneContentKind::Plugin`]); `true` means the plugin marked its
@@ -996,7 +973,6 @@ impl PaneStatus {
             Self::Agent(state) => Some(state),
             Self::PlainShell
             | Self::Editor { .. }
-            | Self::Board
             | Self::AgentUnavailable(_)
             | Self::Plugin { .. } => None,
         }
@@ -1007,7 +983,7 @@ impl PaneStatus {
         match self {
             Self::Agent(state) => Some(state),
             Self::AgentUnavailable(recovery) => Some(&recovery.last_known_state),
-            Self::PlainShell | Self::Editor { .. } | Self::Board | Self::Plugin { .. } => None,
+            Self::PlainShell | Self::Editor { .. } | Self::Plugin { .. } => None,
         }
     }
 
@@ -1035,7 +1011,6 @@ enum PaneStatusWire {
     Agent(AgentClass, AgentActivity),
     AgentWithGoal(AgentClass, AgentActivity, GoalState),
     Editor { dirty: bool },
-    Board,
     // Append only. Existing variant indices and payloads remain unchanged.
     // Older peers cannot decode this new variant; this is not a negotiation.
     AgentUnavailable(Box<AgentRecovery>),
@@ -1056,7 +1031,6 @@ impl Serialize for PaneStatus {
                 None => PaneStatusWire::Agent(state.class.clone(), state.activity()),
             },
             Self::Editor { dirty } => PaneStatusWire::Editor { dirty: *dirty },
-            Self::Board => PaneStatusWire::Board,
             Self::AgentUnavailable(recovery) => PaneStatusWire::AgentUnavailable(recovery.clone()),
             Self::Plugin { dirty } => PaneStatusWire::Plugin { dirty: *dirty },
         };
@@ -1076,7 +1050,6 @@ impl<'de> Deserialize<'de> for PaneStatus {
                 Self::from_activity(class, activity, Some(goal))
             }
             PaneStatusWire::Editor { dirty } => Self::Editor { dirty },
-            PaneStatusWire::Board => Self::Board,
             PaneStatusWire::AgentUnavailable(recovery) => Self::AgentUnavailable(recovery),
             PaneStatusWire::Plugin { dirty } => Self::Plugin { dirty },
         })
@@ -1264,7 +1237,7 @@ pub fn project_pane_signals(
                 now_rule: if shell_output.is_some() { "A8" } else { "A9" },
             };
         }
-        PaneStatus::Editor { .. } | PaneStatus::Board | PaneStatus::Plugin { .. } => {
+        PaneStatus::Editor { .. } | PaneStatus::Plugin { .. } => {
             return PaneSignals {
                 objective: ObjectiveSignal::None,
                 now: NowSignal::None,
@@ -1390,66 +1363,7 @@ impl StructureSource {
     }
 }
 
-/// One durable, server-owned input scheduled for a terminal pane. The tree
-/// carries the absolute deadline so every attached client renders the same
-/// countdown and a detached server can still execute it after the UI exits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledPaneInput {
-    pub execute_at_unix_millis: u64,
-    pub text: String,
-    pub send_enter: bool,
-}
-
-impl ScheduledPaneInput {
-    /// At least text or Enter must be present; otherwise the schedule would
-    /// wake the server only to perform an invisible no-op.
-    pub fn has_input(&self) -> bool {
-        !self.text.is_empty() || self.send_enter
-    }
-}
-
-/// How often one queued prompt is delivered after successive agent-finished
-/// transitions. The default is deliberately one delivery: repeated delivery
-/// is explicit because an unattended agent can otherwise loop indefinitely.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PromptQueueDelivery {
-    Once,
-    Times { remaining_runs: u32 },
-    Forever,
-}
-
-impl PromptQueueDelivery {
-    pub fn is_valid(&self) -> bool {
-        !matches!(self, Self::Times { remaining_runs: 0 })
-    }
-}
-
-/// One durable FIFO prompt waiting for an agent-finished transition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QueuedPrompt {
-    pub text: String,
-    pub delivery: PromptQueueDelivery,
-    /// Persisted before the first PTY byte is admitted. An attempted head is
-    /// retained for inspection but never replayed after an uncertain exit.
-    #[serde(default)]
-    pub attempted_delivery: bool,
-}
-
-impl QueuedPrompt {
-    pub fn is_valid(&self) -> bool {
-        !self.text.trim().is_empty() && self.delivery.is_valid()
-    }
-}
-
 pub const MAXIMUM_SPLIT_VIEW_PANES: usize = 4;
-
-/// Hard cap on how many prompts one pane may hold in `prompt_queue`. Recurring
-/// entries (`Times`/`Forever`) are rotated to the tail on delivery rather than
-/// pinned at the head (see [`Tree::acknowledge_queued_prompt`]), so under
-/// normal operation the queue is bounded by what a user actually queued. This
-/// cap exists only to stop a misbehaving client or automation loop from
-/// growing the persisted/broadcast snapshot without bound.
-pub const MAXIMUM_PROMPT_QUEUE_LEN: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitOrientation {
@@ -1706,19 +1620,6 @@ pub enum NodeKind {
         content: PaneContentKind,
         status: PaneStatus,
         title_source: PaneTitleSource,
-        /// Present exactly for [`PaneContentKind::Board`]. Kept in the pure
-        /// tree rather than a server runtime because boards have no PTY or
-        /// background process to own.
-        board_storage: Option<BoardStorage>,
-        /// At most one pending action per terminal pane. `serde(default)`
-        /// preserves crash-recovery compatibility with snapshots written
-        /// before scheduled input existed.
-        #[serde(default)]
-        scheduled_input: Option<ScheduledPaneInput>,
-        /// FIFO prompts sent only after a detected agent-finished transition.
-        /// `serde(default)` keeps existing recovery snapshots compatible.
-        #[serde(default)]
-        prompt_queue: Vec<QueuedPrompt>,
         /// The most recent exactly-reconstructed line a user typed or pasted
         /// and submitted with Enter in a terminal pane. `None` until a first
         /// exact submission, and left unchanged (never cleared) by a
@@ -1745,7 +1646,7 @@ pub enum NodeKind {
         #[serde(default)]
         workspace: Option<Box<PaneWorkspace>>,
         /// Present exactly for [`PaneContentKind::Plugin`]: the plugin pane kind the pane shows.
-        /// Kept in the pure tree, like `board_storage`, because a plugin pane has no PTY or
+        /// Kept in the pure tree because a plugin pane has no PTY or
         /// server process; the snapshot of the tree is what restores it. `serde(default)` keeps
         /// snapshots written before plugin panes existed loadable.
         #[serde(default)]
@@ -1956,12 +1857,6 @@ pub enum TreeError {
     InvalidPluginPaneKind(String),
     #[error("pane {pane_id:?} progress is invalid: {reason}")]
     InvalidPaneProgress { pane_id: NodeId, reason: String },
-    #[error("scheduled input must contain text, Enter, or both")]
-    EmptyScheduledInput,
-    #[error("queued prompt must contain text and a positive delivery count")]
-    EmptyQueuedPrompt,
-    #[error("pane {0:?} prompt queue already holds the maximum of {1} entries")]
-    PromptQueueFull(NodeId, usize),
     #[error("worktree container {0:?} has fixed ownership and membership")]
     FixedWorktreeMembership(NodeId),
     #[error("cannot remove the root group")]
@@ -2017,8 +1912,6 @@ pub enum TreeError {
         expected: Vec<NodeId>,
         actual: Vec<NodeId>,
     },
-    #[error("board storage is already open at {}", .0.display())]
-    BoardStorageAlreadyOpen(PathBuf),
     #[error("node {0:?} is not a folder")]
     NotAFolder(NodeId),
     #[error("node {0:?} is locked closed and cannot be expanded")]
@@ -2761,7 +2654,6 @@ impl Tree {
         let status = match content {
             PaneContentKind::Terminal => PaneStatus::PlainShell,
             PaneContentKind::Editor => PaneStatus::Editor { dirty: false },
-            PaneContentKind::Board => PaneStatus::Board,
             // A plugin pane is meaningless without its kind: `add_plugin_pane` names it.
             PaneContentKind::Plugin => return Err(TreeError::PluginPaneKindRequired),
         };
@@ -2788,9 +2680,6 @@ impl Tree {
                     content,
                     status,
                     title_source: PaneTitleSource::Automatic,
-                    board_storage: None,
-                    scheduled_input: None,
-                    prompt_queue: Vec::new(),
                     last_prompt: None,
                     progress_monitors: Vec::new(),
                     launch_cwd: None,
@@ -2814,65 +2703,6 @@ impl Tree {
             return Err(TreeError::FixedWorktreeMembership(parent));
         }
         container.validate_pane_child(false)
-    }
-
-    /// Adds a board pane whose user-owned storage descriptor is persisted in
-    /// the tree. Board I/O stays outside this pure domain crate.
-    pub fn add_board(
-        &mut self,
-        parent: NodeId,
-        name: String,
-        storage: BoardStorage,
-    ) -> Result<NodeId, TreeError> {
-        self.validate_new_pane_parent(parent)?;
-        if self.panes().any(|node| {
-            matches!(
-                &node.kind,
-                NodeKind::Pane {
-                    board_storage: Some(existing_storage),
-                    ..
-                } if existing_storage.path() == storage.path()
-            )
-        }) {
-            return Err(TreeError::BoardStorageAlreadyOpen(
-                storage.path().to_path_buf(),
-            ));
-        }
-        let id = self.alloc_id();
-        self.push_child(parent, id)?;
-        self.nodes.insert(
-            id,
-            Node {
-                id,
-                parent: Some(parent),
-                name,
-                short_name: None,
-                inferred_icon: None,
-                inferred_animation: None,
-                animation_generation: 0,
-                is_name_fixed: false,
-                presentation_revision: 0,
-                is_bookmarked: false,
-                activity_revision: 0,
-                last_restructure_activity_revision: None,
-                last_focus_activity_revision: None,
-                structure_source: StructureSource::Manual,
-                kind: NodeKind::Pane {
-                    content: PaneContentKind::Board,
-                    status: PaneStatus::Board,
-                    title_source: PaneTitleSource::Automatic,
-                    board_storage: Some(storage),
-                    scheduled_input: None,
-                    prompt_queue: Vec::new(),
-                    last_prompt: None,
-                    progress_monitors: Vec::new(),
-                    launch_cwd: None,
-                    workspace: None,
-                    plugin_pane: None,
-                },
-            },
-        );
-        Ok(id)
     }
 
     /// Adds a pane whose body a plugin draws. The kind is persisted in the tree, so the pane
@@ -2911,9 +2741,6 @@ impl Tree {
                     content: PaneContentKind::Plugin,
                     status: PaneStatus::Plugin { dirty: false },
                     title_source: PaneTitleSource::Automatic,
-                    board_storage: None,
-                    scheduled_input: None,
-                    prompt_queue: Vec::new(),
                     last_prompt: None,
                     progress_monitors: Vec::new(),
                     launch_cwd: None,
@@ -4257,112 +4084,6 @@ impl Tree {
         Ok(acknowledged_status)
     }
 
-    /// Replaces the pending input for one terminal pane. Replacement is
-    /// intentional: the context-menu action can be used again to move the
-    /// deadline or change the payload without stacking surprising actions.
-    pub fn schedule_pane_input(
-        &mut self,
-        id: NodeId,
-        scheduled_input: ScheduledPaneInput,
-    ) -> Result<(), TreeError> {
-        if !scheduled_input.has_input() {
-            return Err(TreeError::EmptyScheduledInput);
-        }
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane {
-            content,
-            scheduled_input: pending_input,
-            ..
-        } = &mut node.kind
-        else {
-            return Err(TreeError::NotAPane(id));
-        };
-        if *content != PaneContentKind::Terminal {
-            return Err(TreeError::NotATerminal(id));
-        }
-        *pending_input = Some(scheduled_input);
-        Ok(())
-    }
-
-    /// Clears only the schedule the caller actually observed. This compare-
-    /// and-clear contract prevents an executor finishing an old action from
-    /// deleting a replacement submitted concurrently for the same pane.
-    pub fn clear_scheduled_pane_input_if_matches(
-        &mut self,
-        id: NodeId,
-        expected: &ScheduledPaneInput,
-    ) -> Result<bool, TreeError> {
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane {
-            scheduled_input, ..
-        } = &mut node.kind
-        else {
-            return Err(TreeError::NotAPane(id));
-        };
-        if scheduled_input.as_ref() != Some(expected) {
-            return Ok(false);
-        }
-        *scheduled_input = None;
-        Ok(true)
-    }
-
-    /// Every pending action in no particular order. Scheduling policy belongs
-    /// to `ilium-server`; the pure tree only exposes its durable domain state.
-    pub fn scheduled_pane_inputs(&self) -> impl Iterator<Item = (NodeId, &ScheduledPaneInput)> {
-        self.nodes.iter().filter_map(|(id, node)| {
-            let NodeKind::Pane {
-                scheduled_input: Some(scheduled_input),
-                ..
-            } = &node.kind
-            else {
-                return None;
-            };
-            Some((*id, scheduled_input))
-        })
-    }
-
-    /// Adds one prompt to a terminal pane's durable FIFO queue.
-    pub fn enqueue_prompt(&mut self, id: NodeId, prompt: QueuedPrompt) -> Result<(), TreeError> {
-        if !prompt.is_valid() {
-            return Err(TreeError::EmptyQueuedPrompt);
-        }
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane {
-            content,
-            prompt_queue,
-            ..
-        } = &mut node.kind
-        else {
-            return Err(TreeError::NotAPane(id));
-        };
-        if *content != PaneContentKind::Terminal {
-            return Err(TreeError::NotATerminal(id));
-        }
-        if prompt_queue.len() >= MAXIMUM_PROMPT_QUEUE_LEN {
-            return Err(TreeError::PromptQueueFull(id, MAXIMUM_PROMPT_QUEUE_LEN));
-        }
-        prompt_queue.push(prompt);
-        Ok(())
-    }
-
-    /// Removes every pending prompt for one terminal pane.
-    pub fn clear_prompt_queue(&mut self, id: NodeId) -> Result<(), TreeError> {
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane {
-            content,
-            prompt_queue,
-            ..
-        } = &mut node.kind
-        else {
-            return Err(TreeError::NotAPane(id));
-        };
-        if *content != PaneContentKind::Terminal {
-            return Err(TreeError::NotATerminal(id));
-        }
-        prompt_queue.clear();
-        Ok(())
-    }
-
     /// Records the most recent exactly-reconstructed submitted line for a
     /// terminal pane. Callers pass `None` only to clear the field
     /// explicitly (e.g. pane recreation); an inexact or unreconstructable
@@ -4514,99 +4235,6 @@ impl Tree {
             return Err(TreeError::NotATerminal(id));
         }
         Ok(progress_monitors)
-    }
-
-    /// Returns the FIFO head without consuming it. The server persists its
-    /// attempt bit before sending bytes; an attempted head remains visible but
-    /// must not be sent again on a later completion.
-    pub fn next_queued_prompt(&self, id: NodeId) -> Result<Option<&QueuedPrompt>, TreeError> {
-        let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
-        let NodeKind::Pane {
-            content,
-            prompt_queue,
-            ..
-        } = &node.kind
-        else {
-            return Err(TreeError::NotAPane(id));
-        };
-        if *content != PaneContentKind::Terminal {
-            return Err(TreeError::NotATerminal(id));
-        }
-        Ok(prompt_queue.first())
-    }
-
-    /// Compare-and-mark the current head before any irreversible PTY write.
-    /// A stale completion cannot mark a replacement prompt after Clear.
-    pub fn mark_queued_prompt_attempted(
-        &mut self,
-        id: NodeId,
-        expected: &QueuedPrompt,
-    ) -> Result<bool, TreeError> {
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane { prompt_queue, .. } = &mut node.kind else {
-            return Err(TreeError::NotAPane(id));
-        };
-        let Some(head) = prompt_queue.first_mut() else {
-            return Ok(false);
-        };
-        if &*head != expected || head.attempted_delivery {
-            return Ok(false);
-        }
-        head.attempted_delivery = true;
-        Ok(true)
-    }
-
-    /// Acknowledges delivery only when the current FIFO head is still the
-    /// entry the server read. This compare-and-advance prevents a concurrent
-    /// clear or enqueue mutation from consuming the wrong prompt.
-    ///
-    /// A one-shot entry (`Once`, or `Times` on its last run) is removed
-    /// outright. A recurring entry that still has deliveries left (`Times`
-    /// with runs remaining, or `Forever`) is rotated to the *tail* of the
-    /// queue instead of being left pinned at the head: this keeps the FIFO a
-    /// true cycle, so a recurring prompt can never permanently block the
-    /// entries queued behind it (functional starvation) or accumulate
-    /// unreachable entries ahead of it (unbounded growth) -- every entry is
-    /// either eventually consumed or eventually delivered again.
-    pub fn acknowledge_queued_prompt(
-        &mut self,
-        id: NodeId,
-        expected: &QueuedPrompt,
-    ) -> Result<bool, TreeError> {
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane { prompt_queue, .. } = &mut node.kind else {
-            return Err(TreeError::NotAPane(id));
-        };
-        let Some(head) = prompt_queue.first() else {
-            return Ok(false);
-        };
-        if head != expected {
-            return Ok(false);
-        }
-        // Removed before deciding delivery so a rotation and a permanent
-        // removal share the same single mutation site.
-        let mut delivered = prompt_queue.remove(0);
-        delivered.attempted_delivery = false;
-        match &mut delivered.delivery {
-            PromptQueueDelivery::Once => {}
-            PromptQueueDelivery::Times { remaining_runs } if *remaining_runs > 1 => {
-                *remaining_runs -= 1;
-                prompt_queue.push(delivered);
-            }
-            PromptQueueDelivery::Times { .. } => {}
-            PromptQueueDelivery::Forever => {
-                prompt_queue.push(delivered);
-            }
-        }
-        Ok(true)
-    }
-
-    /// Number of independently queued messages, including recurring entries.
-    pub fn prompt_queue_len(&self, id: NodeId) -> Option<usize> {
-        match &self.get(id)?.kind {
-            NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
-            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
-        }
     }
 
     /// The most recent exactly-reconstructed submitted line for a pane, if
@@ -5843,12 +5471,10 @@ mod tests {
             .add_pane(group, "notes", PaneContentKind::Editor)
             .unwrap();
         let board = tree
-            .add_board(
+            .add_plugin_pane(
                 group,
-                "planning".to_string(),
-                BoardStorage::MarkdownFile {
-                    path: PathBuf::from("/tmp/bookmarks.md"),
-                },
+                "planning",
+                PluginPaneKind::new("ilium.core.kanban.board").unwrap(),
             )
             .unwrap();
         let folder = tree
@@ -6169,27 +5795,6 @@ mod tests {
     }
 
     #[test]
-    fn add_board_persists_its_storage_descriptor() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let storage = BoardStorage::MarkdownFile {
-            path: PathBuf::from("/tmp/work.md"),
-        };
-        let board = tree
-            .add_board(group, "Work".to_string(), storage.clone())
-            .unwrap();
-        assert!(matches!(
-            tree.get(board).map(|node| &node.kind),
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Board,
-                status: PaneStatus::Board,
-                board_storage: Some(saved_storage),
-                ..
-            }) if saved_storage == &storage
-        ));
-    }
-
-    #[test]
     fn a_plugin_pane_kind_names_its_owner_and_local_id() {
         let kind = PluginPaneKind::new("ilium.core.kanban.board").unwrap();
         assert_eq!(kind.kind_id(), "ilium.core.kanban.board");
@@ -6227,7 +5832,6 @@ mod tests {
             Some(NodeKind::Pane {
                 content: PaneContentKind::Plugin,
                 status: PaneStatus::Plugin { dirty: false },
-                board_storage: None,
                 plugin_pane: Some(saved),
                 ..
             }) if saved == &kind
@@ -6311,7 +5915,7 @@ mod tests {
         let NodeKind::Pane { status, .. } = &mut wrong_status.get_mut(plugin).unwrap().kind else {
             panic!("pane")
         };
-        *status = PaneStatus::Board;
+        *status = PaneStatus::PlainShell;
         assert!(wrong_status.validate().is_err());
         tree.validate().unwrap();
     }
@@ -6341,33 +5945,6 @@ mod tests {
         let status = PaneStatus::Plugin { dirty: true };
         assert!(status.agent_state().is_none());
         assert!(status.known_agent_state().is_none());
-    }
-
-    #[test]
-    fn add_board_rejects_a_second_pane_for_the_same_storage_path() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let path = PathBuf::from("/tmp/shared-board.md");
-        tree.add_board(
-            group,
-            "First".to_string(),
-            BoardStorage::MarkdownFile { path: path.clone() },
-        )
-        .unwrap();
-
-        let error = tree
-            .add_board(
-                group,
-                "Second".to_string(),
-                BoardStorage::MarkdownFile { path: path.clone() },
-            )
-            .unwrap_err();
-
-        assert!(matches!(
-            error,
-            TreeError::BoardStorageAlreadyOpen(existing_path) if existing_path == path
-        ));
-        assert_eq!(tree.panes().count(), 1);
     }
 
     #[test]
@@ -6703,200 +6280,6 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_input_is_terminal_only_and_requires_a_real_payload() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let editor = tree
-            .add_pane(group, "notes", PaneContentKind::Editor)
-            .unwrap();
-        let empty = ScheduledPaneInput {
-            execute_at_unix_millis: 1000,
-            text: String::new(),
-            send_enter: false,
-        };
-
-        assert!(matches!(
-            tree.schedule_pane_input(terminal, empty),
-            Err(TreeError::EmptyScheduledInput)
-        ));
-        assert!(matches!(
-            tree.schedule_pane_input(
-                editor,
-                ScheduledPaneInput {
-                    execute_at_unix_millis: 1000,
-                    text: "ignored".to_string(),
-                    send_enter: false,
-                }
-            ),
-            Err(TreeError::NotATerminal(id)) if id == editor
-        ));
-    }
-
-    #[test]
-    fn queued_prompts_are_fifo_and_advance_only_after_acknowledged_delivery() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        let once = QueuedPrompt {
-            text: "first".to_string(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        let repeat = QueuedPrompt {
-            text: "second".to_string(),
-            delivery: PromptQueueDelivery::Times { remaining_runs: 2 },
-            attempted_delivery: false,
-        };
-        tree.enqueue_prompt(terminal, once.clone()).unwrap();
-        tree.enqueue_prompt(terminal, repeat.clone()).unwrap();
-        assert_eq!(tree.prompt_queue_len(terminal), Some(2));
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once));
-        assert!(!tree.acknowledge_queued_prompt(terminal, &repeat).unwrap());
-        assert!(tree.acknowledge_queued_prompt(terminal, &once).unwrap());
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&repeat));
-        assert!(tree.acknowledge_queued_prompt(terminal, &repeat).unwrap());
-        assert_eq!(tree.prompt_queue_len(terminal), Some(1));
-        assert!(matches!(
-            tree.next_queued_prompt(terminal).unwrap(),
-            Some(QueuedPrompt {
-                delivery: PromptQueueDelivery::Times { remaining_runs: 1 },
-                ..
-            })
-        ));
-        let final_repeat = tree.next_queued_prompt(terminal).unwrap().cloned().unwrap();
-        assert!(tree
-            .acknowledge_queued_prompt(terminal, &final_repeat)
-            .unwrap());
-        assert_eq!(tree.prompt_queue_len(terminal), Some(0));
-    }
-
-    #[test]
-    fn queued_prompt_attempt_is_a_compare_and_set_replay_fence() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        let prompt = QueuedPrompt {
-            text: "one".to_string(),
-            delivery: PromptQueueDelivery::Forever,
-            attempted_delivery: false,
-        };
-        tree.enqueue_prompt(terminal, prompt.clone()).unwrap();
-        assert!(tree
-            .mark_queued_prompt_attempted(terminal, &prompt)
-            .unwrap());
-        assert!(!tree
-            .mark_queued_prompt_attempted(terminal, &prompt)
-            .unwrap());
-        let attempted = tree.next_queued_prompt(terminal).unwrap().unwrap().clone();
-        assert!(attempted.attempted_delivery);
-        assert!(!tree.acknowledge_queued_prompt(terminal, &prompt).unwrap());
-        assert!(tree
-            .acknowledge_queued_prompt(terminal, &attempted)
-            .unwrap());
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&prompt));
-    }
-
-    /// Regression test for a leak/starvation bug: a `Forever` entry ahead of
-    /// other queued prompts used to stay pinned at index 0 forever, so
-    /// everything queued behind it was permanently unreachable and the queue
-    /// grew without bound as more prompts were enqueued. Acknowledging a
-    /// recurring entry must rotate it to the tail instead, so the queue stays
-    /// a bounded cycle and every one-shot entry behind it still drains.
-    #[test]
-    fn recurring_prompts_rotate_to_the_tail_instead_of_starving_the_queue() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        let forever = QueuedPrompt {
-            text: "reminder".to_string(),
-            delivery: PromptQueueDelivery::Forever,
-            attempted_delivery: false,
-        };
-        let once_a = QueuedPrompt {
-            text: "one-shot-a".to_string(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        let once_b = QueuedPrompt {
-            text: "one-shot-b".to_string(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        tree.enqueue_prompt(terminal, forever.clone()).unwrap();
-        tree.enqueue_prompt(terminal, once_a.clone()).unwrap();
-        tree.enqueue_prompt(terminal, once_b.clone()).unwrap();
-        assert_eq!(tree.prompt_queue_len(terminal), Some(3));
-
-        // First completion delivers the Forever prompt; it rotates to the
-        // tail rather than staying at the head, so the queue length is
-        // unchanged and the one-shots are now reachable.
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&forever));
-        assert!(tree.acknowledge_queued_prompt(terminal, &forever).unwrap());
-        assert_eq!(tree.prompt_queue_len(terminal), Some(3));
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once_a));
-
-        // Both one-shots drain permanently.
-        assert!(tree.acknowledge_queued_prompt(terminal, &once_a).unwrap());
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once_b));
-        assert!(tree.acknowledge_queued_prompt(terminal, &once_b).unwrap());
-        assert_eq!(tree.prompt_queue_len(terminal), Some(1));
-
-        // Only the Forever entry remains, and it keeps cycling without ever
-        // growing the queue on repeated completions.
-        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&forever));
-        for _ in 0..5 {
-            assert!(tree.acknowledge_queued_prompt(terminal, &forever).unwrap());
-            assert_eq!(tree.prompt_queue_len(terminal), Some(1));
-        }
-    }
-
-    #[test]
-    fn enqueue_prompt_rejects_growth_past_the_bounded_maximum() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        for index in 0..MAXIMUM_PROMPT_QUEUE_LEN {
-            tree.enqueue_prompt(
-                terminal,
-                QueuedPrompt {
-                    text: format!("prompt-{index}"),
-                    delivery: PromptQueueDelivery::Once,
-                    attempted_delivery: false,
-                },
-            )
-            .unwrap();
-        }
-        assert_eq!(
-            tree.prompt_queue_len(terminal),
-            Some(MAXIMUM_PROMPT_QUEUE_LEN)
-        );
-        let overflow = QueuedPrompt {
-            text: "one-too-many".to_string(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        assert!(matches!(
-            tree.enqueue_prompt(terminal, overflow),
-            Err(TreeError::PromptQueueFull(id, MAXIMUM_PROMPT_QUEUE_LEN)) if id == terminal
-        ));
-        assert_eq!(
-            tree.prompt_queue_len(terminal),
-            Some(MAXIMUM_PROMPT_QUEUE_LEN)
-        );
-    }
-
-    #[test]
     fn set_last_prompt_round_trips_and_rejects_non_terminal_panes() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
@@ -7096,42 +6479,6 @@ mod tests {
         progress.validate().unwrap();
         assert_eq!(progress.report.status, ProgressTaskStatus::Running);
         assert!(progress.monitor_health.is_failed());
-    }
-
-    #[test]
-    fn replacing_and_compare_clearing_scheduled_input_is_race_safe() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let original = ScheduledPaneInput {
-            execute_at_unix_millis: 1000,
-            text: "first".to_string(),
-            send_enter: true,
-        };
-        let replacement = ScheduledPaneInput {
-            execute_at_unix_millis: 2000,
-            text: "second".to_string(),
-            send_enter: false,
-        };
-
-        tree.schedule_pane_input(terminal, original.clone())
-            .unwrap();
-        tree.schedule_pane_input(terminal, replacement.clone())
-            .unwrap();
-
-        assert!(!tree
-            .clear_scheduled_pane_input_if_matches(terminal, &original)
-            .unwrap());
-        assert_eq!(
-            tree.scheduled_pane_inputs().collect::<Vec<_>>(),
-            vec![(terminal, &replacement)]
-        );
-        assert!(tree
-            .clear_scheduled_pane_input_if_matches(terminal, &replacement)
-            .unwrap());
-        assert_eq!(tree.scheduled_pane_inputs().count(), 0);
     }
 
     #[test]
@@ -8116,7 +7463,7 @@ mod tests {
             .unwrap();
         let nested_group = tree.add_group(group, "nested").unwrap();
         let nested_pane = tree
-            .add_pane(nested_group, "nested pane", PaneContentKind::Board)
+            .add_pane(nested_group, "nested pane", PaneContentKind::Editor)
             .unwrap();
 
         assert_eq!(tree.containing_group(second_split_member), Some(group));

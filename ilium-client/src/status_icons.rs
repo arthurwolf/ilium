@@ -189,10 +189,6 @@ pub fn identity_explanation(status: &PaneStatus) -> StatusExplanation {
             title: "Editor",
             body: "This tree entry is an editor pane whose current buffer is saved.",
         },
-        PaneStatus::Board => StatusExplanation {
-            title: "Board",
-            body: "This tree entry is a board pane.",
-        },
         PaneStatus::Plugin { dirty: true } => StatusExplanation {
             title: "Plugin pane, unsaved",
             body: "This tree entry is a pane drawn by a plugin; the plugin reports unsaved changes.",
@@ -208,7 +204,6 @@ pub(crate) fn missing_identity_evidence_reason(content: PaneContentKind) -> Stri
     match content {
         PaneContentKind::Terminal => "Why: the server has not sent this terminal's process-classification evidence yet.".to_string(),
         PaneContentKind::Editor => "Why: the saved tree marks this as an editor pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
-        PaneContentKind::Board => "Why: the saved tree marks this as a board pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
         PaneContentKind::Plugin => "Why: the saved tree marks this as a plugin pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
     }
 }
@@ -237,9 +232,6 @@ pub(crate) fn identity_provenance_reason(
         }
         PaneStatus::Editor { dirty: false } => {
             "Why: the server-owned pane status reports dirty=false, so the editor is shown as saved.".to_string()
-        }
-        PaneStatus::Board => {
-            "Why: the server-owned pane status identifies this entry as a board pane.".to_string()
         }
         PaneStatus::Plugin { dirty } => format!(
             "Why: the server-owned pane status identifies this entry as a plugin pane (dirty={dirty})."
@@ -1219,7 +1211,6 @@ mod tests {
 
         for (content, pane_name) in [
             (PaneContentKind::Editor, "editor pane"),
-            (PaneContentKind::Board, "board pane"),
             (PaneContentKind::Plugin, "plugin pane"),
         ] {
             let reason = missing_identity_evidence_reason(content);
@@ -1243,8 +1234,6 @@ mod tests {
 
         let editor = identity_provenance_reason(&PaneStatus::Editor { dirty: true }, None);
         assert!(editor.contains("dirty=true"));
-        let board = identity_provenance_reason(&PaneStatus::Board, None);
-        assert!(board.contains("board pane"));
 
         let detector = DetectionReason {
             rule: "process marker matched".to_string(),

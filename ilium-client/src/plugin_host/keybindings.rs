@@ -287,7 +287,6 @@ impl App {
             } => Some(match content {
                 ilium_core::PaneContentKind::Terminal => "terminal".to_owned(),
                 ilium_core::PaneContentKind::Editor => "editor".to_owned(),
-                ilium_core::PaneContentKind::Board => "board".to_owned(),
                 ilium_core::PaneContentKind::Plugin => plugin_pane.as_ref()?.kind_id().to_owned(),
             }),
             _ => None,

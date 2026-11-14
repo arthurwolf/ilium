@@ -11,3 +11,4 @@ pub mod raster;
 pub mod scene;
 pub mod settings;
 pub mod style;
+pub mod worldmap;

@@ -2903,19 +2903,7 @@ async fn run_due_panes_with_hook(
                 ),
                 AgentDebugField::plain(
                     "Applied pane state",
-                    describe_pane_status(
-                        &new_status,
-                        &runtime.progress_reports(),
-                        tree.get(pane_id).is_some_and(|node| {
-                            matches!(
-                                &node.kind,
-                                ilium_core::NodeKind::Pane {
-                                    scheduled_input: Some(_),
-                                    ..
-                                }
-                            )
-                        }),
-                    ),
+                    describe_pane_status(&new_status, &runtime.progress_reports()),
                 ),
             ];
             if let Some(line) = classified_pane.activity_evidence_line.as_deref() {
@@ -3411,11 +3399,7 @@ fn explain_session_decision(
     }
 }
 
-fn describe_pane_status(
-    status: &PaneStatus,
-    progress: &[ilium_core::PaneProgress],
-    has_scheduled_input: bool,
-) -> String {
+fn describe_pane_status(status: &PaneStatus, progress: &[ilium_core::PaneProgress]) -> String {
     let state = match status {
         PaneStatus::PlainShell => "Plain shell; no agent badge is applied.".to_string(),
         PaneStatus::AgentUnavailable(recovery) => format!(
@@ -3448,10 +3432,9 @@ fn describe_pane_status(
             ),
         },
         PaneStatus::Editor { .. } => "Editor pane; agent detection does not apply.".to_string(),
-        PaneStatus::Board => "Board pane; agent detection does not apply.".to_string(),
         PaneStatus::Plugin { .. } => "Plugin pane; agent detection does not apply.".to_string(),
     };
-    let signals = ilium_core::project_pane_signals(status, progress, has_scheduled_input, None);
+    let signals = ilium_core::project_pane_signals(status, progress, false, None);
     format!(
         "{state} Projected objective {}: {:?}; projected now {}: {:?}.",
         signals.objective_rule, signals.objective, signals.now_rule, signals.now
@@ -4671,7 +4654,7 @@ mod tests {
             AgentActivity::Working,
             Some(ilium_core::GoalState::Blocked),
         );
-        let description = describe_pane_status(&status, &[], true);
+        let description = describe_pane_status(&status, &[]);
         assert!(description.contains("Projected objective B3: Goal(Blocked)"));
         assert!(description.contains("projected now A2: Working"));
     }

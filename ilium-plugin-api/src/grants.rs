@@ -1150,7 +1150,8 @@ fn valid_program(program: &str) -> bool {
 fn valid_scope(family: &str, scope: &str) -> bool {
     match scope {
         "package" => family != "fs.write",
-        "data" | "cache" | "project" | "worktrees" | "picked" | "minecraft-saves" => true,
+        "data" | "cache" | "project" | "worktrees" | "picked" | "minecraft-saves"
+        | "minecraft-java" => true,
         _ => {
             if let Some(agent) = scope.strip_prefix("agent-sessions:") {
                 return family != "fs.write" && AGENTS.contains(&agent);

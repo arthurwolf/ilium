@@ -298,7 +298,6 @@ impl App {
             ilium_core::PaneContentKind::Terminal if agent.is_some() => ("agent", "terminal"),
             ilium_core::PaneContentKind::Terminal => ("terminal", "terminal"),
             ilium_core::PaneContentKind::Editor => ("editor", "editor"),
-            ilium_core::PaneContentKind::Board => ("basic", "board"),
             ilium_core::PaneContentKind::Plugin => (
                 "basic",
                 plugin_pane
@@ -1082,7 +1081,6 @@ impl crate::app::App {
         let content = match content {
             ilium_core::PaneContentKind::Terminal => "terminal",
             ilium_core::PaneContentKind::Editor => "editor",
-            ilium_core::PaneContentKind::Board => "board",
             // A plugin pane is `pane:<global kind id>`, as in a `pane:` keybinding.
             ilium_core::PaneContentKind::Plugin => plugin_pane
                 .as_ref()

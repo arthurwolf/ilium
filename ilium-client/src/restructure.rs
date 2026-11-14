@@ -249,12 +249,6 @@ pub fn gather_leaf_contexts(
                 context.automatic_content_fingerprint =
                     stable_restructure_fingerprint(&context.content_extract);
             }
-            (Some(PaneRuntime::Board(board)), _) => {
-                context.content_extract =
-                    clip_lines(&crate::board::board_text_extract(&board.columns));
-                context.automatic_content_fingerprint =
-                    stable_restructure_fingerprint(&context.content_extract);
-            }
             (None, _) => {}
         }
         contexts.push(context);
@@ -598,7 +592,6 @@ fn describe_pane_status(status: &PaneStatus) -> String {
             recovery.availability.label(),
         ),
         PaneStatus::Editor { .. } => "Editor".to_string(),
-        PaneStatus::Board => "Board".to_string(),
         PaneStatus::Plugin { .. } => "Plugin pane".to_string(),
     }
 }
@@ -1855,7 +1848,7 @@ mod tests {
         };
         decorate(children);
         if value.get("animations").is_none() {
-            value["animations"] = serde_json::json!({"definitions":[{"key":"calm","recommendation":{"kind":"shoreline","resources":"catalog","parameters":[]}}],"project":"calm"});
+            value["animations"] = serde_json::json!({"definitions":[{"key":"calm","recommendation":{"kind":"night_lights","resources":"catalog","parameters":[]}}],"project":"calm"});
         }
         format!("{}{}{}", &response[..start], value, &response[end + 1..])
     }

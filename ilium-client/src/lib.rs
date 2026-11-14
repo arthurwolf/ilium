@@ -49,8 +49,6 @@ mod background_acceptance;
 pub mod background_animation;
 pub mod background_composition;
 mod blocking_errors;
-pub mod board;
-pub mod board_ui;
 pub mod claude_model_statusline;
 pub mod config;
 pub mod connection;
@@ -929,10 +927,6 @@ async fn run_inner(
     app.voice_preparation
         .configure(voice_retirement_client.clone());
     let normal_voice_preparation_notification = app.voice_preparation.notification();
-    app.board_files = Some(crate::filesystem::boards::BoardFiles::new(
-        filesystem_client,
-        std::sync::Arc::clone(&filesystem_notification),
-    ));
     app.editor_files = Some(editor_files);
     app.agent_setup_home_dir = std::env::var_os(AGENT_SETUP_HOME_ENV)
         .map(std::path::PathBuf::from)
@@ -1058,7 +1052,6 @@ async fn run_inner(
     }
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
-    app.kanban_board_settings = config.kanban_board;
     app.padding_settings = config.padding;
     app.sync_padding();
     app.apply_sound_settings(config.sound);
@@ -1068,7 +1061,6 @@ async fn run_inner(
     app.apply_agent_setup_settings(config.agent_setup);
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
-    app.apply_session_settings(config.session);
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_cost_settings(config.cost);
@@ -1366,7 +1358,6 @@ async fn run_inner(
             && app.pending_key_paste.is_none()
             && deferred_event_fits_editor_custody
             && deferred_input.front().is_none_or(|event| native_input_geometry_ready(&app, event))
-            && !app.board_input_backpressured()
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
@@ -1499,8 +1490,8 @@ async fn run_inner(
             _ = animation_admission_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
             }
-            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() && !app.board_input_backpressured() => {}
-            input_event = input_rx.recv(), if !app.board_input_backpressured() && app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
+            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() => {}
+            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
                 match input_event {
                     Some(event) => {
                         if let Some(failure) = dispatch_ready_input_events(
@@ -4172,9 +4163,7 @@ where
                 overflow = Some(event);
                 return false;
             }
-            if !native_input_geometry_ready(app, &event)
-                || (event.is_ok() && app.board_input_backpressured())
-            {
+            if !native_input_geometry_ready(app, &event) {
                 overflow = Some(event);
                 return false;
             }
@@ -4348,9 +4337,6 @@ fn advance_pending_key_paste(
     icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
 ) -> bool {
-    if app.board_input_backpressured() {
-        return false;
-    }
     let Some(mut replay) = app.pending_key_paste.take() else {
         return false;
     };
@@ -5580,9 +5566,6 @@ mod responsiveness_tests {
             "Could not save inference settings: permission denied"
         ));
         assert!(status_message_is_failure("Save failed: disk full"));
-        assert!(status_message_is_failure(
-            "Board path picker lost its parent dialog"
-        ));
         assert!(!status_message_is_failure("Testing inference provider…"));
         assert!(!status_message_is_failure("Card saved"));
     }
@@ -6033,6 +6016,5 @@ mod responsiveness_tests {
     }
 }
 
-pub mod tree_layout_settings;
 
 pub mod tree_row_layout;

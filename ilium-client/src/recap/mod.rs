@@ -1,4 +1,6 @@
-//! Pane recaps: one shared pipeline for the CLI and future UI consumers.
+//! Pane recaps for the in-terminal refresh worker. The `ilium recap` command is the
+//! `ilium.core.recap` plugin; this module keeps only the pipeline that worker and the
+//! project restructure call still use.
 //!
 //! Flow per pane: gather bounded, redacted evidence (agent transcript with a
 //! verified session, or shell screen text) → deterministic state and goal
@@ -14,9 +16,7 @@ pub mod fence;
 pub mod infer;
 pub mod model;
 pub mod pointers;
-pub mod render;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -450,51 +450,6 @@ pub async fn run_recaps(inputs: Vec<PaneRecapInput>, context: RecapContext) -> R
     }
     let cancelled = *context.cancel.borrow();
     RecapBatch { panes, cancelled }
-}
-
-/// Final identity check for callers that run the pipeline on an attach-time
-/// snapshot (the CLI). Drops text for each pane whose session changed or
-/// vanished while inference ran; `latest` reports the pane's identity now.
-pub fn apply_final_fence(
-    batch: &mut RecapBatch,
-    captured: &HashMap<String, PaneFence>,
-    latest: &dyn Fn(&str) -> Option<PaneFence>,
-) {
-    for pane in &mut batch.panes {
-        if pane.state != RecapPaneState::Summarized {
-            continue;
-        }
-        let Some(captured_fence) = captured.get(&pane.pane_id) else {
-            continue;
-        };
-        if !fence_still_current(captured_fence, latest(&pane.pane_id).as_ref()) {
-            pane.state = RecapPaneState::Stale;
-            pane.short = None;
-            pane.long = None;
-            pane.failure = Some("pane or session changed while the recap was running".to_string());
-        }
-    }
-}
-
-/// A batch where every pane is denied without reading evidence or calling the
-/// model. Used when AI permission is off, so the caller still gets one record
-/// per selected pane.
-pub fn permission_denied(inputs: &[PaneRecapInput], reason: &str) -> RecapBatch {
-    RecapBatch {
-        panes: inputs
-            .iter()
-            .map(|input| PaneRecap {
-                pane_id: input.pane_id.clone(),
-                pane_name: input.pane_name.clone(),
-                state: RecapPaneState::Denied,
-                facts: empty_facts(),
-                short: None,
-                long: None,
-                failure: Some(reason.to_string()),
-            })
-            .collect(),
-        cancelled: false,
-    }
 }
 
 #[cfg(test)]

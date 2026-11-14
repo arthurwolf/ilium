@@ -18,6 +18,8 @@ use ilium_plugin_sdk::types::{
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, Views};
 
 pub mod analysis;
+mod apply;
+mod config_edit;
 mod monitor;
 mod optimize;
 mod panel;
@@ -52,6 +54,44 @@ impl CompactionServer {
             channel: channel.to_string(),
             payload: payload.to_string().into_bytes(),
         }))
+    }
+
+    /// Answers one request of the panel's Apply and Revert keys with a `plan`, a `note` or a `failed-note` message.
+    fn answer_threshold_request(channel: &str, payload: &[u8]) -> Submission {
+        let request: serde_json::Value = serde_json::from_slice(payload).unwrap_or_default();
+        let agent = request
+            .get("agent")
+            .and_then(serde_json::Value::as_str)
+            .and_then(apply::Agent::from_wire);
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        let planned = match (channel, agent) {
+            ("plan", Some(agent)) => {
+                let value = request.get("value").and_then(serde_json::Value::as_u64);
+                match value {
+                    Some(value) => Some(apply::plan_apply(api, agent, value)),
+                    None => Some(Err("The recommendation has no value.".to_string())),
+                }
+            }
+            ("plan-revert", Some(agent)) => Some(apply::plan_revert(api, agent)),
+            _ => None,
+        };
+        let answer = match (channel, planned) {
+            ("cancel", _) => {
+                apply::cancel();
+                return Self::to_client("note", serde_json::json!({ "text": "" }));
+            }
+            ("confirm", _) => apply::confirm(api),
+            (_, Some(Ok(lines))) => {
+                return Self::to_client("plan", serde_json::json!({ "lines": lines }));
+            }
+            (_, Some(Err(message))) => Err(message),
+            (_, None) => Err("The request names no Claude Code or Codex agent.".to_string()),
+        };
+        match answer {
+            Ok(text) => Self::to_client("note", serde_json::json!({ "text": text })),
+            Err(message) => Self::to_client("failed-note", serde_json::json!({ "text": message })),
+        }
     }
 
     fn start_scan(&mut self, payload: &[u8], out: &mut Vec<Submission>) {
@@ -134,6 +174,18 @@ impl Handler for CompactionServer {
                     if message.from_side == PluginSide::Client && message.channel == "scan" =>
                 {
                     self.start_scan(&message.payload, &mut out);
+                }
+                Event::Message(message)
+                    if message.from_side == PluginSide::Client
+                        && matches!(
+                            message.channel.as_str(),
+                            "plan" | "plan-revert" | "confirm" | "cancel"
+                        ) =>
+                {
+                    out.push(Self::answer_threshold_request(
+                        &message.channel,
+                        &message.payload,
+                    ));
                 }
                 Event::RequestCompleted(result) => {
                     if let RequestRef::Call(request) = result.request {

@@ -17,12 +17,19 @@ ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
 swash = "0.2.9"
+# Provider timestamps and the Coinbase history plan; no clock feature, the host supplies the time.
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+# Decodes the embedded elevation PNGs of the topographic maps scene (pure Rust, builds for wasm).
+image = { version = "0.25", default-features = false, features = ["png", "tga"] }
+# The voxel landscape: texture-pack identity digests and ZIP member inflation (pure Rust, builds for wasm).
+sha2 = "=0.10.9"
+flate2 = "1.1.9"
 
 [dev-dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
 serde_json = "1.0.151"
 proptest = "1"
-image = { version = "0.25", default-features = false, features = ["png"] }
+tempfile = "3.27.0"
 
 [features]
 # Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.

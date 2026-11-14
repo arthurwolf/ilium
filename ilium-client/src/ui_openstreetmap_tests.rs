@@ -246,14 +246,14 @@ fn disabled_or_switched_scene_clears_credit_and_restores_workspace_height() {
 
     app.settings_adjust_animation_row(background_row, 1);
     assert!(app.animation_settings.enabled);
-    app.settings_select_animation_scene(AnimationKind::QuietPond);
+    app.settings_select_animation_scene(AnimationKind::Images);
     app.settle_filesystem_for_test();
     assert_eq!(
         crate::project_config::load(project.path())
             .unwrap()
             .animation
             .kind,
-        AnimationKind::QuietPond
+        AnimationKind::Images
     );
     draw_buffer(&mut terminal, &mut app);
     assert!(app.layout.osm_attribution_area.is_empty());

@@ -13,10 +13,24 @@ fn port_actual_public_video_http_without_original_network_right_is_denied_before
         .filter_map(|grant| grant.as_str())
         .filter(|grant| grant.starts_with("http:"))
         .collect();
+    let mut expected = vec![
+        "http:services.swpc.noaa.gov",
+        "http:lichess.org",
+        "http:earthquake.usgs.gov",
+        "http:api.exchange.coinbase.com",
+        "http:api.frankfurter.dev",
+        "http:api.wheretheiss.at",
+        "http:api.drand.sh",
+        "http:meri.digitraffic.fi",
+        "http:opensky-network.org",
+        "http:api.openseafeed.com",
+    ];
+    let mut hosts = hosts;
+    expected.sort_unstable();
+    hosts.sort_unstable();
     assert_eq!(
-        hosts,
-        vec!["http:services.swpc.noaa.gov"],
-        "the only network right is the one live-data host"
+        hosts, expected,
+        "the network rights are exactly the hosts of the live-data scenes"
     );
     for id in MANIFEST_SCENES {
         let screen = fake_scene(id, 40, 10).frame(braille_frame(40, 10, 0));

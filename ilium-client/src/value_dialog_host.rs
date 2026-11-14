@@ -44,9 +44,6 @@ pub enum ValueTarget {
         source: crate::agent_from_line::EditorSourceLine,
         parent_group: NodeId,
     },
-    BoardStorage {
-        parent_group: NodeId,
-    },
     SoundStudio {
         control: crate::onboarding::studio::SoundControl,
         identity: std::sync::Arc<()>,
@@ -74,7 +71,6 @@ pub enum ValueTarget {
     SettingsChoice {
         field: crate::value_settings_choice::SettingsChoice,
         directory: std::path::PathBuf,
-        session_previous: Option<crate::config::SessionSettings>,
         inference_revision: Option<u64>,
     },
 }
@@ -345,46 +341,6 @@ impl ValueDialogHost {
         Ok(())
     }
 
-    pub fn board_storage(parent: &crate::app::CreateBoardState) -> Result<Self, String> {
-        let options = crate::app::BoardStorageKind::ALL
-            .into_iter()
-            .map(|value| ChoiceOption {
-                id: format!("{value:?}"),
-                label: value.label().into(),
-                disabled_reason: None,
-            })
-            .collect();
-        Ok(Self {
-            target: ValueTarget::BoardStorage {
-                parent_group: parent.parent_group,
-            },
-            dialog: ValueDialogState::Choice(ChoiceDialogState::new(
-                "Board storage",
-                options,
-                Some(format!("{:?}", parent.storage_kind)),
-            )?),
-            pending_save: None,
-        })
-    }
-
-    pub fn apply_board_storage_choice(
-        &self,
-        parent: &mut crate::app::CreateBoardState,
-        id: &str,
-    ) -> Result<(), String> {
-        let ValueTarget::BoardStorage { parent_group } = &self.target else {
-            return Err("This catalog belongs to a different form".into());
-        };
-        if parent.parent_group != *parent_group {
-            return Err("The board destination changed; reopen its storage catalog".into());
-        }
-        parent.storage_kind = crate::app::BoardStorageKind::ALL
-            .into_iter()
-            .find(|value| format!("{value:?}") == id)
-            .ok_or("This storage option is no longer available")?;
-        Ok(())
-    }
-
     pub fn studio_number(
         control: crate::onboarding::studio::SoundControl,
         studio: &crate::onboarding::studio::SoundStudio,
@@ -418,9 +374,6 @@ impl ValueDialogHost {
             target: ValueTarget::SettingsChoice {
                 field,
                 directory,
-                session_previous: (field
-                    == crate::value_settings_choice::SettingsChoice::SessionRecovery)
-                    .then_some(app.session_settings),
                 inference_revision: matches!(
                     field,
                     crate::value_settings_choice::SettingsChoice::InferenceProvider
@@ -596,19 +549,6 @@ impl crate::app::App {
             }
         }
     }
-
-    pub(crate) fn begin_board_storage_dialog(&mut self, parent: crate::app::CreateBoardState) {
-        match ValueDialogHost::board_storage(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::CreateBoard(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::CreateBoard(parent);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -655,107 +595,6 @@ mod tests {
             .apply_agent_from_line_provider(&mut parent, "Claude")
             .is_err());
         assert_eq!(parent.agent_type, AgentLaunchType::Codex);
-    }
-
-    #[test]
-    fn board_chrome_paints_the_exact_picker_and_arrow_targets() {
-        use crate::value_control::{ControlAction, ControlStyles, PointerButton};
-        use ratatui::{
-            backend::TestBackend,
-            layout::{Position, Rect},
-            Terminal,
-        };
-        for (width, height) in [(32, 20), (80, 30), (140, 40)] {
-            let area = Rect::new(0, 0, width, height);
-            for control in [crate::modal::create_board_storage_control(
-                area,
-                crate::app::BoardStorageKind::Folder.label(),
-            )] {
-                let geometry = control.geometry();
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|frame| control.render(frame, ControlStyles::default()))
-                    .unwrap();
-                for (rect, glyph) in [
-                    (geometry.previous, "←"),
-                    (geometry.open, "+"),
-                    (geometry.next, "→"),
-                ] {
-                    assert_eq!(
-                        terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
-                        glyph
-                    );
-                }
-                assert_eq!(
-                    control.hit(
-                        Position::new(geometry.value.x, geometry.value.y),
-                        PointerButton::Left
-                    ),
-                    Some(ControlAction::NextChoice)
-                );
-                assert_eq!(
-                    control.hit(
-                        Position::new(geometry.value.x, geometry.value.y),
-                        PointerButton::Right
-                    ),
-                    Some(ControlAction::PreviousChoice)
-                );
-                assert_eq!(
-                    control.hit(
-                        Position::new(geometry.open.x, geometry.open.y),
-                        PointerButton::Left
-                    ),
-                    Some(ControlAction::OpenChoices)
-                );
-                assert_eq!(
-                    control.hit(
-                        Position::new(geometry.label.x, geometry.label.y),
-                        PointerButton::Left
-                    ),
-                    None
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn board_catalog_keeps_authored_fields_and_rejects_changed_destination() {
-        let mut parent = crate::app::CreateBoardState {
-            parent_group: NodeId(12),
-            name: TextPromptState::new("Authored λ board"),
-            path: TextPromptState::new("/tmp/authored plan.md"),
-            storage_kind: crate::app::BoardStorageKind::Folder,
-            editing_path: true,
-        };
-        parent.name.cursor = 3;
-        parent.path.cursor = 7;
-        let original = parent.clone();
-        let host = ValueDialogHost::board_storage(&parent).unwrap();
-        let ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("catalog");
-        };
-        assert_eq!(choice.options().len(), 2);
-        assert_eq!(choice.selected_id.as_deref(), Some("Folder"));
-        host.apply_board_storage_choice(&mut parent, "MarkdownFile")
-            .unwrap();
-        assert_eq!(
-            parent.storage_kind,
-            crate::app::BoardStorageKind::MarkdownFile
-        );
-        assert_eq!(parent.name, original.name);
-        assert_eq!(parent.path, original.path);
-        assert_eq!(parent.editing_path, original.editing_path);
-        assert!(host
-            .apply_board_storage_choice(&mut parent, "invented")
-            .is_err());
-        parent.parent_group = NodeId(13);
-        assert!(host
-            .apply_board_storage_choice(&mut parent, "Folder")
-            .is_err());
-        assert_eq!(
-            parent.storage_kind,
-            crate::app::BoardStorageKind::MarkdownFile
-        );
     }
 
     #[test]

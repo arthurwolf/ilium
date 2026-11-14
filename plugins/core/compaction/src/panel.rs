@@ -1,7 +1,10 @@
 //! The client side of the optimizer: the command that opens the panel, the panel's text and its keys.
 //!
 //! The client holds only what it draws. A scan is a job of the server side: the client sends `scan` with the agent
-//! to scan and the server side answers `report` (the plain-text report) or `failed` (a message).
+//! to scan and the server side answers `report` (the plain-text report with the recommended threshold) or `failed`
+//! (a message). A applies the recommendation and R reverts the last apply: the client sends `plan` or `plan-revert`,
+//! the server side answers `plan` with the lines to confirm (Enter confirms through `confirm`, Esc cancels through
+//! `cancel`) and then `note` or `failed-note` with the outcome (see [`crate::apply`]).
 
 use std::cell::RefCell;
 
@@ -35,11 +38,24 @@ enum Phase {
     Failed(String),
 }
 
+/// The threshold the last report recommends.
+#[derive(Debug, Clone, PartialEq)]
+struct Recommendation {
+    key: String,
+    value: u64,
+}
+
 #[derive(Debug, Default)]
 struct PanelState {
     agent: String,
     phase: Phase,
     scroll: usize,
+    /// What the Apply key writes; set by a finished scan.
+    recommendation: Option<Recommendation>,
+    /// The lines of a change that waits for Enter or Esc.
+    confirming: Option<Vec<String>>,
+    /// The outcome of the last apply or revert, shown under the report.
+    note: Option<(String, bool)>,
 }
 
 thread_local! {
@@ -72,6 +88,9 @@ fn start_scan(agent: &str, out: &mut Vec<Submission>) {
         state.agent = agent.to_string();
         state.phase = Phase::Scanning;
         state.scroll = 0;
+        state.recommendation = None;
+        state.confirming = None;
+        state.note = None;
         true
     });
     if started {
@@ -114,6 +133,31 @@ fn on_server_message(channel: &str, payload: &[u8]) {
             "report" => {
                 let text = value.get("text").and_then(Value::as_str).unwrap_or("");
                 state.phase = Phase::Report(text.lines().map(str::to_string).collect());
+                state.recommendation = value.get("recommendation").and_then(|card| {
+                    Some(Recommendation {
+                        key: card.get("key")?.as_str()?.to_string(),
+                        value: card.get("value")?.as_u64()?,
+                    })
+                });
+            }
+            "plan" => {
+                let lines = value
+                    .get("lines")
+                    .and_then(Value::as_array)
+                    .map(|lines| {
+                        lines
+                            .iter()
+                            .filter_map(|line| line.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                state.confirming = Some(lines);
+                state.note = None;
+            }
+            "note" | "failed-note" => {
+                let text = value.get("text").and_then(Value::as_str).unwrap_or("");
+                state.confirming = None;
+                state.note = (!text.is_empty()).then(|| (text.to_string(), channel == "note"));
             }
             "failed" => {
                 let message = value
@@ -134,6 +178,40 @@ fn key_name(chord: &str) -> String {
     }
 }
 
+/// Whether the key is for the confirmation of a change; handles Enter and Esc then.
+fn on_confirmation_key(key: &str, out: &mut Vec<Submission>) -> bool {
+    let confirming = PANEL_STATE.with(|cell| cell.borrow().confirming.is_some());
+    if !confirming {
+        return false;
+    }
+    match key {
+        "enter" | "return" => out.push(to_server("confirm", &json!({}))),
+        "escape" => {
+            PANEL_STATE.with(|cell| cell.borrow_mut().confirming = None);
+            out.push(to_server("cancel", &json!({})));
+        }
+        _ => {}
+    }
+    true
+}
+
+/// The Apply key: asks the server side to prepare writing the recommended value.
+fn request_apply(agent: &str, out: &mut Vec<Submission>) {
+    let recommendation = PANEL_STATE.with(|cell| {
+        let state = cell.borrow();
+        match (&state.phase, &state.recommendation) {
+            (Phase::Report(_), Some(recommendation)) => Some(recommendation.clone()),
+            _ => None,
+        }
+    });
+    if let Some(recommendation) = recommendation {
+        out.push(to_server(
+            "plan",
+            &json!({"agent": agent, "value": recommendation.value}),
+        ));
+    }
+}
+
 fn on_key(chord: &str, out: &mut Vec<Submission>) {
     let (open, agent) = PANEL_STATE.with(|cell| {
         let state = cell.borrow();
@@ -142,12 +220,18 @@ fn on_key(chord: &str, out: &mut Vec<Submission>) {
     if !open {
         return;
     }
-    match key_name(chord).as_str() {
+    let key = key_name(chord);
+    if on_confirmation_key(&key, out) {
+        return;
+    }
+    match key.as_str() {
         "escape" => {
             PANEL_STATE.with(|cell| *cell.borrow_mut() = PanelState::default());
             out.push(Submission::new(Intent::CloseView(panel_target())));
         }
-        "s" | "r" => start_scan(&agent, out),
+        "s" => start_scan(&agent, out),
+        "a" => request_apply(&agent, out),
+        "r" => out.push(to_server("plan-revert", &json!({"agent": agent}))),
         "up" => PANEL_STATE.with(|cell| {
             let mut state = cell.borrow_mut();
             state.scroll = state.scroll.saturating_sub(1);
@@ -181,6 +265,12 @@ pub fn on_event(event: Event) -> Vec<Submission> {
 fn panel_lines(height: usize) -> Vec<String> {
     PANEL_STATE.with(|cell| {
         let state = cell.borrow();
+        if let Some(lines) = &state.confirming {
+            let mut shown = lines.clone();
+            shown.push(String::new());
+            shown.push("Enter writes the change, Esc cancels.".to_string());
+            return shown;
+        }
         match &state.phase {
             Phase::Idle => Vec::new(),
             Phase::Ready => vec![
@@ -200,13 +290,24 @@ fn panel_lines(height: usize) -> Vec<String> {
                 "S scans again, Esc closes.".to_string(),
             ],
             Phase::Report(lines) => {
-                let last_start = lines.len().saturating_sub(height.max(1));
+                // The last row is the footer: the outcome of the last apply or revert, else the keys.
+                let body = height.saturating_sub(1).max(1);
+                let last_start = lines.len().saturating_sub(body);
                 let start = state.scroll.min(last_start);
-                let mut shown: Vec<String> =
-                    lines.iter().skip(start).take(height).cloned().collect();
-                if let Some(footer) = shown.last_mut().filter(|_| lines.len() > height) {
-                    *footer = "Up/Down scroll, S scans again, Esc closes.".to_string();
+                let mut shown: Vec<String> = lines.iter().skip(start).take(body).cloned().collect();
+                let mut keys = vec!["S scans again"];
+                if state.recommendation.is_some() {
+                    keys.push("A applies the recommendation");
                 }
+                keys.push("R reverts the last apply");
+                let footer = match &state.note {
+                    Some((text, _)) => text.clone(),
+                    None if lines.len() > body => {
+                        format!("Up/Down scroll, {}, Esc closes.", keys.join(", "))
+                    }
+                    None => format!("{}, Esc closes.", keys.join(", ")),
+                };
+                shown.push(footer);
                 shown
             }
         }

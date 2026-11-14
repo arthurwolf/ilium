@@ -1,9 +1,8 @@
 //! Numeric settings binding. Rendering never owns persistence or runtime effects.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, EditorRow, KanbanBoardRow, Mode, SettingsTab,
-    TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, EditorRow, Mode, SettingsTab, TerminalRow,
 };
-use crate::value_config::{self, BoardNumber, PanelNumber, ScalarNumber};
+use crate::value_config::{self, PanelNumber, ScalarNumber};
 use crate::value_number::{NumberSpec, NumberValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,7 +12,6 @@ pub enum SettingsNumber {
     TerminalScrollback,
     TerminalEngineMemory,
     EditorAutosaveDelay,
-    Board(BoardNumber),
     ApiPort,
     VoiceVolume,
     NotificationCoalesce,
@@ -51,7 +49,6 @@ struct NumberSettingsValues<'a> {
     ui: &'a crate::config::UiSettings,
     terminal: &'a crate::config::TerminalSettings,
     editor: &'a crate::config::EditorSettings,
-    kanban_board: &'a crate::config::KanbanBoardSettings,
     api: &'a crate::config::ApiSettings,
     detection: Option<&'a ilium_ipc::AgentDetectionSettings>,
 }
@@ -139,15 +136,6 @@ impl SettingsNumber {
             SettingsTab::Editor if EditorRow::ALL.get(row) == Some(&EditorRow::AutosaveDelay) => {
                 Some(Self::EditorAutosaveDelay)
             }
-            SettingsTab::KanbanBoard => match KanbanBoardRow::ALL.get(row) {
-                Some(KanbanBoardRow::CardPreviewLines) => {
-                    Some(Self::Board(BoardNumber::CardPreviewLines))
-                }
-                Some(KanbanBoardRow::MinimumColumnWidth) => {
-                    Some(Self::Board(BoardNumber::MinimumColumnWidth))
-                }
-                None => None,
-            },
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
             SettingsTab::Padding if row == crate::padding_ui::ROW_THRESHOLD => {
                 Some(Self::PaddingThreshold)
@@ -176,8 +164,6 @@ impl SettingsNumber {
             Self::TerminalScrollback => "Scrollback budget (MiB)",
             Self::TerminalEngineMemory => "Parser pool budget (MiB; 0 = Off)",
             Self::EditorAutosaveDelay => "Autosave delay (ms)",
-            Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
-            Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
             Self::ApiPort => "HTTP API port",
             Self::PaddingThreshold => "Terminal columns",
         }
@@ -192,7 +178,6 @@ impl SettingsNumber {
             ui: &app.ui_settings,
             terminal: &app.terminal_settings,
             editor: &app.editor_settings,
-            kanban_board: &app.kanban_board_settings,
             api: &app.api_settings,
             detection: app.agent_detection_settings.as_ref(),
         })
@@ -207,7 +192,6 @@ impl SettingsNumber {
             ui: &config.ui,
             terminal: &config.terminal,
             editor: &config.editor,
-            kanban_board: &config.kanban_board,
             api: &config.api,
             detection: None,
         })
@@ -277,7 +261,6 @@ impl SettingsNumber {
                 value_config::editor_autosave_spec(),
                 values.editor.autosave_delay_ms.to_string(),
             ),
-            Self::Board(field) => (field.spec(), field.value(values.kanban_board).to_string()),
             Self::ApiPort => (ScalarNumber::ApiPort.spec(), values.api.port.to_string()),
         }
     }
@@ -809,11 +792,6 @@ impl App {
                 value_config::set_editor_autosave_delay(&mut settings, text)?;
                 ConfigurationChange::Editor(settings)
             }
-            SettingsNumber::Board(field) => {
-                let mut settings = self.kanban_board_settings;
-                field.set(&mut settings, text)?;
-                ConfigurationChange::Kanban(settings)
-            }
             SettingsNumber::ApiPort => {
                 let mut settings = self.api_settings;
                 settings.port = u16::try_from(ScalarNumber::ApiPort.parse(text)?)
@@ -888,14 +866,6 @@ impl App {
                     intent,
                 )?;
                 self.apply_editor_settings(settings);
-            }
-            ConfigurationChange::Kanban(settings) => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::Kanban(settings),
-                    intent,
-                )?;
-                self.kanban_board_settings = settings;
             }
             ConfigurationChange::Api(settings) => {
                 self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;

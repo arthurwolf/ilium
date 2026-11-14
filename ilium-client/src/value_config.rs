@@ -1,9 +1,7 @@
 //! Fresh configuration-domain validation for direct numeric controls.
 //! Domain values are returned or assigned only after exact range validation;
 //! the settings host retains runtime effects, persistence, and error display.
-use crate::config::{
-    self, EditorSettings, KanbanBoardSettings, LeftPanelSizingSettings, TerminalSettings,
-};
+use crate::config::{self, EditorSettings, LeftPanelSizingSettings, TerminalSettings};
 use crate::layout::{
     MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH, MIN_TREE_WIDTH,
 };
@@ -69,41 +67,6 @@ impl PanelNumber {
             Self::UnfocusedWidth => sizing.unfocused_width = value,
             Self::FocusedWidth => sizing.focused_width = value,
             Self::MinimumTerminalWidth => sizing.minimum_terminal_width = value,
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoardNumber {
-    CardPreviewLines,
-    MinimumColumnWidth,
-}
-impl BoardNumber {
-    pub const ALL: [Self; 2] = [Self::CardPreviewLines, Self::MinimumColumnWidth];
-    pub fn spec(self) -> NumberSpec {
-        match self {
-            Self::CardPreviewLines => integer_spec(
-                config::MIN_CARD_PREVIEW_LINES,
-                config::MAX_CARD_PREVIEW_LINES,
-            ),
-            Self::MinimumColumnWidth => integer_spec(
-                config::MIN_BOARD_COLUMN_WIDTH,
-                config::MAX_BOARD_COLUMN_WIDTH,
-            ),
-        }
-    }
-    pub fn value(self, settings: &KanbanBoardSettings) -> u16 {
-        match self {
-            Self::CardPreviewLines => settings.card_preview_lines,
-            Self::MinimumColumnWidth => settings.minimum_column_width,
-        }
-    }
-    pub fn set(self, settings: &mut KanbanBoardSettings, text: &str) -> Result<(), String> {
-        let value = small_number(self.spec(), text)?;
-        match self {
-            Self::CardPreviewLines => settings.card_preview_lines = value,
-            Self::MinimumColumnWidth => settings.minimum_column_width = value,
         }
         Ok(())
     }
@@ -261,17 +224,6 @@ mod tests {
         assert_eq!(editor.autosave_delay_ms, 1101);
         assert!(set_editor_autosave_delay(&mut editor, "249").is_err());
         assert_eq!(editor.autosave_delay_ms, 1101);
-        let mut board = KanbanBoardSettings::default();
-        BoardNumber::CardPreviewLines.set(&mut board, "7").unwrap();
-        BoardNumber::MinimumColumnWidth
-            .set(&mut board, "37")
-            .unwrap();
-        assert_eq!(board.card_preview_lines, 7);
-        assert_eq!(board.minimum_column_width, 37);
-        assert!(BoardNumber::CardPreviewLines.set(&mut board, "11").is_err());
-        assert!(BoardNumber::MinimumColumnWidth
-            .set(&mut board, "9")
-            .is_err());
     }
     #[test]
     fn scalar_inventory_accepts_own_limits_and_rejects_outside_values() {

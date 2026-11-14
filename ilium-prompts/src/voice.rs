@@ -104,11 +104,6 @@ pub const VOICE_POLICY_RUN_THE_SHELL_COMMAND_V0_IN_A: &str = include_str!(concat
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/run-the-shell-command-v0-in-a.hbs"
 ));
-pub const VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY: &str =
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/templates/voice/policy/queue-this-prompt-to-be-submitted-automatically.hbs"
-    ));
 pub const VOICE_POLICY_BOARD_HAS_NO_COLUMN: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/board-has-no-column.hbs"
@@ -137,25 +132,6 @@ pub const VOICE_POLICY_PRESS_ENTER_AND_SUBMIT_WHAT_YOU_SEE: &str = include_str!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/press-enter-and-submit-what-you-see.hbs"
 ));
-pub const VOICE_POLICY_SCHEDULE_THIS_TERMINAL_INPUT_FOR_AUTOMATIC_SUBMISSION: &str =
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/templates/voice/policy/schedule-this-terminal-input-for-automatic-submission.hbs"
-    ));
-pub const VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY_2: &str =
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/templates/voice/policy/queue-this-prompt-to-be-submitted-automatically-2.hbs"
-    ));
-pub const VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/policy/runs-is-required-and-must-be-positive.hbs"
-));
-pub const VOICE_POLICY_QUEUE_THIS_PROMPT_FOR_AUTOMATIC_SUBMISSION_AFTER: &str =
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/templates/voice/policy/queue-this-prompt-for-automatic-submission-after.hbs"
-    ));
 pub const VOICE_POLICY_KILL_THE_ENTIRE_ILIUM_SESSION_AND_EVERY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/kill-the-entire-ilium-session-and-every.hbs"
@@ -424,18 +400,6 @@ pub const VOICE_EXECUTOR_SCROLLED_THE_TERMINAL: &str = include_str!(concat!(
 pub const VOICE_EXECUTOR_RETURNED_TO_LIVE_TERMINAL_OUTPUT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/returned-to-live-terminal-output.hbs"
-));
-pub const VOICE_EXECUTOR_SCHEDULED_TERMINAL_INPUT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/scheduled-terminal-input.hbs"
-));
-pub const VOICE_EXECUTOR_QUEUED_THE_PROMPT_FOR_THE_AGENT_S: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/queued-the-prompt-for-the-agent-s.hbs"
-));
-pub const VOICE_EXECUTOR_CLEARING_THE_PANE_S_PROMPT_QUEUE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/clearing-the-pane-s-prompt-queue.hbs"
 ));
 pub const VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -751,10 +715,6 @@ pub const VOICE_SETTINGS_INVALID_NEW_PANE_DIRECTORY_POLICY: &str = include_str!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/settings/invalid-new-pane-directory-policy.hbs"
 ));
-pub const VOICE_SETTINGS_INVALID_SESSION_RECOVERY_POLICY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/settings/invalid-session-recovery-policy.hbs"
-));
 pub const VOICE_SETTINGS_INVALID_INFERENCE_PROVIDER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/settings/invalid-inference-provider.hbs"
@@ -880,10 +840,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
         VOICE_POLICY_RUN_THE_SHELL_COMMAND_V0_IN_A,
     ),
     (
-        "voice/policy/queue-this-prompt-to-be-submitted-automatically",
-        VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY,
-    ),
-    (
         "voice/policy/board-has-no-column",
         VOICE_POLICY_BOARD_HAS_NO_COLUMN,
     ),
@@ -910,22 +866,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/policy/press-enter-and-submit-what-you-see",
         VOICE_POLICY_PRESS_ENTER_AND_SUBMIT_WHAT_YOU_SEE,
-    ),
-    (
-        "voice/policy/schedule-this-terminal-input-for-automatic-submission",
-        VOICE_POLICY_SCHEDULE_THIS_TERMINAL_INPUT_FOR_AUTOMATIC_SUBMISSION,
-    ),
-    (
-        "voice/policy/queue-this-prompt-to-be-submitted-automatically-2",
-        VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY_2,
-    ),
-    (
-        "voice/policy/runs-is-required-and-must-be-positive",
-        VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE,
-    ),
-    (
-        "voice/policy/queue-this-prompt-for-automatic-submission-after",
-        VOICE_POLICY_QUEUE_THIS_PROMPT_FOR_AUTOMATIC_SUBMISSION_AFTER,
     ),
     (
         "voice/policy/kill-the-entire-ilium-session-and-every",
@@ -1185,18 +1125,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/executor/returned-to-live-terminal-output",
         VOICE_EXECUTOR_RETURNED_TO_LIVE_TERMINAL_OUTPUT,
-    ),
-    (
-        "voice/executor/scheduled-terminal-input",
-        VOICE_EXECUTOR_SCHEDULED_TERMINAL_INPUT,
-    ),
-    (
-        "voice/executor/queued-the-prompt-for-the-agent-s",
-        VOICE_EXECUTOR_QUEUED_THE_PROMPT_FOR_THE_AGENT_S,
-    ),
-    (
-        "voice/executor/clearing-the-pane-s-prompt-queue",
-        VOICE_EXECUTOR_CLEARING_THE_PANE_S_PROMPT_QUEUE,
     ),
     (
         "voice/executor/target-is-not-an-editor-pane",
@@ -1503,10 +1431,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/settings/invalid-new-pane-directory-policy",
         VOICE_SETTINGS_INVALID_NEW_PANE_DIRECTORY_POLICY,
-    ),
-    (
-        "voice/settings/invalid-session-recovery-policy",
-        VOICE_SETTINGS_INVALID_SESSION_RECOVERY_POLICY,
     ),
     (
         "voice/settings/invalid-inference-provider",

@@ -17,9 +17,8 @@ use ilium_core::progress_timing::{
 use ilium_core::{
     task_progress_bucket, validate_branch_name, AgentAvailability, AgentClass, AgentExitOutcome,
     AgentProvider, BranchNameError, BuiltinAgentProvider, ContainerKind, ContainerNode,
-    NodeActivityUpdate, NodeId, NodeKind, PaneContentKind, PaneProgress, PaneTitleSource,
-    ProgressAttention, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus,
-    ProgressValidationError, PromptQueueDelivery, QueuedPrompt, ScheduledPaneInput,
+    NodeActivityUpdate, NodeId, PaneContentKind, PaneProgress, PaneTitleSource, ProgressAttention,
+    ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus, ProgressValidationError,
     SessionIdentityTransitionRule, SplitOrientation, StructureSource, TaskSignal, Tree, TreeError,
     MAXIMUM_PROGRESS_ERROR_BYTES, MAXIMUM_PROGRESS_ETA_SECONDS, MAXIMUM_PROGRESS_JOB_ID_BYTES,
     MAXIMUM_PROGRESS_MESSAGE_BYTES, MAXIMUM_PROGRESS_MONITOR_ERROR_BYTES, ROOT_ID,
@@ -107,21 +106,6 @@ fn pane_in_group() -> Result<(Tree, NodeId), TreeError> {
     let group = tree.add_group(ROOT_ID, "Work")?;
     let pane = tree.add_pane(group, "Shell", PaneContentKind::Terminal)?;
     Ok((tree, pane))
-}
-
-fn prompt_queue_len(tree: &Tree, pane: NodeId) -> Option<usize> {
-    match &tree.get(pane)?.kind {
-        NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
-        _ => None,
-    }
-}
-
-fn queued_prompt(text: &str) -> QueuedPrompt {
-    QueuedPrompt {
-        text: text.to_string(),
-        delivery: PromptQueueDelivery::Once,
-        attempted_delivery: false,
-    }
 }
 
 fn args(values: &[&str]) -> Vec<String> {
@@ -759,66 +743,6 @@ fn structure_source_labels_are_non_empty_and_distinct() {
     assert!(!manual.is_empty());
     assert!(!restructure.is_empty());
     assert_ne!(manual, restructure);
-}
-
-#[test]
-fn scheduled_input_requires_text_or_enter() {
-    let empty = ScheduledPaneInput {
-        execute_at_unix_millis: 1_000,
-        text: String::new(),
-        send_enter: false,
-    };
-    let enter_only = ScheduledPaneInput {
-        execute_at_unix_millis: 1_000,
-        text: String::new(),
-        send_enter: true,
-    };
-    let text_only = ScheduledPaneInput {
-        execute_at_unix_millis: 1_000,
-        text: "ls".to_string(),
-        send_enter: false,
-    };
-    assert!(!empty.has_input());
-    assert!(enter_only.has_input());
-    assert!(text_only.has_input());
-}
-
-#[test]
-fn whitespace_only_scheduled_text_counts_as_input() {
-    // The schedule sends the text as typed, so only an empty string is a no-op.
-    let whitespace = ScheduledPaneInput {
-        execute_at_unix_millis: 1_000,
-        text: "   ".to_string(),
-        send_enter: false,
-    };
-    assert!(whitespace.has_input());
-}
-
-#[test]
-fn prompt_queue_delivery_rejects_zero_remaining_runs_only() {
-    assert!(PromptQueueDelivery::Once.is_valid());
-    assert!(PromptQueueDelivery::Forever.is_valid());
-    assert!(PromptQueueDelivery::Times { remaining_runs: 1 }.is_valid());
-    assert!(!PromptQueueDelivery::Times { remaining_runs: 0 }.is_valid());
-}
-
-#[test]
-fn queued_prompt_rejects_blank_text() {
-    let empty = queued_prompt("");
-    let blank = queued_prompt(" \t ");
-    assert!(!empty.is_valid());
-    assert!(!blank.is_valid());
-    assert!(queued_prompt("run the tests").is_valid());
-}
-
-#[test]
-fn queued_prompt_propagates_invalid_delivery() {
-    let prompt = QueuedPrompt {
-        text: "run the tests".to_string(),
-        delivery: PromptQueueDelivery::Times { remaining_runs: 0 },
-        attempted_delivery: false,
-    };
-    assert!(!prompt.is_valid());
 }
 
 // ContainerKind, ContainerNode
@@ -1503,34 +1427,6 @@ fn invalidate_presentation_unknown_node_is_an_error() {
     let mut tree = Tree::new();
     assert!(matches!(
         tree.invalidate_presentation(NodeId(9_999)),
-        Err(TreeError::NodeNotFound(NodeId(9_999)))
-    ));
-}
-
-#[test]
-fn clear_prompt_queue_on_an_empty_queue_is_a_no_op() -> TestResult {
-    let (mut tree, pane) = pane_in_group()?;
-    tree.clear_prompt_queue(pane)?;
-    assert_eq!(prompt_queue_len(&tree, pane), Some(0));
-    Ok(())
-}
-
-#[test]
-fn clear_prompt_queue_empties_queued_entries() -> TestResult {
-    let (mut tree, pane) = pane_in_group()?;
-    tree.enqueue_prompt(pane, queued_prompt("one"))?;
-    tree.enqueue_prompt(pane, queued_prompt("two"))?;
-    assert_eq!(prompt_queue_len(&tree, pane), Some(2));
-    tree.clear_prompt_queue(pane)?;
-    assert_eq!(prompt_queue_len(&tree, pane), Some(0));
-    Ok(())
-}
-
-#[test]
-fn clear_prompt_queue_unknown_id_is_an_error() {
-    let mut tree = Tree::new();
-    assert!(matches!(
-        tree.clear_prompt_queue(NodeId(9_999)),
         Err(TreeError::NodeNotFound(NodeId(9_999)))
     ));
 }

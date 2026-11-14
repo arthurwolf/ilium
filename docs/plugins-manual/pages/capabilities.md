@@ -185,6 +185,7 @@ File scopes are the argument of `fs.read`, `fs.write` and `fs.watch`:
 - `agent-sessions:<agent>` holds transcripts and is H. It is read only.
 - `agent-config:<agent>` holds agent configuration. Reads are H. Writes and watches are refused; a plugin proposes changes with the H grant `agent-config.propose:<agent>`, and the host applies only what the user accepts.
 - `minecraft-saves` is the platform's saves folder.
+- `minecraft-java` is the platform's Minecraft Java folder (versions and resource packs), read only.
 - `path:<template>` is a path template. It starts with a placeholder (`{home}`, `{config}`,
   `{data}`, `{cache}`, `{project}`, `{worktrees}`) or with a literal absolute path. A literal path
   is always H. The template ends with a name or with `/**`. A `*` anywhere else is refused.

@@ -385,13 +385,9 @@ mod saved_runtime_tests {
             Box::new(MessageScene("synthetic saved host scene".into()))
         }));
         let settings = AmbientSettings::default();
-        host.sync(AmbientKind::VoxelLandscape, &settings, Duration::ZERO);
+        host.sync(AmbientKind::NightLights, &settings, Duration::ZERO);
         host.release();
-        host.sync(
-            AmbientKind::VoxelLandscape,
-            &settings,
-            Duration::from_secs(1),
-        );
+        host.sync(AmbientKind::NightLights, &settings, Duration::from_secs(1));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
         assert!(Arc::ptr_eq(&seen[0], &seen[1]));

@@ -156,36 +156,44 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "settings": [
       {
-        "kind": "section",
-        "id": "session-recovery",
-        "tab": "session",
-        "placement": "end",
-        "title": "Recovery",
-        "scope": "server",
-        "rows": [
+        "kind": "tab",
+        "id": "session",
+        "title": "Session",
+        "sections": [
           {
-            "type": "toggle",
-            "key": "backups_enabled",
-            "title": "Back up the session snapshot",
-            "default": true
-          },
-          {
-            "type": "choice",
-            "key": "recovery_policy",
-            "title": "After a crash",
-            "default": "restore_automatically",
-            "options": [
+            "id": "session-recovery",
+            "title": "Recovery",
+            "scope": "server",
+            "rows": [
               {
-                "value": "restore_automatically",
-                "title": "Restore automatically"
+                "type": "toggle",
+                "key": "backups_enabled",
+                "title": "Back up the session snapshot",
+                "default": true,
+                "kernel_tab": "session",
+                "kernel_key": "backups_enabled"
               },
               {
-                "value": "ask_before_restore",
-                "title": "Ask before restoring"
-              },
-              {
-                "value": "start_fresh",
-                "title": "Start fresh"
+                "type": "choice",
+                "key": "recovery_policy",
+                "title": "After a crash",
+                "default": "restore_automatically",
+                "kernel_tab": "session",
+                "kernel_key": "recovery_policy",
+                "options": [
+                  {
+                    "value": "restore_automatically",
+                    "title": "Restore automatically"
+                  },
+                  {
+                    "value": "ask_before_restore",
+                    "title": "Ask before restoring"
+                  },
+                  {
+                    "value": "start_fresh",
+                    "title": "Start fresh"
+                  }
+                ]
               }
             ]
           }

@@ -67,6 +67,12 @@ impl App {
                 self.action_freeze_agent(node);
                 true
             }
+            ClientEffect::SetTreeRowLayout(layout) => {
+                if self.ui_settings.tree_row_layout != layout {
+                    self.settings_set_tree_row_layout(layout);
+                }
+                true
+            }
         }
     }
 

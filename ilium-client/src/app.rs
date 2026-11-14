@@ -30,11 +30,9 @@ use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
 use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
-use crate::board::BoardPane;
 use crate::config::{
-    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings,
-    KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings,
-    UiSettings, VoiceSettings,
+    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings, KeyboardSettings,
+    LeftPanelSizingMode, TerminalSettings, UiSettings, VoiceSettings,
 };
 use crate::cost_settings::{CostRow, CostSettings};
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
@@ -201,15 +199,6 @@ fn selected_inference_model(settings: &InferenceSettings) -> String {
     settings.selected_model().to_string()
 }
 
-/// Gives an existing board path one stable lexical identity without using a
-/// currently selected project as an implicit base directory.
-fn normalize_board_path(path: PathBuf) -> PathBuf {
-    // Through `ilium_platform`, not `std`: a board path is written into the
-    // board definition and shown to the user, and Windows' own canonical form
-    // carries an extended-length `\\?\` prefix that should never reach either.
-    normalize_path_lexically(&path)
-}
-
 /// Cycles through system default plus every discovered CPAL device. A saved
 /// device that disappeared is treated as system default on the next step.
 fn stepped_optional_device(
@@ -374,15 +363,6 @@ pub enum Mode {
     ConfirmWorkspaceCloseOffer(NodeId),
     /// A popup a plugin opened; the plugin owns the content, the kernel the chrome.
     PluginPopup(crate::plugin_host::popup::PopupState),
-    /// Board creation owns its storage choice and destination before a tree
-    /// node exists, so a cancelled dialog cannot leave a phantom pane.
-    CreateBoard(CreateBoardState),
-    /// Path picker stacked over its exact `CreateBoard` parent state.
-    BoardPathPicker(Box<ExplorerOverlay>),
-    BoardCardPrompt(NodeId, TextPromptState),
-    BoardColumnPrompt(NodeId, TextPromptState),
-    BoardRenamePrompt(NodeId, BoardRenameTarget, TextPromptState),
-    BoardDeleteConfirm(NodeId, BoardDeleteTarget),
     /// A Yes/No confirmation is pending before closing `NodeId`.
     ConfirmClose(NodeId),
     /// A separate confirmation before removing an Ilium-owned worktree.
@@ -483,10 +463,8 @@ pub enum SettingsTab {
     Animations,
     Terminal,
     Editor,
-    Session,
     Git,
     Keyboard,
-    KanbanBoard,
     Sound,
     VoiceControl,
     AgentMonitoring,
@@ -655,7 +633,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 25] = [
+    pub const ALL: [SettingsTab; 24] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
@@ -665,9 +643,7 @@ impl SettingsTab {
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
-        Self::Session,
         Self::Git,
-        Self::KanbanBoard,
         Self::Animations,
         Self::Sound,
         Self::VoiceControl,
@@ -698,10 +674,8 @@ impl SettingsTab {
             Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
-            Self::Session => "Session",
             Self::Git => "Git",
             Self::Keyboard => "Keyboard",
-            Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
             Self::AgentMonitoring => "Agent Monitoring",
@@ -931,15 +905,6 @@ impl EditorRow {
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionRow {
-    RecoveryPolicy,
-    BackupsEnabled,
-}
-impl SessionRow {
-    pub const ALL: [Self; 2] = [Self::RecoveryPolicy, Self::BackupsEnabled];
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitRow {
     DefaultWhere,
     BranchPrefix,
@@ -997,19 +962,6 @@ impl ApiRow {
 
 impl DebugRow {
     pub const ALL: [Self; 1] = [Self::FileLogging];
-}
-
-/// One live-persisted layout control in the Kanban Board settings tab.
-/// Keeping both controls in this registry gives keyboard and mouse input the
-/// same selected-row contract as the Appearance and Sound tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KanbanBoardRow {
-    CardPreviewLines,
-    MinimumColumnWidth,
-}
-
-impl KanbanBoardRow {
-    pub const ALL: [KanbanBoardRow; 2] = [Self::CardPreviewLines, Self::MinimumColumnWidth];
 }
 
 /// Rows in the Sound tab. Keeping source, selected file, preview, and event
@@ -1143,7 +1095,6 @@ pub struct SettingsState {
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
-    pub tree_layout_editor: Option<crate::tree_layout_settings::EditorState>,
     pub toolbar_picker: Option<usize>,
     /// Full-screen catalogue picker layered over the Icons tab.
     pub icon_picker: Option<IconPickerState>,
@@ -1281,7 +1232,6 @@ impl SettingsState {
             animation_detail_show_help: false,
             animation_detail_scroll: 0,
             icons_preview_real: false,
-            tree_layout_editor: None,
             toolbar_picker: None,
             icon_picker: None,
             keyboard_picker: None,
@@ -1712,45 +1662,6 @@ pub struct ExplorerFileMenu {
     pub area: Rect,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoardStorageKind {
-    Folder,
-    MarkdownFile,
-}
-
-impl BoardStorageKind {
-    pub const ALL: [Self; 2] = [Self::Folder, Self::MarkdownFile];
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Folder => "Folder columns + Markdown cards",
-            Self::MarkdownFile => "One Markdown file",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateBoardState {
-    /// The destination captured when the dialog opened. Keeping it stable
-    /// ensures a later selection change cannot move a board into another project.
-    pub parent_group: NodeId,
-    pub name: TextPromptState,
-    pub path: TextPromptState,
-    pub storage_kind: BoardStorageKind,
-    pub editing_path: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoardRenameTarget {
-    Card,
-    Column,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoardDeleteTarget {
-    Card,
-    Column,
-}
-
 /// The live, client-local half of a pane. For a PTY-backed pane this is
 /// only a render cache fed by `ServerEvent::ScreenUpdate` -- see
 /// `crate::terminal_view`'s module docs for why ilium-client owns no PTY
@@ -1759,7 +1670,6 @@ pub enum BoardDeleteTarget {
 pub enum PaneRuntime {
     Terminal(Box<TerminalView>),
     Editor(Box<EditorPane>),
-    Board(Box<BoardPane>),
 }
 
 /// A background LLM title-inference worker `App` has decided to start but
@@ -2042,6 +1952,9 @@ pub struct App {
     /// The plugin and toast id whose toast the status line shows, so `dismiss-toast` can
     /// clear exactly that toast.
     pub(crate) plugin_toast: Option<(String, String)>,
+    /// The Settings screen set aside while a plugin popup that a settings page asked for is open.
+    /// The popup replaces the whole screen, so closing it brings the page back where it was.
+    pub(crate) settings_suspended_for_popup: Option<Box<SettingsState>>,
     pub(crate) external_open: Option<crate::external_open::ExternalOpenService>,
     pub(crate) external_open_status_storage: Option<ilium_execution::Retention>,
     /// Clipboard ownership must outlive the copy action on Linux, where the
@@ -2142,8 +2055,6 @@ pub struct App {
     /// than keymap's startup-only global, so Settings can apply a remap at the
     /// exact moment it is selected and Help always renders the same map.
     pub keybindings: Vec<KeyBinding>,
-    /// Live card-preview settings shared by every board pane in this client.
-    pub kanban_board_settings: KanbanBoardSettings,
     /// Panel padding (see [`crate::padding`]).
     pub padding_settings: crate::padding::PaddingSettings,
     /// Live user-global sound choices and the catalogue discovered once on
@@ -2177,7 +2088,6 @@ pub struct App {
     pub(crate) is_agent_setup_policy_available: bool,
     pub terminal_settings: TerminalSettings,
     pub editor_settings: EditorSettings,
-    pub session_settings: SessionSettings,
     pub git_settings: GitSettings,
     pub git_settings_error: Option<String>,
     /// Live voice settings and transport-neutral status. The actual service
@@ -2472,9 +2382,6 @@ pub struct App {
         Option<(ilium_execution::Client, std::sync::Arc<tokio::sync::Notify>)>,
     pub(crate) configuration_files: Option<crate::filesystem::configurations::ConfigurationFiles>,
     pub(crate) configuration_admission: crate::filesystem::ConfigurationAdmission,
-    pub(crate) board_files: Option<crate::filesystem::boards::BoardFiles>,
-    pub(crate) pending_board_loads: Vec<NodeId>,
-    pub(crate) pending_board_dialogs: Vec<crate::filesystem::board_app::BoardDialogReceipt>,
     pub(crate) onboarding_dismiss_pending: bool,
     pub(crate) pending_editor_loads: Vec<crate::filesystem::editors::LoadTarget>,
     /// Instance identities whose full editor model is temporarily owned by a
@@ -2654,17 +2561,6 @@ pub(crate) struct PendingPaneFocus {
     pub(crate) parent_group: Option<NodeId>,
 }
 
-/// Returns the first millisecond at which integer frame selection based on
-/// `remaining_millis / frame_millis` can change.
-fn scheduled_input_frame_delay(remaining_millis: u64, frame_millis: u64) -> Duration {
-    let delay_millis = if remaining_millis == 0 {
-        1
-    } else {
-        remaining_millis % frame_millis + 1
-    };
-    Duration::from_millis(delay_millis.min(frame_millis))
-}
-
 /// Returns the next boundary for a frame index derived from elapsed time.
 fn elapsed_frame_delay(elapsed_millis: u128, frame_millis: u64) -> Duration {
     let remainder = elapsed_millis % u128::from(frame_millis);
@@ -2766,6 +2662,7 @@ impl App {
             modal_stack: Vec::new(),
             status_message: None,
             plugin_toast: None,
+            settings_suspended_for_popup: None,
             external_open: None,
             external_open_status_storage: None,
             terminal_clipboard: None,
@@ -2818,7 +2715,6 @@ impl App {
             progress_display_now_unix_millis: crate::wall_clock::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
-            kanban_board_settings: KanbanBoardSettings::default(),
             padding_settings: crate::padding::PaddingSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             notification_settings: ilium_sound::NotificationSettings::default(),
@@ -2839,7 +2735,6 @@ impl App {
             is_agent_setup_policy_available: true,
             terminal_settings: TerminalSettings::default(),
             editor_settings: EditorSettings::default(),
-            session_settings: SessionSettings::default(),
             git_settings: GitSettings::default(),
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
@@ -3086,21 +2981,6 @@ impl App {
                     None
                 }
             },
-            board_files: {
-                #[cfg(test)]
-                {
-                    Some(crate::filesystem::boards::BoardFiles::new(
-                        crate::execution::test_client(),
-                        std::sync::Arc::new(tokio::sync::Notify::new()),
-                    ))
-                }
-                #[cfg(not(test))]
-                {
-                    None
-                }
-            },
-            pending_board_loads: Vec::new(),
-            pending_board_dialogs: Vec::new(),
             onboarding_dismiss_pending: false,
             pending_editor_loads: Vec::new(),
             editor_model_loans: HashMap::new(),
@@ -3242,9 +3122,6 @@ impl App {
                         Some(Mode::WorktreeManager(parent)) => {
                             host.apply_prune_branch_choice(parent, &id)
                         }
-                        Some(Mode::CreateBoard(parent)) => {
-                            host.apply_board_storage_choice(parent, &id)
-                        }
                         Some(Mode::CreateAgentFromLine(parent)) => {
                             host.apply_agent_from_line_provider(parent, &id)
                         }
@@ -3353,11 +3230,10 @@ impl App {
                 self.animation_settings.kind,
                 model.effective_kind()
             );
-            let target = AnimationControlTarget::new_for_animation(
+            let target = AnimationControlTarget::new(
                 self.animation_write_path()?,
                 identity,
                 scope,
-                self.animation_settings.kind,
                 control,
             )?;
             crate::value_dialog_host::ValueDialogHost::animation(target)
@@ -3452,13 +3328,6 @@ impl App {
                 ..
             }
         );
-        let session_recovery_saved = matches!(
-            host.target,
-            crate::value_dialog_host::ValueTarget::SettingsChoice {
-                field: crate::value_settings_choice::SettingsChoice::SessionRecovery,
-                ..
-            }
-        );
         if matches!(
             host.target,
             crate::value_dialog_host::ValueTarget::SettingsChoice {
@@ -3475,9 +3344,7 @@ impl App {
             self.pop_modal();
             if self.status_message.as_deref() == Some("Saving settings…") {
                 self.status_message = Some(
-                    if session_recovery_saved {
-                        "Recovery policy saved; applies when the server next starts"
-                    } else if api_port_saved {
+                    if api_port_saved {
                         "HTTP API port saved; restart the server to apply it"
                     } else {
                         "Settings saved to disk"
@@ -5685,9 +5552,6 @@ impl App {
             }
         }
     }
-    pub fn apply_session_settings(&mut self, settings: SessionSettings) {
-        self.session_settings = settings;
-    }
 
     pub fn apply_git_settings(&mut self, settings: GitSettings) {
         self.git_settings = settings;
@@ -6233,22 +6097,6 @@ impl App {
             "editor settings",
         );
     }
-    fn persist_session_settings(&mut self, previous: SessionSettings) -> bool {
-        let Some(directory) = self.config_dir.clone() else {
-            return true;
-        };
-        let desired = self.session_settings;
-        if let Err(error) = self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::Session { previous, desired },
-            crate::filesystem::configurations::ConfigurationIntent::Session { desired },
-        ) {
-            self.session_settings = previous;
-            self.status_message = Some(error);
-            return false;
-        }
-        true
-    }
 
     /// [`apply_ui_settings`] plus a best-effort write-through to
     /// `config.toml` -- what every settings-screen control actually calls.
@@ -6684,51 +6532,6 @@ impl App {
                 .navigation_shortcut_base
                 .stepped(direction),
         );
-    }
-
-    /// Applies and persists the global card-preview height used by all boards.
-    pub fn settings_adjust_card_preview_lines(&mut self, direction: i32) {
-        let current = i32::from(self.kanban_board_settings.card_preview_lines);
-        let card_preview_lines = (current + direction).clamp(
-            i32::from(crate::config::MIN_CARD_PREVIEW_LINES),
-            i32::from(crate::config::MAX_CARD_PREVIEW_LINES),
-        ) as u16;
-        self.kanban_board_settings.card_preview_lines = card_preview_lines;
-        self.persist_kanban_board_settings();
-    }
-
-    /// Applies and persists the minimum terminal width shared by every board
-    /// column before horizontal scrolling takes over.
-    pub fn settings_adjust_board_column_width(&mut self, direction: i32) {
-        let current = i32::from(self.kanban_board_settings.minimum_column_width);
-        let minimum_column_width = (current + direction).clamp(
-            i32::from(crate::config::MIN_BOARD_COLUMN_WIDTH),
-            i32::from(crate::config::MAX_BOARD_COLUMN_WIDTH),
-        ) as u16;
-        self.kanban_board_settings.minimum_column_width = minimum_column_width;
-        self.persist_kanban_board_settings();
-    }
-
-    /// Writes the complete Kanban presentation table after either live
-    /// control changes, preserving unrelated global configuration tables.
-    fn persist_kanban_board_settings(&mut self) {
-        self.persist_configuration(
-            crate::filesystem::configuration::ConfigurationChange::Kanban(
-                self.kanban_board_settings,
-            ),
-            "Kanban Board settings",
-        );
-    }
-
-    /// Adjusts the selected Kanban row without duplicating persistence logic
-    /// in keyboard and mouse dispatch.
-    pub fn settings_adjust_kanban_board_row(&mut self, row: KanbanBoardRow, direction: i32) {
-        match row {
-            KanbanBoardRow::CardPreviewLines => self.settings_adjust_card_preview_lines(direction),
-            KanbanBoardRow::MinimumColumnWidth => {
-                self.settings_adjust_board_column_width(direction)
-            }
-        }
     }
 
     /// Installs startup sound settings without emitting an IPC update. The
@@ -8409,7 +8212,14 @@ impl App {
                 }
                 crate::plugin_host::host::Output::Redraw => needs_redraw = true,
                 crate::plugin_host::host::Output::PopupOpened { plugin, popup } => {
-                    if matches!(self.mode, Mode::Normal) {
+                    if matches!(self.mode, Mode::Normal | Mode::Settings(_)) {
+                        // A popup over Settings returns to the page; one over the normal view
+                        // leaves no page behind.
+                        self.settings_suspended_for_popup =
+                            match std::mem::replace(&mut self.mode, Mode::Normal) {
+                                Mode::Settings(settings) => Some(settings),
+                                _ => None,
+                            };
                         self.mode = Mode::PluginPopup(crate::plugin_host::popup::PopupState::new(
                             plugin, popup,
                         ));
@@ -8423,7 +8233,7 @@ impl App {
                     if matches!(&self.mode, Mode::PluginPopup(open)
                         if open.plugin == plugin && open.popup == popup)
                     {
-                        self.mode = Mode::Normal;
+                        self.close_plugin_popup_mode();
                     }
                     needs_redraw = true;
                 }
@@ -8651,18 +8461,7 @@ impl App {
         let Some(control) = control else {
             return;
         };
-        let stepped = match crate::value_animation::stepped_animation_number(
-            self.animation_settings.kind,
-            &control,
-            direction,
-        ) {
-            Ok(Some(value)) => Some(value),
-            Ok(None) => control.stepped(direction),
-            Err(message) => {
-                self.status_message = Some(message);
-                return;
-            }
-        };
+        let stepped = control.stepped(direction);
         // A step that could not move (the only other option is disabled)
         // tells the user why instead of silently doing nothing.
         if stepped.as_ref() == Some(&control.value) {
@@ -9760,30 +9559,6 @@ impl App {
         self.apply_editor_settings(settings);
         self.persist_editor_settings();
     }
-    pub fn settings_adjust_session_row(&mut self, row: SessionRow, direction: i32) {
-        let previous = self.session_settings;
-        match row {
-            SessionRow::RecoveryPolicy => {
-                self.session_settings.recovery_policy =
-                    self.session_settings.recovery_policy.stepped(direction);
-            }
-            SessionRow::BackupsEnabled => {
-                self.session_settings.backups_enabled = !self.session_settings.backups_enabled;
-            }
-        }
-        if !self.persist_session_settings(previous) {
-            return;
-        }
-        self.status_message = Some(match row {
-            SessionRow::RecoveryPolicy => {
-                "Recovery policy applies when the server next starts".to_string()
-            }
-            SessionRow::BackupsEnabled if self.session_settings.backups_enabled => {
-                "Automatic session backups enabled".to_string()
-            }
-            SessionRow::BackupsEnabled => "Automatic session backups disabled".to_string(),
-        });
-    }
 
     /// Records the pointer's last reported cell, driving the tree-panel
     /// hover-expand animation in `tick_layout_animation`.
@@ -9914,11 +9689,9 @@ impl App {
         self.is_spatial_animation_active() || self.animation_requirements(Instant::now()).is_active
     }
 
-    /// Gathers every non-spatial animation clock, including scheduled-input
-    /// countdowns, while visiting the pane tree exactly once.
+    /// Gathers every non-spatial animation clock while visiting the pane tree
+    /// exactly once.
     fn animation_requirements(&self, now: Instant) -> AnimationRequirements {
-        const SCHEDULED_INPUT_FRAME_MILLIS: u64 = 220;
-
         let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
         let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         let mut requirements = AnimationRequirements::default();
@@ -10012,27 +9785,10 @@ impl App {
             }
         }
 
-        let scheduled_input_now = crate::wall_clock::unix_millis_now();
         for node in self.tree.panes() {
-            let NodeKind::Pane {
-                status,
-                scheduled_input,
-                ..
-            } = &node.kind
-            else {
+            let NodeKind::Pane { status, .. } = &node.kind else {
                 continue;
             };
-
-            if let Some(scheduled_input) = scheduled_input {
-                requirements.is_active = true;
-                let remaining = scheduled_input
-                    .execute_at_unix_millis
-                    .saturating_sub(scheduled_input_now);
-                retain_minimum_delay(
-                    &mut requirements.next_ordinary_delay,
-                    scheduled_input_frame_delay(remaining, SCHEDULED_INPUT_FRAME_MILLIS),
-                );
-            }
 
             let frame_millis = match status.agent_state().map(ilium_core::AgentState::activity) {
                 Some(activity) => match activity {
@@ -12129,73 +11885,6 @@ impl App {
         self.queue_request(ClientRequest::ChangeProjectFolder { project_id, path })
     }
 
-    /// Adds a board pane backed by an existing Markdown file. The file is
-    /// not modified while creating the pane; the board adapter reads the
-    /// existing headings/bullets on the next tree snapshot.
-    pub fn request_new_markdown_board(&mut self, parent_group: NodeId, path: PathBuf) {
-        let path = self.resolve_board_path_in_project(parent_group, path);
-        if let Some(existing_pane) = self.board_pane_for_path(&path) {
-            self.focus_pane(existing_pane);
-            self.status_message = Some("That board file is already open".to_string());
-            return;
-        }
-        let storage = ilium_core::BoardStorage::MarkdownFile { path };
-        let result = self
-            .board_files
-            .as_mut()
-            .ok_or_else(|| "Board file worker unavailable".to_owned())
-            .and_then(|files| {
-                files.request(
-                    crate::filesystem::boards::BoardLoadTarget::Open {
-                        parent_group,
-                        storage: storage.clone(),
-                    },
-                    storage,
-                    false,
-                )
-            });
-        self.status_message = Some(match result {
-            Ok(()) => "Loading board…".into(),
-            Err(error) => error,
-        });
-    }
-
-    /// Creates a board beside an existing Markdown editor, first flushing
-    /// any unsaved editor buffer so the board reads the exact contents the
-    /// user sees instead of an older on-disk revision.
-    pub fn request_board_from_markdown_editor(&mut self, editor_pane_id: NodeId) {
-        let dirty_path = match self.panes.get(&editor_pane_id) {
-            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() && editor.dirty => {
-                editor.path.clone()
-            }
-            _ => None,
-        };
-        if let Some(path) = dirty_path {
-            if let Err(error) = self.enqueue_editor_save(
-                editor_pane_id,
-                path,
-                crate::filesystem::editors::SavePurpose::OpenAsBoard,
-            ) {
-                self.status_message = Some(format!(
-                    "Could not save Markdown before opening board: {error}"
-                ));
-            }
-            return;
-        }
-        let path = match self.panes.get_mut(&editor_pane_id) {
-            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() => editor.path.clone(),
-            _ => self.restored_editor_paths.get(&editor_pane_id).cloned(),
-        };
-        let Some(path) = path.filter(|path| crate::editor_pane::is_markdown_path(path)) else {
-            self.status_message = Some("This editor is not backed by a Markdown file".to_string());
-            return;
-        };
-        let parent_group = self
-            .normal_group_for_node(editor_pane_id)
-            .unwrap_or(ROOT_ID);
-        self.request_new_markdown_board(parent_group, path);
-    }
-
     pub fn open_explorer_file_menu(
         &mut self,
         overlay: Box<ExplorerOverlay>,
@@ -12219,258 +11908,6 @@ impl App {
             ),
         });
         self.push_modal_over(Mode::Explorer(overlay, target_group), menu);
-    }
-
-    pub fn open_create_board_dialog(&mut self) {
-        let parent_group = self.group_for_new_node();
-        let board_directory = self
-            .project_cwd_for_node(parent_group)
-            .join(".ilium")
-            .join("boards");
-        let default_path = board_directory.join("board.md");
-        let occupied = self
-            .tree
-            .panes()
-            .filter_map(|node| match &node.kind {
-                NodeKind::Pane {
-                    board_storage: Some(storage),
-                    ..
-                } => Some(storage.path().to_path_buf()),
-                _ => None,
-            })
-            .take(33)
-            .collect();
-        if let Some(files) = &mut self.board_files {
-            if let Err(error) = files.suggest(
-                parent_group,
-                default_path.clone(),
-                board_directory,
-                occupied,
-            ) {
-                self.status_message = Some(error);
-            }
-        }
-        self.mode = Mode::CreateBoard(CreateBoardState {
-            parent_group,
-            name: TextPromptState::new("Board"),
-            path: TextPromptState::new(default_path.display().to_string()),
-            storage_kind: BoardStorageKind::MarkdownFile,
-            editing_path: false,
-        });
-    }
-
-    pub fn commit_create_board(&mut self, state: &CreateBoardState) {
-        use ilium_core::BoardStorage;
-        if state.name.buf.len() > 8192 || state.path.buf.len() > 64 * 1024 {
-            self.status_message = Some("Board creation command exceeds retained byte limit".into());
-            self.mode = Mode::CreateBoard(state.clone());
-            return;
-        }
-        let entered_path = PathBuf::from(state.path.buf.trim());
-        if entered_path.as_os_str().is_empty() {
-            self.status_message = Some("Board storage path is required".to_string());
-            self.mode = Mode::CreateBoard(state.clone());
-            return;
-        }
-        let path = self.resolve_board_path_in_project(state.parent_group, entered_path);
-        let storage = match state.storage_kind {
-            BoardStorageKind::Folder => BoardStorage::Folder { path },
-            BoardStorageKind::MarkdownFile => BoardStorage::MarkdownFile { path },
-        };
-        if let Some(existing_pane) = self.board_pane_for_path(storage.path()) {
-            self.focus_pane(existing_pane);
-            self.status_message = Some("That board storage is already open".to_string());
-            self.mode = Mode::Normal;
-            return;
-        }
-        self.mode = Mode::CreateBoard(state.clone());
-        let result = self
-            .board_files
-            .as_mut()
-            .ok_or_else(|| "Board file worker unavailable".to_owned())
-            .and_then(|files| {
-                files.request(
-                    crate::filesystem::boards::BoardLoadTarget::Create(
-                        state.clone(),
-                        storage.clone(),
-                    ),
-                    storage,
-                    true,
-                )
-            });
-        self.status_message = Some(match result {
-            Ok(()) => "Creating board…".into(),
-            Err(error) => error,
-        });
-    }
-
-    /// Resolves user-entered relative board storage against the canonical
-    /// project directory and normalizes lexical `.`/`..` components. Existing
-    /// paths additionally use the filesystem's canonical identity.
-    fn resolve_board_path_in_project(&self, project_node: NodeId, path: PathBuf) -> PathBuf {
-        let absolute_path = if path.is_absolute() {
-            path
-        } else {
-            self.project_cwd_for_node(project_node).join(path)
-        };
-        normalize_path_lexically(&absolute_path)
-    }
-
-    /// Finds the one board pane already owning `path`, if any. Board storage
-    /// is single-owner inside a session because each pane otherwise carries an
-    /// independent client-local document copy capable of stale overwrites.
-    pub(crate) fn board_pane_for_path(&self, path: &Path) -> Option<NodeId> {
-        let candidate = normalize_board_path(path.to_path_buf());
-        self.tree.panes().find_map(|node| {
-            let NodeKind::Pane {
-                board_storage: Some(storage),
-                ..
-            } = &node.kind
-            else {
-                return None;
-            };
-            let path = match self.panes.get(&node.id) {
-                Some(PaneRuntime::Board(board)) => board.storage.path(),
-                _ => storage.path(),
-            };
-            (normalize_board_path(path.to_path_buf()) == candidate).then_some(node.id)
-        })
-    }
-
-    pub fn open_board_path_picker(&mut self, state: CreateBoardState) {
-        let picker_root = self.project_cwd_for_node(state.parent_group);
-        let picker = match state.storage_kind {
-            BoardStorageKind::Folder => {
-                self.open_explorer_overlay(&picker_root, Some("Use Folder"))
-            }
-            BoardStorageKind::MarkdownFile => self.open_explorer_overlay(&picker_root, None),
-        };
-        match picker {
-            Ok(picker) => self.push_modal_over(
-                Mode::CreateBoard(state),
-                Mode::BoardPathPicker(Box::new(picker)),
-            ),
-            Err(error) => {
-                self.status_message = Some(format!("Could not open board path picker: {error}"));
-                self.mode = Mode::CreateBoard(state);
-            }
-        }
-    }
-
-    /// Closes the stacked path picker and optionally applies its selection to
-    /// the suspended board form. A broken parent invariant degrades to Normal
-    /// with a visible error instead of leaving an unreachable modal layer.
-    pub fn return_to_create_board(&mut self, selected_path: Option<PathBuf>) {
-        self.pop_modal();
-        let Mode::CreateBoard(state) = &mut self.mode else {
-            self.close_modal_flow();
-            self.status_message = Some("Board path picker lost its parent dialog".to_string());
-            return;
-        };
-        if let Some(path) = selected_path {
-            state.path = TextPromptState::new(path.display().to_string());
-            state.editing_path = true;
-        }
-    }
-
-    pub fn action_add_board_card(&mut self, pane_id: NodeId) {
-        self.mode = Mode::BoardCardPrompt(pane_id, TextPromptState::new(""));
-    }
-
-    pub fn commit_board_card(&mut self, pane_id: NodeId, title: String) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
-            return;
-        };
-        match board.add_card(title) {
-            Ok(()) => {
-                self.remember_board_modal(pane_id);
-                self.status_message = Some("Saving card…".to_string());
-            }
-            Err(error) => self.status_message = Some(error),
-        }
-    }
-
-    pub fn action_add_board_column(&mut self, pane_id: NodeId) {
-        self.mode = Mode::BoardColumnPrompt(pane_id, TextPromptState::new(""));
-    }
-
-    pub fn commit_board_column(&mut self, pane_id: NodeId, title: String) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
-            return;
-        };
-        match board.add_column(title) {
-            Ok(()) => {
-                self.remember_board_modal(pane_id);
-                self.status_message = Some("Saving column…".to_string());
-            }
-            Err(error) => self.status_message = Some(error),
-        }
-    }
-
-    pub fn action_rename_board_selection(&mut self, pane_id: NodeId) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get(&pane_id) else {
-            return;
-        };
-        let (target, title) = match board.columns.get(board.selected_column).and_then(|column| {
-            board
-                .selected_card
-                .and_then(|selected_card| column.cards.get(selected_card))
-        }) {
-            Some(card) => (BoardRenameTarget::Card, card.title.clone()),
-            None => match board.columns.get(board.selected_column) {
-                Some(column) => (BoardRenameTarget::Column, column.title.clone()),
-                None => return,
-            },
-        };
-        self.mode = Mode::BoardRenamePrompt(pane_id, target, TextPromptState::new(title));
-    }
-
-    pub fn commit_board_rename(
-        &mut self,
-        pane_id: NodeId,
-        target: BoardRenameTarget,
-        title: String,
-    ) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
-            return;
-        };
-        let result = match target {
-            BoardRenameTarget::Card => board.rename_selected_card(title),
-            BoardRenameTarget::Column => board.rename_selected_column(title),
-        };
-        if let Err(error) = result {
-            self.status_message = Some(error);
-        } else {
-            self.remember_board_modal(pane_id);
-        }
-    }
-
-    pub fn action_delete_board_selection(&mut self, pane_id: NodeId) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get(&pane_id) else {
-            return;
-        };
-        let target = if board.selected_card.is_some() {
-            BoardDeleteTarget::Card
-        } else {
-            BoardDeleteTarget::Column
-        };
-        self.mode = Mode::BoardDeleteConfirm(pane_id, target);
-    }
-
-    pub fn commit_board_delete(&mut self, pane_id: NodeId, target: BoardDeleteTarget) {
-        let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
-            return;
-        };
-        let result = match target {
-            BoardDeleteTarget::Card => board.delete_selected_card(),
-            BoardDeleteTarget::Column => board.delete_selected_column(),
-        };
-        if let Err(error) = result {
-            self.status_message = Some(error);
-        } else {
-            self.remember_board_modal(pane_id);
-            self.status_message = Some("Saving board…".into());
-        }
     }
 
     /// Destination to preselect when "New group" is triggered without a
@@ -12522,7 +11959,7 @@ impl App {
         }
     }
 
-    fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
+    pub(crate) fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
         let node = self.tree.get(node_id)?;
         if node.accepts_normal_children() {
             return Some(node_id);
@@ -15605,7 +15042,7 @@ impl App {
             .values()
             .filter_map(|runtime| match runtime {
                 PaneRuntime::Editor(editor) => editor.autosave_deadline(),
-                PaneRuntime::Terminal(_) | PaneRuntime::Board(_) => None,
+                PaneRuntime::Terminal(_) => None,
             })
             .min();
         let next_deadline = autosave_deadline
@@ -15934,31 +15371,6 @@ impl App {
         }
     }
 
-    /// Ordinary (non-leader) key handling while a pane has focus: forwards
-    /// raw input to the focused pane's runtime -- a `KeyInput` request for
-    /// a terminal pane, or a direct buffer edit for an editor pane in
-    /// Source mode (Rendered mode is read-only; only scroll navigation
-    /// applies).
-    ///
-    /// A terminal pane intercepts Shift+PageUp/Shift+PageDown as local
-    /// scrollback navigation and Shift+End as an immediate return to live
-    /// output rather than forwarding them. Plain PageUp/PageDown/End aren't
-    /// in `encode_key_for_terminal`'s table at all (dropped silently), so this
-    /// claims only the Shift-held variants, leaving room for the plain keys to
-    /// reach the foreground app if that table ever grows to cover them. Any
-    /// other key that *does* forward also resets the view back to the live tail,
-    /// matching how an ordinary terminal emulator returns you to the prompt
-    /// the moment you type.
-    /// Board edits own one full durable snapshot at a time. Keep native events
-    /// in their existing guarded backlog until the previous write completes;
-    /// otherwise the bounded writer correctly refuses and rolls edits back.
-    pub(crate) fn board_input_backpressured(&self) -> bool {
-        self.active_pane_id().is_some_and(|pane_id| {
-            matches!(self.panes.get(&pane_id), Some(PaneRuntime::Board(board))
-                if board.is_detail_panel_open && board.pending_writes() != 0)
-        })
-    }
-
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
         if matches!(self.right_panel_target, RightPanelTarget::PluginView { .. }) {
@@ -16042,132 +15454,6 @@ impl App {
                     }
                     _ => {}
                 }
-            }
-            Some(PaneRuntime::Board(board)) => {
-                let content_revision_before = board.content_revision();
-                if !is_press(&key) {
-                    return;
-                }
-                if board.is_detail_panel_open {
-                    let result = match key.code {
-                        KeyCode::Esc => {
-                            board.close_card_details();
-                            Ok(false)
-                        }
-                        KeyCode::Tab => {
-                            board.cycle_detail_editor_focus(false);
-                            Ok(false)
-                        }
-                        KeyCode::BackTab => {
-                            board.cycle_detail_editor_focus(true);
-                            Ok(false)
-                        }
-                        KeyCode::Enter
-                            if board.detail_editor.as_ref().is_some_and(|editor| {
-                                editor.focus == crate::board::CardEditorField::Title
-                            }) =>
-                        {
-                            board.cycle_detail_editor_focus(false);
-                            Ok(false)
-                        }
-                        _ => board.input_detail_editor(ratatui_textarea::Input::from(
-                            crossterm::event::Event::Key(key),
-                        )),
-                    };
-                    if let Err(error) = result {
-                        self.status_message = Some(error);
-                    } else if result == Ok(true) {
-                        self.status_message = Some("Saving card…".to_string());
-                    }
-                    return;
-                }
-                let result = match key.code {
-                    KeyCode::Enter => {
-                        if let Some(card_index) = board.selected_card {
-                            board.open_card_details(board.selected_column, card_index);
-                        }
-                        Ok(())
-                    }
-                    KeyCode::Left | KeyCode::Char('h')
-                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
-                    {
-                        board.move_selected_card(-1)
-                    }
-                    KeyCode::Right | KeyCode::Char('l')
-                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
-                    {
-                        board.move_selected_card(1)
-                    }
-                    KeyCode::Up | KeyCode::Char('k')
-                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
-                    {
-                        board.move_selected_card_vertically(-1)
-                    }
-                    KeyCode::Down | KeyCode::Char('j')
-                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
-                    {
-                        board.move_selected_card_vertically(1)
-                    }
-                    KeyCode::Left | KeyCode::Char('h') => {
-                        board.select_previous_column();
-                        Ok(())
-                    }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        board.select_next_column();
-                        Ok(())
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        board.select_previous_card();
-                        Ok(())
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        board.select_next_card();
-                        Ok(())
-                    }
-                    KeyCode::Char('n') => {
-                        self.action_add_board_card(id);
-                        return;
-                    }
-                    KeyCode::Char('c') => {
-                        self.action_add_board_column(id);
-                        return;
-                    }
-                    KeyCode::Char('r') => {
-                        if board.pending_writes() != 0 {
-                            return;
-                        }
-                        let storage = board.storage.clone();
-                        self.request_board_load(id, storage);
-                        return;
-                    }
-                    KeyCode::Char('e') => {
-                        self.action_rename_board_selection(id);
-                        return;
-                    }
-                    KeyCode::Char('d') => {
-                        self.action_delete_board_selection(id);
-                        return;
-                    }
-                    _ => Ok(()),
-                };
-                if result.is_ok() {
-                    let layout = crate::board_ui::compute_layout(
-                        pane_content_area,
-                        board.is_detail_panel_open,
-                        board.columns.len(),
-                        self.kanban_board_settings.minimum_column_width,
-                    );
-                    let visible_column_count = crate::board_ui::visible_column_count(
-                        layout.columns_area,
-                        board.columns.len(),
-                        self.kanban_board_settings.minimum_column_width,
-                    );
-                    board.ensure_selected_column_visible(visible_column_count);
-                }
-                if let Err(error) = result {
-                    self.status_message = Some(error);
-                }
-                did_change_client_content = board.content_revision() != content_revision_before;
             }
             None => {}
         }
@@ -17531,10 +16817,6 @@ impl App {
             self.handle_editor_pane_mouse(id, viewport.content_area, mouse, position);
             return;
         }
-        if matches!(self.panes.get(&id), Some(PaneRuntime::Board(_))) {
-            self.handle_board_pane_mouse(id, viewport.content_area, mouse, position);
-            return;
-        }
 
         if self.handle_goal_resume_mouse(id, viewport.content_area, mouse, position) {
             return;
@@ -17886,207 +17168,6 @@ impl App {
 
     pub fn resolve_session_recovery(&mut self, restore: bool) {
         self.queue_request(ClientRequest::ResolveSessionRecovery { restore });
-    }
-
-    fn handle_board_pane_mouse(
-        &mut self,
-        id: NodeId,
-        area: Rect,
-        mouse: crossterm::event::MouseEvent,
-        position: Position,
-    ) {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let preview_lines = self.kanban_board_settings.card_preview_lines;
-        let minimum_column_width = self.kanban_board_settings.minimum_column_width;
-        let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&id) else {
-            return;
-        };
-        let content_revision_before = board.content_revision();
-        if board.columns.is_empty() {
-            return;
-        }
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                match crate::board_ui::hit_test(
-                    board,
-                    area,
-                    preview_lines,
-                    minimum_column_width,
-                    position,
-                ) {
-                    Some(crate::board_ui::BoardHit::Column { column_index }) => {
-                        board.select_column(column_index);
-                        board.drag_source = None;
-                        board.drag_target = None;
-                    }
-                    Some(crate::board_ui::BoardHit::Card {
-                        column_index,
-                        card_index,
-                    }) => {
-                        board.select_card(column_index, card_index);
-                        board.drag_source = Some((column_index, card_index));
-                        board.drag_target = None;
-                    }
-                    Some(crate::board_ui::BoardHit::CardCheckbox {
-                        column_index,
-                        card_index,
-                        checkbox_index,
-                    }) => {
-                        board.select_card(column_index, card_index);
-                        board.drag_source = None;
-                        board.drag_target = None;
-                        match board.toggle_card_checkbox(column_index, card_index, checkbox_index) {
-                            Ok(()) => self.status_message = Some("Card save queued".to_string()),
-                            Err(error) => self.status_message = Some(error),
-                        }
-                    }
-                    Some(crate::board_ui::BoardHit::HorizontalScrollbar { column_scroll }) => {
-                        let layout = crate::board_ui::compute_layout(
-                            area,
-                            board.is_detail_panel_open,
-                            board.columns.len(),
-                            minimum_column_width,
-                        );
-                        let visible_column_count = crate::board_ui::visible_column_count(
-                            layout.columns_area,
-                            board.columns.len(),
-                            minimum_column_width,
-                        );
-                        board.set_column_scroll(column_scroll, visible_column_count);
-                        board.drag_source = None;
-                        board.drag_target = None;
-                    }
-                    Some(crate::board_ui::BoardHit::DetailClose) => {
-                        board.drag_source = None;
-                        board.drag_target = None;
-                        board.close_card_details();
-                    }
-                    Some(crate::board_ui::BoardHit::DetailTitle) => {
-                        board.drag_source = None;
-                        board.drag_target = None;
-                        board.set_detail_editor_focus(crate::board::CardEditorField::Title);
-                    }
-                    Some(crate::board_ui::BoardHit::DetailBody) => {
-                        board.drag_source = None;
-                        board.drag_target = None;
-                        board.set_detail_editor_focus(crate::board::CardEditorField::Body);
-                    }
-                    None => {
-                        board.drag_source = None;
-                        board.drag_target = None;
-                    }
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                board.drag_target = crate::board_ui::card_drop_target(
-                    board,
-                    area,
-                    preview_lines,
-                    minimum_column_width,
-                    position,
-                );
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                if let Some((source_column, source_card)) = board.drag_source.take() {
-                    if let Some((destination_column, insertion_index)) = board.drag_target.take() {
-                        let result = board.move_dragged_card(
-                            source_column,
-                            source_card,
-                            destination_column,
-                            insertion_index,
-                        );
-                        if let Err(error) = result {
-                            self.status_message = Some(error);
-                        }
-                    } else if matches!(
-                        crate::board_ui::hit_test(
-                            board,
-                            area,
-                            preview_lines,
-                            minimum_column_width,
-                            position,
-                        ),
-                        Some(crate::board_ui::BoardHit::Card {
-                            column_index,
-                            card_index,
-                        }) if (column_index, card_index) == (source_column, source_card)
-                    ) {
-                        board.open_card_details(source_column, source_card);
-                        let layout = crate::board_ui::compute_layout(
-                            area,
-                            true,
-                            board.columns.len(),
-                            minimum_column_width,
-                        );
-                        let visible_column_count = crate::board_ui::visible_column_count(
-                            layout.columns_area,
-                            board.columns.len(),
-                            minimum_column_width,
-                        );
-                        board.ensure_selected_column_visible(visible_column_count);
-                    }
-                }
-                board.drag_target = None;
-            }
-            MouseEventKind::ScrollUp
-                if matches!(
-                    crate::board_ui::hit_test(
-                        board,
-                        area,
-                        preview_lines,
-                        minimum_column_width,
-                        position,
-                    ),
-                    Some(crate::board_ui::BoardHit::DetailBody)
-                ) =>
-            {
-                // Wheel interaction with the body is an explicit engagement
-                // with that field: focus it so typed input lands where the
-                // user is looking. Focus policy lives here in the input
-                // router; `scroll_detail_body` itself stays a pure scroll.
-                board.set_detail_editor_focus(crate::board::CardEditorField::Body);
-                board.scroll_detail_body(-3);
-            }
-            MouseEventKind::ScrollDown
-                if matches!(
-                    crate::board_ui::hit_test(
-                        board,
-                        area,
-                        preview_lines,
-                        minimum_column_width,
-                        position,
-                    ),
-                    Some(crate::board_ui::BoardHit::DetailBody)
-                ) =>
-            {
-                // Same focus-follows-wheel policy as ScrollUp above.
-                board.set_detail_editor_focus(crate::board::CardEditorField::Body);
-                board.scroll_detail_body(3);
-            }
-            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
-                let layout = crate::board_ui::compute_layout(
-                    area,
-                    board.is_detail_panel_open,
-                    board.columns.len(),
-                    minimum_column_width,
-                );
-                let visible_column_count = crate::board_ui::visible_column_count(
-                    layout.columns_area,
-                    board.columns.len(),
-                    minimum_column_width,
-                );
-                let next_scroll = match mouse.kind {
-                    MouseEventKind::ScrollLeft => board.column_scroll.saturating_sub(1),
-                    MouseEventKind::ScrollRight => board.column_scroll.saturating_add(1),
-                    _ => unreachable!("matched horizontal wheel events"),
-                };
-                board.set_column_scroll(next_scroll, visible_column_count);
-            }
-            _ => {}
-        }
-        if board.content_revision() != content_revision_before {
-            self.record_client_node_activity(id);
-        }
     }
 
     fn handle_editor_pane_mouse(
@@ -19883,7 +18964,7 @@ mod tests {
                 let project = tempfile::tempdir().unwrap();
                 let mut app = App::new("status-test".into(), project.path().to_path_buf());
                 app.set_screen_area(Rect::new(0, 0, width, height));
-                app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+                app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
                 let settings_before = app.animation_settings.clone();
                 let probe = FakeProbe::new();
                 let report = format!(
@@ -19973,7 +19054,7 @@ mod tests {
             Some("fix time unknown; received 123; error: offline"),
         ] {
             let mut app = app();
-            app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+            app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
             let probe = FakeProbe::new();
             *probe.status.lock().unwrap() = report.map(str::to_owned);
             *app.animation_frame.host_mut() = fake_host(&probe);
@@ -20270,7 +19351,7 @@ mod tests {
     }
 
     #[test]
-    fn successful_editor_and_board_edits_report_node_activity() {
+    fn successful_editor_edits_report_node_activity() {
         let directory = tempfile::tempdir().expect("create client activity directory");
         let mut app = app();
         let project_id = app
@@ -20295,29 +19376,6 @@ mod tests {
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::RecordNodeActivity { node_id }] if *node_id == editor_id
-        ));
-
-        let storage = ilium_core::BoardStorage::MarkdownFile {
-            path: directory.path().join("board.md"),
-        };
-        let board_id = app
-            .tree
-            .add_board(project_id, "board".to_string(), storage.clone())
-            .unwrap();
-        let mut board = BoardPane::create(storage).unwrap();
-        board.add_card("move me".to_string()).unwrap();
-        app.panes
-            .insert(board_id, PaneRuntime::Board(Box::new(board)));
-        app.focus_pane(board_id);
-        app.take_outbound_requests();
-
-        app.handle_pane_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Right,
-            crossterm::event::KeyModifiers::SHIFT,
-        ));
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::RecordNodeActivity { node_id }] if *node_id == board_id
         ));
     }
 
@@ -20359,7 +19417,7 @@ mod tests {
         use ilium_core::animation_recommendation::*;
         let project = AnimationRecommendation {
             version: 1,
-            kind: "shoreline".into(),
+            kind: "night_lights".into(),
             resources: ResourcePolicy::Catalog,
             parameters: vec![],
         };
@@ -21412,7 +20470,11 @@ mod tests {
             .unwrap();
         let board = app
             .tree
-            .add_pane(group, "board", PaneContentKind::Board)
+            .add_plugin_pane(
+                group,
+                "board",
+                ilium_core::PluginPaneKind::new("ilium.core.kanban.board").unwrap(),
+            )
             .unwrap();
         let folder = app
             .tree
@@ -21605,72 +20667,6 @@ mod tests {
                 ..
             }] if command_line == "agy"
         ));
-    }
-
-    #[test]
-    fn markdown_editor_tree_action_creates_a_sibling_board_from_the_same_file() {
-        let path = std::env::temp_dir().join(format!(
-            "ilium-board-context-{}-{}.markdown",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        std::fs::write(&path, "# Work\n\n* [ ] Keep this task\n").unwrap();
-        // Canonicalized through the same helper the app uses: `%TEMP%` hands
-        // out an 8.3 short path (`RUNNER~1`) while resolving it yields the long
-        // name, so an unresolved expectation cannot match what the app stores.
-        let path = ilium_platform::paths::canonicalize(&path).unwrap_or(path);
-
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let editor_id = app
-            .tree
-            .add_pane(group, "work.markdown", PaneContentKind::Editor)
-            .unwrap();
-        let editor = EditorPane::load(path.clone()).unwrap();
-        app.panes
-            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
-
-        assert!(app
-            .context_actions_for(editor_id)
-            .contains(&ContextMenuAction::CreateBoardFromMarkdown));
-
-        app.execute_context_action(ContextMenuAction::CreateBoardFromMarkdown, editor_id);
-        app.settle_filesystem_for_test();
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::NewBoard {
-                parent_group: group,
-                name: path.file_stem().unwrap().to_string_lossy().into_owned(),
-                storage: ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
-            }]
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn create_board_tree_action_is_hidden_for_non_markdown_editors() {
-        let path = std::env::temp_dir().join(format!(
-            "ilium-board-context-{}-{}.txt",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        std::fs::write(&path, "not markdown").unwrap();
-
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let editor_id = app
-            .tree
-            .add_pane(group, "notes.txt", PaneContentKind::Editor)
-            .unwrap();
-        let editor = EditorPane::load(path.clone()).unwrap();
-        app.panes
-            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
-
-        assert!(!app
-            .context_actions_for(editor_id)
-            .contains(&ContextMenuAction::CreateBoardFromMarkdown));
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -22041,51 +21037,6 @@ mod tests {
     }
 
     #[test]
-    fn pending_scheduled_input_keeps_countdown_redraws_active() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .schedule_pane_input(
-                terminal,
-                ilium_core::ScheduledPaneInput {
-                    execute_at_unix_millis: u64::MAX,
-                    text: String::new(),
-                    send_enter: true,
-                },
-            )
-            .unwrap();
-
-        assert!(app.has_active_animation());
-        let delay = app.next_maintenance_delay(Instant::now());
-        assert!(delay > Duration::ZERO);
-        assert!(delay <= Duration::from_millis(220));
-    }
-
-    #[test]
-    fn scheduled_input_redraw_uses_the_exact_reverse_clock_boundary() {
-        assert_eq!(
-            scheduled_input_frame_delay(440, 220),
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            scheduled_input_frame_delay(441, 220),
-            Duration::from_millis(2)
-        );
-        assert_eq!(
-            scheduled_input_frame_delay(659, 220),
-            Duration::from_millis(220)
-        );
-        assert_eq!(
-            scheduled_input_frame_delay(0, 220),
-            Duration::from_millis(1)
-        );
-    }
-
-    #[test]
     fn elapsed_frame_redraw_uses_the_exact_forward_clock_boundary() {
         assert_eq!(
             elapsed_frame_delay(6_250, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
@@ -22146,139 +21097,6 @@ mod tests {
             app.next_semantic_animation_frame_delay(now),
             Some(Duration::from_millis(1))
         );
-    }
-
-    #[test]
-    fn request_new_markdown_board_preserves_the_existing_file_as_its_storage() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        // An absolute path in the platform's own shape: `/tmp/...` is relative
-        // on Windows, so normalization would resolve it against the current
-        // directory and no longer match what was passed in.
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("release-plan.md");
-        let original = "# Release plan\n\n## To do\n- Preserve authored task\n";
-        std::fs::write(&path, original).unwrap();
-
-        app.request_new_markdown_board(group, path.clone());
-        app.settle_filesystem_for_test();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-
-        // The board adapter stores the file's canonical identity (macOS
-        // temp directories are `/var` -> `/private/var` symlinks; Windows
-        // may expand 8.3 short names), so compare against that form.
-        let canonical = ilium_platform::paths::canonicalize(&path).unwrap();
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::NewBoard {
-                parent_group: group,
-                name: "release-plan".to_string(),
-                storage: ilium_core::BoardStorage::MarkdownFile { path: canonical },
-            }]
-        );
-    }
-
-    #[test]
-    fn new_board_dialog_skips_existing_and_already_open_default_paths() {
-        let project_path = std::env::temp_dir().join(format!(
-            "ilium-board-defaults-{}-{}",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        let board_directory = project_path.join(".ilium").join("boards");
-        std::fs::create_dir_all(&board_directory).unwrap();
-        std::fs::write(board_directory.join("board.md"), "# Existing\n").unwrap();
-        let mut app = App::new("test".to_string(), project_path.clone());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        app.tree
-            .add_board(
-                group,
-                "Second".to_string(),
-                ilium_core::BoardStorage::MarkdownFile {
-                    path: board_directory.join("board-2.md"),
-                },
-            )
-            .unwrap();
-
-        app.open_create_board_dialog();
-        app.settle_filesystem_for_test();
-
-        let Mode::CreateBoard(state) = &app.mode else {
-            panic!("new board should open its creation dialog");
-        };
-        assert_eq!(
-            PathBuf::from(&state.path.buf),
-            board_directory.join("board-3.md")
-        );
-        let _ = std::fs::remove_dir_all(project_path);
-    }
-
-    #[test]
-    fn board_creation_resolves_relative_path_and_preflights_storage_before_request() {
-        let project_path = std::env::temp_dir().join(format!(
-            "ilium-board-relative-{}-{}",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        std::fs::create_dir_all(&project_path).unwrap();
-        let mut app = App::new("test".to_string(), project_path.clone());
-        let state = CreateBoardState {
-            parent_group: ROOT_ID,
-            name: TextPromptState::new("Sprint"),
-            path: TextPromptState::new("plans/sprint.md"),
-            storage_kind: BoardStorageKind::MarkdownFile,
-            editing_path: true,
-        };
-
-        app.commit_create_board(&state);
-        app.settle_filesystem_for_test();
-
-        let board_path = project_path.join("plans").join("sprint.md");
-        assert!(board_path.is_file());
-        assert!(std::fs::read_to_string(&board_path)
-            .unwrap()
-            .contains("## To do"));
-        // The queued request carries the created file's canonical identity.
-        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::NewBoard {
-                name,
-                storage: ilium_core::BoardStorage::MarkdownFile { path },
-                ..
-            }] if name == "Sprint" && path == &canonical_board_path
-        ));
-        let _ = std::fs::remove_dir_all(project_path);
-    }
-
-    #[test]
-    fn board_creation_rejects_an_unreadable_storage_shape_without_queuing_a_dead_pane() {
-        let project_path = std::env::temp_dir().join(format!(
-            "ilium-board-invalid-{}-{}",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        let directory_path = project_path.join("not-a-markdown-file");
-        std::fs::create_dir_all(&directory_path).unwrap();
-        let mut app = App::new("test".to_string(), project_path.clone());
-        let state = CreateBoardState {
-            parent_group: ROOT_ID,
-            name: TextPromptState::new("Broken"),
-            path: TextPromptState::new(directory_path.display().to_string()),
-            storage_kind: BoardStorageKind::MarkdownFile,
-            editing_path: true,
-        };
-
-        app.commit_create_board(&state);
-        app.settle_filesystem_for_test();
-
-        assert!(app.take_outbound_requests().is_empty());
-        assert!(matches!(app.mode, Mode::CreateBoard(_)));
-        assert!(app
-            .status_message
-            .as_deref()
-            .is_some_and(|message| message.contains("Could not create board")));
-        let _ = std::fs::remove_dir_all(project_path);
     }
 
     #[test]
@@ -23333,7 +22151,7 @@ mod tests {
             .unwrap();
         let third = app
             .tree
-            .add_pane(group, "third", PaneContentKind::Board)
+            .add_pane(group, "third", PaneContentKind::Editor)
             .unwrap();
         app.tree
             .create_split_view(group, "split", SplitOrientation::Vertical, &[second, third])
@@ -23368,7 +22186,7 @@ mod tests {
         let last_group = app.tree.add_group(ROOT_ID, "last").unwrap();
         let last_pane = app
             .tree
-            .add_pane(last_group, "last pane", PaneContentKind::Board)
+            .add_pane(last_group, "last pane", PaneContentKind::Editor)
             .unwrap();
         app.focus_pane(first_pane);
         app.take_outbound_requests();
@@ -25925,10 +24743,8 @@ mod tests {
         assert_eq!(SettingsTab::Keyboard.previous(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
-        assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
-        assert_eq!(SettingsTab::Session.next(), SettingsTab::Git);
-        assert_eq!(SettingsTab::Git.next(), SettingsTab::KanbanBoard);
-        assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Animations);
+        assert_eq!(SettingsTab::Editor.next(), SettingsTab::Git);
+        assert_eq!(SettingsTab::Git.next(), SettingsTab::Animations);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::LlmInstructions);
@@ -26246,111 +25062,6 @@ mod tests {
                 .voice
                 .pause_media_while_active
         );
-    }
-
-    #[test]
-    fn kanban_layout_settings_persist_with_bounded_adjustments() {
-        let config_dir = tempfile::tempdir().unwrap();
-        let mut app = app();
-        app.config_dir = Some(config_dir.path().to_path_buf());
-
-        for _ in 0..20 {
-            app.settings_adjust_card_preview_lines(1);
-            app.settle_filesystem_for_test();
-        }
-        app.settings_adjust_board_column_width(100);
-
-        assert_eq!(app.kanban_board_settings.card_preview_lines, 10);
-        assert_eq!(app.kanban_board_settings.minimum_column_width, 80);
-        app.settle_filesystem_for_test();
-        let persisted = crate::config::load(config_dir.path()).unwrap().kanban_board;
-        assert_eq!(persisted.card_preview_lines, 10);
-        assert_eq!(persisted.minimum_column_width, 80);
-    }
-
-    #[test]
-    fn clicking_a_board_card_opens_scrolls_and_closes_its_detail_panel() {
-        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-
-        let directory = tempfile::tempdir().unwrap();
-        let storage = ilium_core::BoardStorage::MarkdownFile {
-            path: directory.path().join("board.md"),
-        };
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let board_id = app
-            .tree
-            .add_board(group, "Board".to_string(), storage.clone())
-            .unwrap();
-        let mut board = BoardPane::create(storage).unwrap();
-        board.add_card("Detailed card".to_string()).unwrap();
-        board.columns[0].cards[0].body = (0..80)
-            .map(|line| format!("detail line {line}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        app.panes
-            .insert(board_id, PaneRuntime::Board(Box::new(board)));
-        app.right_panel_target = RightPanelTarget::Pane { pane_id: board_id };
-        app.focus = FocusTarget::Pane;
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let board_area = app.pane_viewport(board_id).unwrap().content_area;
-        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
-            unreachable!();
-        };
-        let columns_layout = crate::board_ui::compute_layout(board_area, false, 3, 20);
-        let column_area =
-            crate::board_ui::column_viewport(board, columns_layout.columns_area, 20).areas[0].1;
-        let column_inner = ratatui::widgets::Block::bordered().inner(column_area);
-        let card_area = crate::board_ui::card_area(column_inner, 0, 3).unwrap();
-        let card_position = Position::new(card_area.x + 2, card_area.y + 2);
-        let mouse = |kind, position: Position| MouseEvent {
-            kind,
-            column: position.x,
-            row: position.y,
-            modifiers: KeyModifiers::NONE,
-        };
-
-        app.handle_pane_mouse(
-            mouse(MouseEventKind::Down(MouseButton::Left), card_position),
-            card_position,
-        );
-        app.handle_pane_mouse(
-            mouse(MouseEventKind::Up(MouseButton::Left), card_position),
-            card_position,
-        );
-
-        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
-            panic!("board runtime should remain available");
-        };
-        assert!(board.is_detail_panel_open);
-        let detail_area = crate::board_ui::compute_layout(board_area, true, 3, 20)
-            .detail_area
-            .unwrap();
-        assert_eq!(detail_area.width, board_area.width / 3);
-
-        let detail_body = crate::board_ui::detail_editor_layout(detail_area).body_area;
-        let detail_position = Position::new(detail_body.x + 1, detail_body.y + 1);
-        app.handle_pane_mouse(
-            mouse(MouseEventKind::ScrollDown, detail_position),
-            detail_position,
-        );
-        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
-            unreachable!();
-        };
-        assert_eq!(
-            board.detail_editor.as_ref().unwrap().focus,
-            crate::board::CardEditorField::Body
-        );
-
-        let close_position = Position::new(detail_area.right() - 2, detail_area.y);
-        app.handle_pane_mouse(
-            mouse(MouseEventKind::Down(MouseButton::Left), close_position),
-            close_position,
-        );
-        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
-            unreachable!();
-        };
-        assert!(!board.is_detail_panel_open);
     }
 
     #[test]
@@ -26965,402 +25676,6 @@ impl App {
         self.commit_emitted_geometry(geometry);
         drop(emitted);
         runtime.block_on(presenter.shutdown()).unwrap();
-    }
-}
-
-#[cfg(test)]
-mod board_handoff_tests {
-    use super::*;
-    use crate::filesystem::boards::BoardLoadTarget;
-    use ilium_execution::{
-        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
-    };
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
-
-    fn bank() -> (
-        Execution,
-        ilium_execution::Client,
-        ilium_execution::Client,
-        QuotaGroup,
-    ) {
-        let empty = LaneConfig {
-            threads: 0,
-            queue_slots: 0,
-            priority: None,
-            resident_bytes_per_thread: 0,
-        };
-        let quota = QuotaGroup::new(QuotaLimits {
-            clients: 2,
-            jobs: 64,
-            service_jobs: 0,
-            input_bytes: 512 * 1024 * 1024,
-            result_bytes: 512 * 1024 * 1024,
-            worker_threads: 1,
-            worker_bytes: 32 * 1024 * 1024,
-        });
-        let execution = Execution::start(
-            quota.clone(),
-            ExecutionConfig {
-                cpu: empty,
-                service: empty,
-                io: LaneConfig {
-                    threads: 1,
-                    queue_slots: 4,
-                    priority: None,
-                    resident_bytes_per_thread: 1024 * 1024,
-                },
-            },
-        )
-        .unwrap();
-        let outbound = execution
-            .client(crate::ipc_preparation::request_limits())
-            .unwrap();
-        let files = execution
-            .client(ClientLimits {
-                jobs: 4,
-                service_jobs: 0,
-                input_bytes: 64 * 1024 * 1024,
-                result_bytes: 16 * 1024 * 1024,
-            })
-            .unwrap();
-        (execution, outbound, files, quota)
-    }
-
-    #[test]
-    fn completed_board_open_survives_real_outbound_saturation_without_ghost_focus() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("retained-board.md");
-        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
-        let (mut execution, outbound, client, quota) = bank();
-        let holds = (0..32)
-            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
-            .collect::<Vec<_>>();
-        let mut app = App::new("board-handoff-fixture".into(), directory.path().to_owned());
-        app.outbound_admission = Some(outbound);
-        let parent_group = ilium_core::ROOT_ID;
-        let mut files = crate::filesystem::boards::BoardFiles::new(
-            client,
-            Arc::new(tokio::sync::Notify::new()),
-        );
-        files.set_storage_quota(quota.clone());
-        files
-            .request(
-                BoardLoadTarget::Open {
-                    parent_group,
-                    storage: storage.clone(),
-                },
-                storage,
-                true,
-            )
-            .unwrap();
-        app.board_files = Some(files);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            app.collect_board_files();
-            if !app.pending_pane_focuses.is_empty()
-                || app.status_message.as_ref().is_some_and(|message| {
-                    message.contains("opening retained pending request admission")
-                })
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "original board read did not reach retained handoff: {:?}",
-                app.status_message
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let original = std::fs::read(&path).unwrap();
-        assert!(
-            app.pending_pane_focuses.is_empty(),
-            "refused NewBoard must not record pending focus"
-        );
-        let charged = quota.snapshot().worker_bytes;
-        assert!(
-            charged > 1024 * 1024,
-            "completed source retains its original storage credit"
-        );
-        assert_eq!(app.board_files.as_ref().unwrap().pending(), 1);
-        assert!(app.pending_pane_focuses.is_empty());
-        assert!(app.outbox.is_empty());
-        for _ in 0..3 {
-            app.collect_board_files();
-            assert_eq!(quota.snapshot().worker_bytes, charged);
-            assert!(app.pending_pane_focuses.is_empty());
-            assert!(app.outbox.is_empty());
-        }
-        drop(holds);
-        app.collect_board_files();
-        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
-        assert_eq!(app.pending_pane_focuses.len(), 1);
-        assert_eq!(app.outbox.len(), 1);
-        // The board source reports the file's canonical identity (macOS
-        // `/var` -> `/private/var`, Windows 8.3 short names).
-        let canonical_path = ilium_platform::paths::canonicalize(&path).unwrap();
-        assert!(
-            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == canonical_path)
-        );
-        app.collect_board_files();
-        assert_eq!(
-            app.outbox.len(),
-            1,
-            "retry must not duplicate accepted board creation"
-        );
-        assert_eq!(
-            std::fs::read(&path).unwrap(),
-            original,
-            "retry must preserve the durable file"
-        );
-        drop(app);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
-    }
-
-    #[test]
-    fn removed_board_parent_cancels_open_without_request_or_pending_focus() {
-        let (mut execution, outbound, client, _) = bank();
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "board-parent-removal-fixture".into(),
-            directory.path().to_owned(),
-        );
-        app.outbound_admission = Some(outbound);
-        let source = crate::board::BoardSource {
-            storage: ilium_core::BoardStorage::MarkdownFile {
-                path: directory.path().join("preserved.md"),
-            },
-            columns: Vec::new(),
-            markdown_revision: None,
-            retention: None,
-            capture_hold: None,
-        };
-        // Synthetic completed source; this case verifies cancellation, not persistence.
-        let target = BoardLoadTarget::Open {
-            parent_group: NodeId(u64::MAX),
-            storage: source.storage.clone(),
-        };
-        assert!(app.try_finish_new_board(&target, &source));
-        assert!(app.outbox.is_empty());
-        assert!(app.pending_pane_focuses.is_empty());
-        assert!(app
-            .status_message
-            .as_ref()
-            .unwrap()
-            .contains("parent group removal"));
-        drop(client);
-        drop(app);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
-    }
-
-    #[test]
-    fn cancelled_create_dialog_preserves_completed_file_without_delayed_open() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("created-before-cancel.md");
-        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
-        let (mut execution, outbound, client, quota) = bank();
-        let holds = (0..32)
-            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
-            .collect::<Vec<_>>();
-        let state = CreateBoardState {
-            parent_group: ilium_core::ROOT_ID,
-            name: crate::text_prompt::TextPromptState::new("Captured name"),
-            path: crate::text_prompt::TextPromptState::new(path.display().to_string()),
-            storage_kind: BoardStorageKind::MarkdownFile,
-            editing_path: false,
-        };
-        let mut app = App::new(
-            "board-create-cancel-fixture".into(),
-            directory.path().to_owned(),
-        );
-        app.outbound_admission = Some(outbound);
-        app.mode = Mode::CreateBoard(state.clone());
-        let mut files = crate::filesystem::boards::BoardFiles::new(
-            client,
-            Arc::new(tokio::sync::Notify::new()),
-        );
-        files.set_storage_quota(quota);
-        files
-            .request(
-                BoardLoadTarget::Create(state, storage.clone()),
-                storage,
-                true,
-            )
-            .unwrap();
-        app.board_files = Some(files);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            app.collect_board_files();
-            if app.status_message.as_ref().is_some_and(|message| {
-                message.contains("opening retained pending request admission")
-            }) {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "create result did not reach retained handoff: {:?}",
-                app.status_message
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let original = std::fs::read(&path).unwrap();
-        assert!(
-            matches!(app.mode, Mode::CreateBoard(_)),
-            "refused request retains the original dialog"
-        );
-        app.mode = Mode::Normal;
-        app.collect_board_files();
-        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
-        assert!(app.outbox.is_empty());
-        assert!(app.pending_pane_focuses.is_empty());
-        assert!(app
-            .status_message
-            .as_ref()
-            .unwrap()
-            .contains("dialog changed"));
-        assert_eq!(std::fs::read(&path).unwrap(), original);
-        drop(holds);
-        app.collect_board_files();
-        assert!(
-            app.outbox.is_empty(),
-            "later capacity must not revive cancelled opening"
-        );
-        drop(app);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
-    }
-
-    #[tokio::test]
-    async fn shutdown_without_editor_drains_board_creation_and_reports_open_cancellation() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("shutdown-preserved.md");
-        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
-        let (mut execution, outbound, client, quota) = bank();
-        let holds = (0..32)
-            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
-            .collect::<Vec<_>>();
-        let mut app = App::new("board-shutdown-fixture".into(), directory.path().to_owned());
-        app.editor_files = None;
-        app.configuration_files = None;
-        app.integration_files = None;
-        app.outbound_admission = Some(outbound);
-        let mut files = crate::filesystem::boards::BoardFiles::new(
-            client,
-            Arc::new(tokio::sync::Notify::new()),
-        );
-        files.set_storage_quota(quota);
-        files
-            .request(
-                BoardLoadTarget::Open {
-                    parent_group: ilium_core::ROOT_ID,
-                    storage: storage.clone(),
-                },
-                storage,
-                true,
-            )
-            .unwrap();
-        app.board_files = Some(files);
-        // No collector has submitted the accepted disk intent yet. Shutdown
-        // must finish it using this board owner's independent wake source.
-        app.drain_filesystem().await.unwrap();
-        assert!(
-            path.is_file(),
-            "shutdown must finish the accepted durable creation"
-        );
-        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
-        assert!(app.outbox.is_empty());
-        assert!(app.pending_pane_focuses.is_empty());
-        assert!(app
-            .status_message
-            .as_ref()
-            .unwrap()
-            .contains("client shutdown"));
-        let source =
-            crate::board::read_source(ilium_core::BoardStorage::MarkdownFile { path }, false)
-                .unwrap();
-        assert!(
-            !source.columns.is_empty(),
-            "authoritative disk readback remains valid"
-        );
-        drop(source);
-        drop(holds);
-        drop(app);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
-    }
-
-    #[test]
-    fn captured_project_accepts_board_open_without_retargeting() {
-        let (mut execution, outbound, client, _) = bank();
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "board-project-parent-fixture".into(),
-            directory.path().to_owned(),
-        );
-        app.outbound_admission = Some(outbound);
-        let parent_group = app
-            .tree
-            .add_project(directory.path().join("captured-project"))
-            .unwrap();
-        let source = crate::board::BoardSource {
-            storage: ilium_core::BoardStorage::MarkdownFile {
-                path: directory.path().join("project-board.md"),
-            },
-            columns: Vec::new(),
-            markdown_revision: None,
-            retention: None,
-            capture_hold: None,
-        };
-        // Synthetic completed source: verify the actual domain parent contract,
-        // while the other forcing cases establish durable creation/readback.
-        let target = BoardLoadTarget::Open {
-            parent_group,
-            storage: source.storage.clone(),
-        };
-        assert!(app
-            .tree
-            .get(parent_group)
-            .unwrap()
-            .accepts_normal_children());
-        assert!(!app.tree.get(parent_group).unwrap().is_group());
-        assert!(app.try_finish_new_board(&target, &source));
-        assert_eq!(app.outbox.len(), 1);
-        assert_eq!(app.pending_pane_focuses.len(), 1);
-        assert!(
-            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, storage, .. } if *actual == parent_group && storage.path() == source.storage.path())
-        );
-        drop(source);
-        drop(client);
-        drop(app);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        assert!(
-            execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap()
-                .shutdown_complete
-        );
     }
 }
 

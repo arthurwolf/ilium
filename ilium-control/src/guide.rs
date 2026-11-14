@@ -124,7 +124,6 @@ new-folder PATH --parent ID adds a file-browser root.
 new-split-view NAME ID ID... [--project P|--parent ID] [--horizontal] groups panes side by side;
 ilium ctl op with the mouse operation forwards a mouse event (kind, column, row) to a pane;
 replace-command ID CMD swaps the process running in a pane;
-new-board NAME DIR [--markdown] [--project P|--parent ID] opens a kanban board;
 freeze ID RESUME_CMD keeps a placeholder for a stopped agent, unfreeze ID restarts it.
 Voice: ilium voice say SENTENCE... types into the live voice session; HTTP: POST /v1/voice.
 Settings: ilium ctl op with the operations set_debug_logging,

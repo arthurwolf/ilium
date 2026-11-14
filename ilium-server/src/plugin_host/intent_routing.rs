@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 use ilium_core::{AgentProvider, NodeKind, RestructureNode, RestructurePlan, Tree};
 use ilium_ipc::{ClientRequest, PromptSubmissionSource};
 use ilium_plugin_api::generated::types::intents::{
-    CreateFolderSpec, CreateGroupSpec, CreateProjectSpec, Delivery, InputStage, MoveNodeSpec,
-    NotifySpec, ReplacePaneCommandSpec, RestructureOp, RestructureSpec, SendInputSpec,
-    SetInferredIconSpec,
+    AgentActionSpec, CreateFolderSpec, CreateGroupSpec, CreateProjectSpec, Delivery, InputStage,
+    MoveNodeSpec, NotifySpec, ReplacePaneCommandSpec, RestructureOp, RestructureSpec,
+    SendInputSpec, SetInferredIconSpec,
 };
 use ilium_plugin_api::generated::types::paths::FsPath;
 use ilium_plugin_api::generated::types::{ErrorCode, Intent, NodeId, Outcome, Placement};
@@ -25,6 +25,37 @@ use ilium_plugin_api::kernel::Origin;
 use super::{
     failed, refused, shell_word, to_core, to_plugin, unsupported, RequestEnd, ServerFacade,
 };
+
+/// The `agent-activity` name of a pane's activity, as `allowed_when` lists it, and the words
+/// the refusal message uses for it.
+fn agent_activity_names(activity: ilium_core::AgentActivity) -> (&'static str, &'static str) {
+    use ilium_core::AgentActivity;
+    match activity {
+        AgentActivity::Working
+        | AgentActivity::WaitingBackground
+        | AgentActivity::BackgroundTaskStillRunning => ("working", "working"),
+        AgentActivity::WaitingApproval => ("awaiting-approval", "awaiting approval"),
+        AgentActivity::Done => ("done", "done"),
+        AgentActivity::Idle => ("idle", "idle"),
+    }
+}
+
+/// The actions of the built-in agents: `compact` types `/compact` for Claude Code and Codex,
+/// allowed in the default activities.
+fn builtin_agent_action(
+    class: &ilium_core::AgentClass,
+    action_id: &str,
+) -> Option<super::signatures::SignatureActionSpec> {
+    match (class, action_id) {
+        (ilium_core::AgentClass::Claude | ilium_core::AgentClass::Codex, "compact") => {
+            Some(super::signatures::SignatureActionSpec::new(
+                "/compact\r",
+                &["idle", "done", "awaiting-approval", "menu"],
+            ))
+        }
+        _ => None,
+    }
+}
 
 /// The id of the one sound file Ilium ships (capability-sound-play.md, "Sound ids and files").
 pub(crate) const BUNDLED_SOUND_ID: &str = "chirping";
@@ -740,6 +771,7 @@ impl ServerFacade {
     pub(super) fn route_intent(&self, origin: &Origin, intent: Intent) -> Outcome {
         match intent {
             Intent::SendInput(spec) => self.send_input(spec),
+            Intent::AgentAction(spec) => self.agent_action(spec),
             Intent::CreateFolder(spec) => self.create_folder(spec),
             Intent::CreateProject(spec) => self.create_project(spec),
             Intent::Restructure(spec) => self.restructure(spec),
@@ -844,6 +876,52 @@ impl ServerFacade {
             },
         ));
         Outcome::Ok
+    }
+
+    /// Presses the keys a signature declares for an action (capability-agent-control.md, steps
+    /// 4, 6, 7 and 9): the pane must exist and run an agent, an enabled plugin's signature must
+    /// declare the action, and the agent's activity must be one the action allows.
+    fn agent_action(&self, spec: AgentActionSpec) -> Outcome {
+        let pane_id = to_core(spec.pane);
+        let agent = self
+            .with_tree(|tree| match &tree.get(pane_id)?.kind {
+                NodeKind::Pane { status, .. } => status
+                    .agent_state()
+                    .map(|state| (state.class.clone(), state.activity())),
+                _ => None,
+            })
+            .flatten();
+        let Some((class, activity)) = agent else {
+            return refused(ErrorCode::NotFound, "the pane has no agent");
+        };
+        let (activity_name, label) = agent_activity_names(activity);
+        let declared = match &class {
+            // The built-in agents declare no signature actions; the kernel owns their command
+            // lines, so a plugin names the action and never types the provider's syntax.
+            ilium_core::AgentClass::Other(class_name) => self.state.upgrade().and_then(|state| {
+                let plugins = state.plugins.get()?;
+                let signatures = plugins.signatures.lock().ok()?;
+                signatures.action(class_name, &spec.action_id)
+            }),
+            builtin => builtin_agent_action(builtin, &spec.action_id),
+        };
+        let Some(action) = declared else {
+            return refused(
+                ErrorCode::Unsupported,
+                format!(
+                    "the agent's signature declares no action {}",
+                    spec.action_id
+                ),
+            );
+        };
+        if !action.allows(activity_name) {
+            return refused(ErrorCode::Conflict, format!("agent is {label}"));
+        }
+        self.simple(ClientRequest::KeyInput {
+            pane_id,
+            bytes: action.keys.into_bytes(),
+            submission: None,
+        })
     }
 
     fn send_input(&self, spec: SendInputSpec) -> Outcome {
@@ -1247,6 +1325,34 @@ impl ServerFacade {
 mod tests {
     use super::*;
     use ilium_core::PaneContentKind;
+
+    #[test]
+    fn built_in_agents_compact_with_their_command_in_the_default_activities() {
+        let claude = builtin_agent_action(&ilium_core::AgentClass::Claude, "compact")
+            .expect("claude compacts");
+        assert_eq!(claude.keys, "/compact\r");
+        assert!(claude.allows("idle") && claude.allows("done") && !claude.allows("working"));
+        assert!(builtin_agent_action(&ilium_core::AgentClass::Codex, "compact").is_some());
+        assert!(builtin_agent_action(&ilium_core::AgentClass::Antigravity, "compact").is_none());
+        assert!(builtin_agent_action(&ilium_core::AgentClass::Claude, "other").is_none());
+    }
+
+    #[test]
+    fn background_waits_read_as_working_for_an_action_gate() {
+        use ilium_core::AgentActivity;
+        for busy in [
+            AgentActivity::Working,
+            AgentActivity::WaitingBackground,
+            AgentActivity::BackgroundTaskStillRunning,
+        ] {
+            assert_eq!(agent_activity_names(busy), ("working", "working"));
+        }
+        assert_eq!(
+            agent_activity_names(AgentActivity::WaitingApproval),
+            ("awaiting-approval", "awaiting approval")
+        );
+    }
+
     use ilium_plugin_api::generated::types::intents::RenameNodeSpec;
     use ilium_plugin_api::generated::types::TitleSource;
 

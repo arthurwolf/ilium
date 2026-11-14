@@ -2015,30 +2015,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_scheduled_input_round_trips_with_the_session_snapshot() {
-        let path = scratch_snapshot_path();
-        let mut snapshot = sample_snapshot();
-        let pane_id = snapshot.panes[0].node_id;
-        snapshot
-            .tree
-            .schedule_pane_input(
-                pane_id,
-                ilium_core::ScheduledPaneInput {
-                    execute_at_unix_millis: 9_999_999,
-                    text: "continue".to_string(),
-                    send_enter: true,
-                },
-            )
-            .unwrap();
-
-        write_snapshot_to(&path, &snapshot).await.unwrap();
-        let loaded = load_snapshot(&path).await.unwrap().unwrap();
-
-        assert_eq!(loaded, snapshot);
-        assert_eq!(loaded.tree.scheduled_pane_inputs().count(), 1);
-    }
-
-    #[tokio::test]
     async fn workspace_cwd_and_creation_facts_survive_snapshot_round_trip() {
         let path = scratch_snapshot_path();
         let mut snapshot = sample_snapshot();
@@ -2145,33 +2121,6 @@ mod tests {
             .remove("plugin_node_metadata");
         let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
         assert!(legacy.plugin_node_metadata.is_empty());
-    }
-
-    #[test]
-    fn snapshots_from_before_scheduled_input_default_to_no_pending_action() {
-        fn remove_scheduled_input_fields(value: &mut serde_json::Value) {
-            match value {
-                serde_json::Value::Object(fields) => {
-                    fields.remove("scheduled_input");
-                    for child in fields.values_mut() {
-                        remove_scheduled_input_fields(child);
-                    }
-                }
-                serde_json::Value::Array(items) => {
-                    for item in items {
-                        remove_scheduled_input_fields(item);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let snapshot = sample_snapshot();
-        let mut old_shape = serde_json::to_value(snapshot).unwrap();
-        remove_scheduled_input_fields(&mut old_shape);
-        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
-
-        assert_eq!(loaded.tree.scheduled_pane_inputs().count(), 0);
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
-//! Twin of the keyboard test of `ilium-client/src/tree_layout_settings.rs` against the plugin's
-//! pure editor state. The kernel dialog tests (cancel restores the layout; the rendering at three
-//! widths) need the ratatui `App` and stay with the kernel code until popup views can edit text.
+//! Twin of the keyboard test of the former kernel tree layout editor against the plugin's pure
+//! editor state. The dialog around it (selection, buttons, specimen, cancel) is tested in
+//! `src/tree_layout_dialog.rs`.
 
 use ilium_plugin_core_layout::tree_layout_rows::{
     EditorKey, EditorState, TreeRowElement, TreeRowLayout,

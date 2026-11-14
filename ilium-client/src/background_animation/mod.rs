@@ -16,10 +16,8 @@ mod controls;
 mod host;
 mod introduction;
 mod pack_simd;
-mod parameters;
 mod raster;
-mod scenes;
-mod shoreline;
+mod slider_track;
 mod surface;
 pub use surface::{AnimationSurface, ComposedPresentation};
 #[cfg(test)]
@@ -30,18 +28,13 @@ mod wikipedia;
 pub mod worker;
 
 pub use cache::{AnimationCacheStatus, AnimationLoopCache};
+pub use controls::common_control_ids;
 #[cfg(test)]
 pub(crate) use controls::test_controls;
-pub use controls::{common_control_ids, LEGACY_CONTROL_IDS};
 pub use host::{AmbientHost, SceneFactory};
 pub use ilium_ambient::raster::DitherMode;
 
-pub use parameters::{
-    slider_thumb_offset, slider_value_at, CloudletSettings, KelpSettings, MoonlitWaterSettings,
-    QuietPondSettings, SleepingRidgeSettings, Slider, StoneCausticsSettings, TeaSteamSettings,
-    TwoRipplesSettings, WindyHillsideSettings,
-};
-pub use shoreline::{ShorelineSettings, ShorelineStyle};
+pub use slider_track::{slider_thumb_offset, slider_value_at};
 pub(crate) use wikipedia::render::safe_symbol_width as wikipedia_symbol_width;
 use wikipedia::WikipediaPresentation;
 pub use wikipedia::WikipediaSettings;
@@ -49,29 +42,31 @@ pub use wikipedia::WikipediaSettings;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnimationKind {
-    #[default]
-    Shoreline,
-    MoonlitWater,
-    SleepingRidge,
-    WindyHillside,
-    TeaSteam,
-    Kelp,
-    StoneCaustics,
-    Cloudlets,
-    TwoRipples,
-    #[serde(alias = "breathing_mountain")]
-    QuietPond,
-    Stars,
     NightLights,
     Clouds,
     Video,
     Spectrum,
     Images,
     /// A scene a plugin supplies (the Scene row picks which). A saved selection of a scene
-    /// that moved into the Scenes plugin (`dithered_waves`, `pipes`, `atlantic_dusk`,
+    /// that moved into the Scenes plugin (`shoreline`, `moonlit_water`, `sleeping_ridge`,
+    /// `windy_hillside`, `tea_steam`, `kelp`, `stone_caustics`, `cloudlets`, `two_ripples`,
+    /// `quiet_pond` (once `breathing_mountain`), `dithered_waves`, `pipes`, `atlantic_dusk`,
     /// `machine_screen`, `hex_expedition`, and the quiet scenes such as `aurora`, `pollen` and
-    /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`, `carpet` and `chess`) loads as this kind.
+    /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`, `carpet` and `chess`, and the live data scenes `graph`,
+    /// `earthquakes`, `aircraft` and `boats`) loads as this kind.
+    #[default]
     #[serde(
+        alias = "shoreline",
+        alias = "moonlit_water",
+        alias = "sleeping_ridge",
+        alias = "windy_hillside",
+        alias = "tea_steam",
+        alias = "kelp",
+        alias = "stone_caustics",
+        alias = "cloudlets",
+        alias = "two_ripples",
+        alias = "quiet_pond",
+        alias = "breathing_mountain",
         alias = "dithered_waves",
         alias = "pi",
         alias = "pipes",
@@ -106,33 +101,23 @@ pub enum AnimationKind {
         alias = "hesitating_ink",
         alias = "carpet",
         alias = "chess",
-        alias = "vector_td"
+        alias = "vector_td",
+        alias = "topographic_maps",
+        alias = "voxel_landscape",
+        alias = "stars",
+        alias = "graph",
+        alias = "earthquakes",
+        alias = "aircraft",
+        alias = "boats"
     )]
     PluginScene,
     Wikipedia,
-    VoxelLandscape,
-    TopographicMaps,
-    Graph,
-    Earthquakes,
-    Aircraft,
-    Boats,
     OpenStreetMap,
     Semantic,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 26] = [
-        Self::Shoreline,
-        Self::MoonlitWater,
-        Self::SleepingRidge,
-        Self::WindyHillside,
-        Self::TeaSteam,
-        Self::Kelp,
-        Self::StoneCaustics,
-        Self::Cloudlets,
-        Self::TwoRipples,
-        Self::QuietPond,
-        Self::Stars,
+    pub const ALL: [Self; 9] = [
         Self::NightLights,
         Self::Clouds,
         Self::Video,
@@ -140,34 +125,21 @@ impl AnimationKind {
         Self::Images,
         Self::PluginScene,
         Self::Wikipedia,
-        Self::VoxelLandscape,
-        Self::TopographicMaps,
-        Self::Graph,
-        Self::Earthquakes,
-        Self::Aircraft,
-        Self::Boats,
         Self::OpenStreetMap,
         Self::Semantic,
     ];
 
-    /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
-    /// deterministic built-in scenes rendered by `scenes.rs`.
+    /// The hosted `ilium-ambient` engine behind this kind, or `None` for the kinds
+    /// that are not hosted scenes (Semantic and Wikipedia).
     pub const fn ambient(self) -> Option<AmbientKind> {
         match self {
-            Self::TopographicMaps => Some(AmbientKind::TopographicMaps),
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
-            Self::Graph => Some(AmbientKind::Graph),
-            Self::Earthquakes => Some(AmbientKind::Earthquakes),
-            Self::Aircraft => Some(AmbientKind::Aircraft),
-            Self::Boats => Some(AmbientKind::Boats),
-            Self::Stars => Some(AmbientKind::Stars),
             Self::NightLights => Some(AmbientKind::NightLights),
             Self::Clouds => Some(AmbientKind::Clouds),
             Self::Video => Some(AmbientKind::Video),
             Self::Spectrum => Some(AmbientKind::Spectrum),
             Self::Images => Some(AmbientKind::Images),
             Self::PluginScene => Some(AmbientKind::Plugin),
-            Self::VoxelLandscape => Some(AmbientKind::VoxelLandscape),
             _ => None,
         }
     }
@@ -195,16 +167,6 @@ impl AnimationKind {
         match self {
             Self::Semantic => "Semantic",
             Self::Wikipedia => "Wikipedia",
-            Self::Shoreline => "Wave washing up sand",
-            Self::MoonlitWater => "Moon over moving water",
-            Self::SleepingRidge => "Clouds over a sleeping ridge",
-            Self::WindyHillside => "Hillside brushed by wind",
-            Self::TeaSteam => "Steam above a tea cup",
-            Self::Kelp => "Kelp in a gentle current",
-            Self::StoneCaustics => "Water caustics on stone",
-            Self::Cloudlets => "Drifting cloud islands",
-            Self::TwoRipples => "Two gentle wave sources",
-            Self::QuietPond => "Lily pads on a quiet pond",
             _ => unreachable!("ambient kinds return before this match"),
         }
     }
@@ -219,24 +181,6 @@ impl AnimationKind {
             }
             Self::Wikipedia => {
                 "Today's Wikipedia articles, slowly scrolling as readable text or font-rendered Braille, with images and infoboxes."
-            }
-            Self::Shoreline => "A diagonal wash with fine foam, wet sand and scattered grains.",
-            Self::MoonlitWater => "Crossing wavelets fracture a widening moonlit reflection.",
-            Self::SleepingRidge => "Layered clouds and valley mist drift over quiet ridges.",
-            Self::WindyHillside => {
-                "A dense meadow of fine blades and seed heads follows traveling gusts."
-            }
-            Self::TeaSteam => "Fine translucent wisps curl above a rounded porcelain cup.",
-            Self::Kelp => "Uneven clusters of tapering ribbons twist through layered currents.",
-            Self::StoneCaustics => {
-                "A moving light web bends over domed stones, pebbles and sparse sand."
-            }
-            Self::Cloudlets => "Soft cloud islands gather, join and separate as they drift.",
-            Self::TwoRipples => {
-                "Continuous outward crests brighten and dim where two wave fields meet."
-            }
-            Self::QuietPond => {
-                "Notched lily pads rest on a pond while fine reflections pass beneath."
             }
             _ => unreachable!("ambient kinds return before this match"),
         }
@@ -318,16 +262,6 @@ pub struct AnimationSettings {
     /// Upper limit on the redraw rate in frames per second; 0 keeps each
     /// scene's own rate.
     pub fps_limit: u16,
-    pub shoreline: ShorelineSettings,
-    pub moonlit_water: MoonlitWaterSettings,
-    pub sleeping_ridge: SleepingRidgeSettings,
-    pub windy_hillside: WindyHillsideSettings,
-    pub tea_steam: TeaSteamSettings,
-    pub kelp: KelpSettings,
-    pub stone_caustics: StoneCausticsSettings,
-    pub cloudlets: CloudletSettings,
-    pub two_ripples: TwoRipplesSettings,
-    pub quiet_pond: QuietPondSettings,
     pub wikipedia: WikipediaSettings,
     /// Settings of the hosted `ilium-ambient` scenes and the shared observer
     /// location. Flattened so the project YAML stays one flat mapping.
@@ -352,16 +286,6 @@ impl Default for AnimationSettings {
             appearance: Default::default(),
             panels: PanelTarget::Both,
             fps_limit: 0,
-            shoreline: Default::default(),
-            moonlit_water: Default::default(),
-            sleeping_ridge: Default::default(),
-            windy_hillside: Default::default(),
-            tea_steam: Default::default(),
-            kelp: Default::default(),
-            stone_caustics: Default::default(),
-            cloudlets: Default::default(),
-            two_ripples: Default::default(),
-            quiet_pond: Default::default(),
             wikipedia: Default::default(),
             ambient: Default::default(),
         }
@@ -383,16 +307,6 @@ impl AnimationSettings {
             } else {
                 self.fps_limit.clamp(1, 30)
             },
-            shoreline: self.shoreline.normalized(),
-            moonlit_water: self.moonlit_water.normalized(),
-            sleeping_ridge: self.sleeping_ridge.normalized(),
-            windy_hillside: self.windy_hillside.normalized(),
-            tea_steam: self.tea_steam.normalized(),
-            kelp: self.kelp.normalized(),
-            stone_caustics: self.stone_caustics.normalized(),
-            cloudlets: self.cloudlets.normalized(),
-            two_ripples: self.two_ripples.normalized(),
-            quiet_pond: self.quiet_pond.normalized(),
             wikipedia: ilium_ambient::SceneSettings::normalized(&self.wikipedia),
             ambient: self.ambient.normalized(),
             ..self.clone()
@@ -404,31 +318,6 @@ impl AnimationSettings {
             .saturating_mul(usize::from(height))
             .saturating_mul(cache::CACHE_FPS as usize)
             .saturating_mul(usize::from(self.loop_seconds.clamp(1, 120)))
-    }
-
-    /// The four named sliders of a built-in scene. Hosted ambient kinds have
-    /// no such sliders (their rows come from `AmbientSettings::controls`), so
-    /// they report four inert placeholders that never enter a cache key.
-    pub fn scene_sliders(&self) -> [Slider; 4] {
-        match self.kind {
-            AnimationKind::Shoreline => self.shoreline.sliders(),
-            AnimationKind::MoonlitWater => self.moonlit_water.sliders(),
-            AnimationKind::SleepingRidge => self.sleeping_ridge.sliders(),
-            AnimationKind::WindyHillside => self.windy_hillside.sliders(),
-            AnimationKind::TeaSteam => self.tea_steam.sliders(),
-            AnimationKind::Kelp => self.kelp.sliders(),
-            AnimationKind::StoneCaustics => self.stone_caustics.sliders(),
-            AnimationKind::Cloudlets => self.cloudlets.sliders(),
-            AnimationKind::TwoRipples => self.two_ripples.sliders(),
-            AnimationKind::QuietPond => self.quiet_pond.sliders(),
-            _ => [Slider::new("", 0, 0, 0, 1, ""); 4],
-        }
-    }
-
-    /// The full shoreline block when it is the selected scene: its Rich
-    /// controls are more than the four sliders a render key otherwise holds.
-    pub(super) fn scene_shoreline_key(&self) -> Option<ShorelineSettings> {
-        (self.kind == AnimationKind::Shoreline).then_some(self.shoreline)
     }
 
     /// True when the loop cache may serve this configuration: Loop playback
@@ -492,18 +381,6 @@ impl PackKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FrameKey {
-    kind: AnimationKind,
-    controls: [u16; 4],
-    shoreline: Option<ShorelineSettings>,
-    quiet_pond: Option<QuietPondSettings>,
-    speed_percent: u16,
-    width: u16,
-    height: u16,
-    elapsed: Duration,
-}
-
 /// Identity of the last hosted-scene render. An input redraw inside one frame
 /// bucket reuses the rendered raster instead of advancing the scene twice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,10 +404,6 @@ pub struct AnimationFrame {
     height: u16,
     raster: raster::Raster,
     cells: Vec<u8>,
-    scene_cache: scenes::SceneCache,
-    last_geometry: Option<FrameKey>,
-    #[cfg(test)]
-    pub(crate) geometry_render_count: usize,
     last_pack: Option<PackKey>,
     thresholds: Vec<f32>,
     diffused: Vec<bool>,
@@ -626,7 +499,6 @@ impl AnimationFrame {
             }
         }
         self.raster.owner_ids.fill(0);
-        self.last_geometry = None;
         self.cells.fill(0);
     }
 
@@ -707,7 +579,6 @@ impl AnimationFrame {
         if settings.kind == AnimationKind::Wikipedia {
             self.host.release();
             self.is_wikipedia = true;
-            self.last_geometry = None;
             self.last_ambient = None;
             #[cfg(test)]
             {
@@ -729,52 +600,13 @@ impl AnimationFrame {
             self.render_ambient(kind, &settings, width, height, elapsed);
             return;
         }
-        // A built-in scene owns nothing: drop any hosted scene (and with it
-        // its threads and child processes) the moment the kind changes.
-        self.host.release();
-        self.has_cell_colors = false;
-        self.last_ambient = None;
-        #[cfg(test)]
-        {
-            self.composed_key = None;
-            self.composed_bits.fill(0);
+        // Every other kind is a hosted scene or Semantic/Wikipedia, handled above; nothing can
+        // reach here, but an unknown kind must still draw nothing and own nothing.
+        self.release_hosts();
+        if width != self.width || height != self.height {
+            self.resize(width, height);
         }
-        let key = FrameKey {
-            kind: settings.kind,
-            controls: settings.scene_sliders().map(|slider| slider.value),
-            shoreline: settings.scene_shoreline_key(),
-            quiet_pond: (settings.kind == AnimationKind::QuietPond).then_some(settings.quiet_pond),
-            speed_percent: settings.speed_percent,
-            width,
-            height,
-            elapsed,
-        };
-        let geometry_changed = self.last_geometry != Some(key);
-        if geometry_changed {
-            #[cfg(test)]
-            {
-                self.geometry_render_count += 1;
-            }
-            if width != self.width || height != self.height {
-                self.resize(width, height);
-            } else {
-                self.raster.dots.fill(0.0);
-                self.raster.owner_ids.fill(0);
-                self.raster.image_coverage.clear();
-            }
-            if width > 0 && height > 0 {
-                let seconds = elapsed.as_secs_f64() * f64::from(settings.speed_percent) / 100.0;
-                scenes::render(&mut self.raster, &mut self.scene_cache, &settings, seconds);
-            }
-            self.last_geometry = Some(key);
-        }
-        if width == 0 || height == 0 {
-            return;
-        }
-        if geometry_changed || self.last_pack != Some(PackKey::of(&settings)) {
-            self.pack(PackKey::of(&settings));
-            self.last_pack = Some(PackKey::of(&settings));
-        }
+        self.cells.fill(0);
     }
 
     /// Renders a hosted `ilium-ambient` scene. `elapsed` is the shared,
@@ -787,9 +619,6 @@ impl AnimationFrame {
         height: u16,
         elapsed: Duration,
     ) {
-        // The raster is about to hold hosted-scene pixels, not the built-in
-        // scene the geometry key describes.
-        self.last_geometry = None;
         self.host.set_palette(settings.appearance.scene_palette());
         let generation = self.host.sync(kind, &settings.ambient, elapsed);
         let key = AmbientRenderKey {
@@ -1008,7 +837,6 @@ impl AnimationFrame {
         let count = self.cells.len().min(cells.len());
         self.cells[..count].copy_from_slice(&cells[..count]);
         self.has_cell_colors = false;
-        self.last_geometry = None;
         self.last_pack = None;
         self.last_ambient = None;
     }

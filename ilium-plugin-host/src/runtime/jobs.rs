@@ -27,7 +27,7 @@ use crate::wasm_guest::WasmGuest;
 use super::{restrict_to_grants, HostRuntime, InstanceContext, PluginState};
 
 /// The declared job kinds of a manifest (`contributes.jobs`).
-pub(super) fn declared_jobs(manifest: &serde_json::Value) -> Vec<JobDeclaration> {
+pub(crate) fn declared_jobs(manifest: &serde_json::Value) -> Vec<JobDeclaration> {
     manifest
         .pointer("/contributes/jobs")
         .and_then(serde_json::Value::as_array)
@@ -40,8 +40,9 @@ pub(super) fn declared_jobs(manifest: &serde_json::Value) -> Vec<JobDeclaration>
         .unwrap_or_default()
 }
 
-/// How a trap that ended a job reads to the plugin that started it.
-fn job_error_of(trap: &Trap) -> PluginError {
+/// How a trap that ended a job reads to the plugin that started it. Scene jobs
+/// (`wiring::scene`) report their traps the same way.
+pub(crate) fn job_error_of(trap: &Trap) -> PluginError {
     let (code, message) = match &*trap.code.0 {
         "trap.deadline" => (ErrorCode::TimedOut, "the job ran past its deadline_ms"),
         "trap.memory" => (

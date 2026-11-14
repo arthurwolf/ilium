@@ -80,6 +80,9 @@ const SCREEN_CHANGED_INTERVAL: Duration = Duration::from_millis(100);
 /// A plugin receives `screen-changed` only with `terminal.read-cells`
 /// (reference-events-and-intents.md, primitives-terminal-reads.md).
 const SCREEN_CHANGED_GRANTS: [&str; 1] = ["terminal.read-cells"];
+/// A plugin receives `user-line-submitted` (the text the user submitted to an agent) only with
+/// `agent.read-prompts` (capability-agent-read-prompts.md).
+const USER_LINE_GRANTS: [&str; 1] = ["agent.read-prompts"];
 /// The observe hook a restore runs first (core-plugin-sessions.md, EXT-056).
 const BEFORE_RESTORE_POINT: &str = "ilium.core.sessions/before-restore";
 /// How long a restore waits for the before-restore chain: 8 handlers at the point's 20 ms
@@ -625,6 +628,31 @@ impl PluginHostHandle {
         });
     }
 
+    /// Hands one `user-line-submitted` event to the plugins that hold `agent.read-prompts` and to
+    /// no other plugin: the line is what the user typed to an agent, so it is private to the
+    /// plugins the user allowed to read prompts.
+    fn feed_user_line(&self, pane: ilium_core::NodeId, text: String) {
+        use ilium_plugin_api::generated::types::events::UserLineEvent;
+        use ilium_plugin_api::generated::types::EpochMs;
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        let batch = vec![Event::UserLineSubmitted(UserLineEvent {
+            pane: NodeId(pane.0),
+            text,
+            at: EpochMs(at),
+        })];
+        self.post(move |runtime| {
+            log_errors(
+                "user-line-submitted delivery",
+                runtime.broadcast_to_holders(&batch, &USER_LINE_GRANTS),
+            );
+            log_errors("pump", runtime.pump());
+        });
+    }
+
     /// A client reported that its pane view gained or lost focus (`SetPaneFocus`). Plugins
     /// hear `pane-focused` when the focused pane changed; the last report of any client wins.
     pub(crate) fn pane_focus(&self, pane: ilium_core::NodeId, focused: bool) {
@@ -1116,6 +1144,15 @@ pub(crate) fn spawn_feed(
                         fill_pane_sizes(&state, &mut node_events).await;
                         batch.extend(node_events);
                         batch
+                    }
+                    // The text of a line the user submitted to an agent reaches only the
+                    // plugins that hold `agent.read-prompts`; an emptied prompt is no line.
+                    ServerEvent::PaneLastPromptChanged {
+                        pane_id,
+                        last_prompt: Some(text),
+                    } => {
+                        host.feed_user_line(*pane_id, text.clone());
+                        Vec::new()
                     }
                     _ => Vec::new(),
                 },

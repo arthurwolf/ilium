@@ -1597,8 +1597,6 @@ fn build_item(
         }
         NodeKind::Pane {
             status,
-            scheduled_input,
-            prompt_queue,
             progress_monitors,
             workspace,
             ..
@@ -1612,15 +1610,7 @@ fn build_item(
                 })
                 .and_then(|path| path.file_name())
                 .map(|name| name.to_string_lossy().into_owned());
-            let display_name = if prompt_queue.is_empty() {
-                display_title(node, context.panel_width).to_string()
-            } else {
-                format!(
-                    "{} [Queue: {}]",
-                    display_title(node, context.panel_width),
-                    prompt_queue.len()
-                )
-            };
+            let display_name = display_title(node, context.panel_width).to_string();
             let display_name = if let Some((icon, name)) = context
                 .custom_agent_labels
                 .and_then(|labels| labels.get(&node.id))
@@ -1649,20 +1639,6 @@ fn build_item(
                 )
             } else {
                 display_name
-            };
-            // A pending scheduled input's countdown is a number, so it belongs
-            // in the text; the long-term slot carries its marker only when no
-            // goal or task claims that slot.
-            let display_name = match scheduled_input.as_ref() {
-                Some(scheduled_input) => format!(
-                    "{} {display_name}",
-                    human_readable_countdown(
-                        scheduled_input
-                            .execute_at_unix_millis
-                            .saturating_sub(context.current_unix_millis)
-                    )
-                ),
-                None => display_name,
             };
             let display_name = title_with_bookmark(
                 title_with_optional_icon(
@@ -1711,7 +1687,7 @@ fn build_item(
                     icons: context.icons,
                     editor_filename: editor_filename.as_deref(),
                     progress: progress_monitors,
-                    has_scheduled_input: scheduled_input.is_some(),
+                    has_scheduled_input: false,
                     use_stable_glyphs: context.use_stable_glyphs,
                     agent_monitoring_mode: context.agent_monitoring_mode,
                     attention_progress_reports: context.attention_progress_reports,
@@ -2403,13 +2379,6 @@ fn pane_label_with_icons(
             Span::raw(icons.glyph(IconTarget::Editor).to_string()),
             Span::raw(editor_text(title)),
         ),
-        PaneStatus::Board => (
-            Span::styled(
-                icons.glyph(IconTarget::Board).to_string(),
-                Style::new().fg(Color::Cyan),
-            ),
-            Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
-        ),
         // A plugin pane shows its plugin-set title; unsaved work is marked like an editor's.
         PaneStatus::Plugin { dirty } => {
             let style = Style::new().fg(Color::Blue);
@@ -2458,8 +2427,8 @@ fn pane_label_with_icons(
     let objective =
         crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs);
     // Custom mode: every pane kind gets exactly one status slot, so editor and
-    // board titles stay aligned with agent titles, and rules may target them
-    // (`PaneKind(Editor)`, `EditorDirty`, `PaneKind(Board)`).
+    // plugin-pane titles stay aligned with agent titles, and rules may target them
+    // (`PaneKind(Editor)`, `EditorDirty`).
     if agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom {
         let custom = custom_status_rules.map_or_else(
             || Span::raw(""),
@@ -2583,25 +2552,6 @@ fn pane_label(
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
         },
     )
-}
-
-/// Rounds partial seconds up so a newly accepted 30-second timer says `30s`
-/// immediately, then chooses the shortest unambiguous clock-style phrase.
-fn human_readable_countdown(remaining_millis: u64) -> String {
-    let total_seconds = remaining_millis.saturating_add(999) / 1000;
-    let hours = total_seconds / 3600;
-    let minutes = total_seconds % 3600 / 60;
-    let seconds = total_seconds % 60;
-    if hours > 0 {
-        return format!("{hours}h {minutes:02}m {seconds:02}s");
-    }
-    if minutes > 0 {
-        return format!("{minutes}m {seconds:02}s");
-    }
-    if seconds > 0 {
-        return format!("{seconds}s");
-    }
-    "now".to_string()
 }
 
 /// Builds a non-pane row (container, folder) with the same fixed
@@ -4732,7 +4682,6 @@ mod tests {
         for status in [
             PaneStatus::Editor { dirty: true },
             PaneStatus::Editor { dirty: false },
-            PaneStatus::Board,
             PaneStatus::Plugin { dirty: false },
             PaneStatus::Plugin { dirty: true },
             PaneStatus::PlainShell,
@@ -8170,9 +8119,6 @@ mod tests {
         assert_eq!(line.spans[1].content.trim_end(), "⏰");
         assert_eq!(line.spans[2].content.trim(), SPINNER_FRAMES[0].to_string());
         assert_eq!(line.spans[3].content, "Claude: 1h 01m 01s Fix auth");
-        assert_eq!(human_readable_countdown(3_661_000), "1h 01m 01s");
-        assert_eq!(human_readable_countdown(0), "now");
-        assert_eq!(human_readable_countdown(61_001), "1m 02s");
     }
 
     #[test]

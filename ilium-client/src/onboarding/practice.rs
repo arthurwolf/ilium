@@ -88,7 +88,7 @@ impl Default for PracticeState {
         }
         if let Some(project) = project {
             if let Ok(group) = tree.add_group(project, "Ideas") {
-                let _ = tree.add_pane(group, "Sketch", PaneContentKind::Board);
+                let _ = tree.add_pane(group, "Sketch", PaneContentKind::Editor);
             }
         }
         Self {
@@ -286,13 +286,19 @@ impl PracticeState {
             Action::NewTerminal | Action::NewEditor | Action::NewBoard => {
                 let content = match action {
                     Action::NewEditor => PaneContentKind::Editor,
-                    Action::NewBoard => PaneContentKind::Board,
                     _ => PaneContentKind::Terminal,
                 };
+                let title = format!("Demo {}", self.serial + 1);
                 let result = self.group.and_then(|group| {
-                    self.tree
-                        .add_pane(group, format!("Demo {}", self.serial + 1), content)
-                        .ok()
+                    if action == Action::NewBoard {
+                        let kind = ilium_core::PluginPaneKind::new(
+                            crate::plugin_host::commands::BOARD_PANE_KIND,
+                        )
+                        .ok()?;
+                        self.tree.add_plugin_pane(group, title, kind).ok()
+                    } else {
+                        self.tree.add_pane(group, title, content).ok()
+                    }
                 });
                 if let Some(id) = result {
                     self.serial += 1;

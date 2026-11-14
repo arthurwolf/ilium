@@ -46,7 +46,8 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
             let settings: VectorTdSettings = settings_from_spec(spec);
             Box::new(VectorTdScene::new(&settings, env))
         }
-        _ => return None,
+        // The live-data scenes (graph, earthquakes, aircraft, boats) have their own table.
+        _ => return crate::live_data::create(scene_id, spec, env),
     })
 }
 

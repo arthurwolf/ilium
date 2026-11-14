@@ -235,10 +235,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 ilium_client::app::Mode::Normal,
             ),
             ("onboarding-voice", ilium_client::app::Mode::Normal),
-            ("board-populated-first", ilium_client::app::Mode::Normal),
-            ("board-populated-last", ilium_client::app::Mode::Normal),
-            ("board-details-title", ilium_client::app::Mode::Normal),
-            ("board-details-notes", ilium_client::app::Mode::Normal),
             ("inference-key-prompt", ilium_client::app::Mode::Normal),
             ("inference-budget-prompt", ilium_client::app::Mode::Normal),
             ("git-setup-command-prompt", ilium_client::app::Mode::Normal),
@@ -252,7 +248,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("animation-text-prompt", ilium_client::app::Mode::Normal),
             ("explorer-files", ilium_client::app::Mode::Normal),
             ("folder-explorer", ilium_client::app::Mode::Normal),
-            ("board-path-picker", ilium_client::app::Mode::Normal),
             (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(
@@ -290,58 +285,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             (
                 "close-workspace-confirm",
                 ilium_client::app::Mode::ConfirmClose(ilium_core::ROOT_ID),
-            ),
-            (
-                "board-card-prompt",
-                ilium_client::app::Mode::BoardCardPrompt(
-                    ilium_core::ROOT_ID,
-                    ilium_client::text_prompt::TextPromptState::new("Synthetic card"),
-                ),
-            ),
-            (
-                "board-column-prompt",
-                ilium_client::app::Mode::BoardColumnPrompt(
-                    ilium_core::ROOT_ID,
-                    ilium_client::text_prompt::TextPromptState::new("Synthetic column"),
-                ),
-            ),
-            (
-                "board-rename-card",
-                ilium_client::app::Mode::BoardRenamePrompt(
-                    ilium_core::ROOT_ID,
-                    ilium_client::app::BoardRenameTarget::Card,
-                    ilium_client::text_prompt::TextPromptState::new("Synthetic card name"),
-                ),
-            ),
-            (
-                "board-rename-column",
-                ilium_client::app::Mode::BoardRenamePrompt(
-                    ilium_core::ROOT_ID,
-                    ilium_client::app::BoardRenameTarget::Column,
-                    ilium_client::text_prompt::TextPromptState::new("Synthetic column name"),
-                ),
-            ),
-            (
-                "board-delete-card",
-                ilium_client::app::Mode::BoardDeleteConfirm(
-                    ilium_core::ROOT_ID,
-                    ilium_client::app::BoardDeleteTarget::Card,
-                ),
-            ),
-            (
-                "board-delete-column",
-                ilium_client::app::Mode::BoardDeleteConfirm(
-                    ilium_core::ROOT_ID,
-                    ilium_client::app::BoardDeleteTarget::Column,
-                ),
-            ),
-            (
-                "board-create-folder",
-                synthetic_board(ilium_client::app::BoardStorageKind::Folder),
-            ),
-            (
-                "board-create-markdown",
-                synthetic_board(ilium_client::app::BoardStorageKind::MarkdownFile),
             ),
             (
                 "worktrees-loading",
@@ -432,10 +375,7 @@ fn capture() -> Result<(), Box<dyn Error>> {
                         true,
                     ),
                 ));
-            } else if name == "explorer-files"
-                || name == "folder-explorer"
-                || name == "board-path-picker"
-            {
+            } else if name == "explorer-files" || name == "folder-explorer" {
                 let directory = output.join("synthetic-workspace");
                 std::fs::write(
                     directory.join("Synthetic notes.md"),
@@ -455,13 +395,11 @@ fn capture() -> Result<(), Box<dyn Error>> {
                         Box::new(overlay),
                         ilium_core::ROOT_ID,
                     )
-                } else if name == "folder-explorer" {
+                } else {
                     ilium_client::app::Mode::FolderExplorer(
                         Box::new(overlay),
                         ilium_core::ROOT_ID,
                     )
-                } else {
-                    ilium_client::app::Mode::BoardPathPicker(Box::new(overlay))
                 };
                 app.mode = mode;
             } else if name.starts_with("stats-") {
@@ -517,14 +455,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     );
                 }
                 // Rendering cached setup state never invokes setup, provider or demo actions.
-            } else if name.starts_with("board-populated-") || name.starts_with("board-details-") {
-                configure_synthetic_board_pane(
-                    &mut app,
-                    name,
-                    output.join("synthetic-workspace"),
-                    width,
-                    height,
-                )?;
             } else if name.starts_with("terminal-") {
                 configure_synthetic_terminals(&mut app, name, width, height)?;
             } else if name.starts_with("inference-") {
@@ -586,8 +516,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "Synthetic pane and empty cached stats presentation; no transcript loading, stats worker, server request, font or live input is tested",
                 name if name.starts_with("onboarding-") =>
                     "Synthetic cached onboarding step; no provider requests, saves, audio, voice or practice actions; no actual audio playback or live keyboard input is tested",
-                "board-populated-first" | "board-populated-last" | "board-details-title" | "board-details-notes" =>
-                    "Synthetic Markdown board loaded from new fixture input; no board saves, server requests, font or live input are tested",
                 "save-as-prompt" =>
                     "Synthetic prompt without a real pane or populated parent; terminal font and live input are not tested",
                 "worktree-close-waiting" | "worktree-close-no-workspace" |
@@ -766,16 +694,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn synthetic_board(storage_kind: ilium_client::app::BoardStorageKind) -> ilium_client::app::Mode {
-    ilium_client::app::Mode::CreateBoard(ilium_client::app::CreateBoardState {
-        parent_group: ilium_core::ROOT_ID,
-        name: ilium_client::text_prompt::TextPromptState::new("Synthetic project board"),
-        path: ilium_client::text_prompt::TextPromptState::new("/synthetic/boards/project"),
-        storage_kind,
-        editing_path: false,
-    })
-}
-
 /// The dispatcher retrieves every hashed file under its target directory.
 /// Keep captures outside source so rendering cannot invalidate source receipts.
 fn service_output_directory() -> Result<PathBuf, Box<dyn Error>> {
@@ -793,75 +711,6 @@ fn service_output_directory() -> Result<PathBuf, Box<dyn Error>> {
         return Err("capture target must belong to the identified ni-build remote job".into());
     }
     Ok(target.join("ui-chrome-captures"))
-}
-
-/// A real cached BoardPane in the compositor, without a server or a board save.
-fn configure_synthetic_board_pane(
-    app: &mut App,
-    name: &str,
-    directory: PathBuf,
-    width: u16,
-    height: u16,
-) -> Result<(), Box<dyn Error>> {
-    use ilium_client::board::{BoardPane, CardEditorField};
-    use std::io::Write;
-    let path = directory.join(format!("synthetic-{name}-{width}x{height}.md"));
-    let mut markdown = String::from("# Synthetic Kanban capture\n");
-    for column in 0..6 {
-        markdown.push_str(&format!("\n## Synthetic column {column}\n"));
-        for card in 0..30 {
-            markdown.push_str(&format!(
-                "- Synthetic card {card:02} — readable long title\n"
-            ));
-            for line in 0..24 {
-                markdown.push_str(&format!(
-                    "  Synthetic note {line:02}: contextual details for this fixture card.\n"
-                ));
-            }
-        }
-    }
-    let mut input = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    input.write_all(markdown.as_bytes())?;
-    drop(input);
-    let mut board = BoardPane::load(ilium_core::BoardStorage::MarkdownFile { path })?;
-    if board.columns.len() != 6 || board.columns.iter().any(|column| column.cards.len() != 30) {
-        return Err("synthetic Markdown board did not produce the planned six columns and thirty cards per column".into());
-    }
-    if name == "board-populated-last" {
-        board.select_card(5, 29);
-        board.column_scroll = 5;
-    } else if name.starts_with("board-details-") {
-        board.open_card_details(0, 0);
-        if name == "board-details-notes" {
-            let editor = board
-                .detail_editor
-                .as_mut()
-                .ok_or("synthetic detail editor missing")?;
-            editor.focus = CardEditorField::Body;
-            editor
-                .body
-                .move_cursor(ratatui_textarea::CursorMove::Jump(20, 0));
-        }
-    } else {
-        board.select_card(0, 0);
-    }
-    let project = app.tree.add_project(directory)?;
-    let pane = app.tree.add_pane(
-        project,
-        "Synthetic Kanban board",
-        ilium_core::PaneContentKind::Board,
-    )?;
-    app.tree_state.open(vec![project]);
-    app.tree_state.select(vec![project, pane]);
-    app.panes
-        .insert(pane, ilium_client::app::PaneRuntime::Board(Box::new(board)));
-    app.right_panel_target = ilium_client::app::RightPanelTarget::Pane { pane_id: pane };
-    app.focus = ilium_client::app::FocusTarget::Pane;
-    app.mode = ilium_client::app::Mode::Normal;
-    Ok(())
 }
 
 fn synthetic_location_picker(kind: &str, directory: PathBuf) -> ilium_client::app::Mode {

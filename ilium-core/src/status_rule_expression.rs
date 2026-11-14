@@ -55,7 +55,9 @@ pub struct SupplementaryFacts {
     pub session_cost_cents: Option<u64>,
     /// Whether the user bookmarked the pane in the sidebar.
     pub bookmarked: Option<bool>,
-    /// How many prompts wait in the pane's prompt queue.
+    /// How many prompts wait in the pane's prompt queue. The kernel keeps no
+    /// queue (the Scheduler plugin owns it), so this stays unknown unless an
+    /// owner of the queue supplies it.
     pub queued_prompts: Option<u32>,
     /// Whether this pane's terminal holds keyboard focus. False for every
     /// pane while focus is on the tree, a dialog or Settings.
@@ -73,8 +75,8 @@ pub struct SupplementaryFacts {
     /// or as a split-view member.
     pub visible: Option<bool>,
     /// Whether the prompt queue is held on a head prompt whose delivery was
-    /// interrupted. The server never replays such a prompt, so the queue
-    /// waits for the user (see `ilium-server/src/prompt_queue.rs`).
+    /// interrupted. The prompt is never replayed, so the queue waits for the
+    /// user. Supplied by the owner of the queue; unknown otherwise.
     pub prompt_queue_held: Option<bool>,
     /// How full the agent's context window was at its latest prompt, in
     /// tenths of a percent (0..=1000).
@@ -86,19 +88,11 @@ impl SupplementaryFacts {
     /// pane facts (tree renderer, hover tooltip, editor inspector) calls this
     /// so the three cannot disagree about a node fact.
     pub fn with_node(self, node: &crate::Node) -> Self {
-        let crate::NodeKind::Pane { prompt_queue, .. } = &node.kind else {
+        let crate::NodeKind::Pane { .. } = &node.kind else {
             return self;
         };
         Self {
             bookmarked: Some(node.is_bookmarked),
-            queued_prompts: Some(u32::try_from(prompt_queue.len()).unwrap_or(u32::MAX)),
-            // Only the head is ever delivered, so only an attempted head can
-            // hold the queue; an empty queue is known not to be held.
-            prompt_queue_held: Some(
-                prompt_queue
-                    .first()
-                    .is_some_and(|prompt| prompt.attempted_delivery),
-            ),
             ..self
         }
     }
@@ -205,7 +199,6 @@ pub enum PaneKind {
     PlainShell,
     AgentUnavailable,
     Editor,
-    Board,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -232,7 +225,6 @@ impl Condition {
                     | (PaneKind::PlainShell, PaneStatus::PlainShell)
                     | (PaneKind::AgentUnavailable, PaneStatus::AgentUnavailable(_))
                     | (PaneKind::Editor, PaneStatus::Editor { .. })
-                    | (PaneKind::Board, PaneStatus::Board)
             )),
             Self::EditorDirty => match facts.status {
                 PaneStatus::Editor { dirty } => Some(*dirty),
@@ -850,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn node_facts_feed_bookmark_and_prompt_queue_conditions() {
+    fn node_facts_feed_the_bookmark_condition_only() {
         use crate::{PaneContentKind, Tree, ROOT_ID};
 
         let status = PaneStatus::PlainShell;
@@ -867,10 +859,6 @@ mod tests {
             Condition::PaneBookmarked.observe(&facts),
             Observation::Unknown
         );
-        assert_eq!(
-            Condition::PromptsQueued.observe(&facts),
-            Observation::Unknown
-        );
 
         let mut tree = Tree::new();
         let group_id = tree.add_group(ROOT_ID, "group").unwrap();
@@ -880,12 +868,13 @@ mod tests {
         let pane = tree.get(pane_id).unwrap();
         facts.supplementary = SupplementaryFacts::default().with_node(pane);
         assert_eq!(facts.supplementary.bookmarked, Some(false));
-        assert_eq!(facts.supplementary.queued_prompts, Some(0));
+        // The kernel keeps no prompt queue, so those facts stay unobserved.
+        assert_eq!(facts.supplementary.queued_prompts, None);
+        assert_eq!(facts.supplementary.prompt_queue_held, None);
         assert_eq!(
             Condition::PaneBookmarked.observe(&facts),
             Observation::False
         );
-        assert_eq!(Condition::PromptsQueued.observe(&facts), Observation::False);
 
         facts.supplementary.bookmarked = Some(true);
         facts.supplementary.queued_prompts = Some(3);
@@ -898,51 +887,6 @@ mod tests {
             SupplementaryFacts::default().with_node(group),
             SupplementaryFacts::default()
         );
-    }
-
-    #[test]
-    fn prompt_queue_is_held_only_by_an_attempted_head() {
-        use crate::{PaneContentKind, PromptQueueDelivery, QueuedPrompt, Tree, ROOT_ID};
-
-        let status = PaneStatus::PlainShell;
-        let observe = |supplementary| {
-            Condition::PromptQueueHeld.observe(&PaneFacts {
-                status: &status,
-                progress: &[],
-                scheduled_input: false,
-                shell_output: None,
-                activity_stale: None,
-                supplementary,
-                screen_matches: &|_| Observation::Unknown,
-            })
-        };
-        // Not observed: unknown, not false.
-        assert_eq!(observe(SupplementaryFacts::default()), Observation::Unknown);
-
-        let mut tree = Tree::new();
-        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
-        let pane_id = tree
-            .add_pane(group_id, "pane", PaneContentKind::Terminal)
-            .unwrap();
-        let with_pane = |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
-        // Empty queue: known not to be held.
-        assert_eq!(with_pane(&tree).prompt_queue_held, Some(false));
-        assert_eq!(observe(with_pane(&tree)), Observation::False);
-
-        let prompt = |text: &str| QueuedPrompt {
-            text: text.to_owned(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        tree.enqueue_prompt(pane_id, prompt("first")).unwrap();
-        tree.enqueue_prompt(pane_id, prompt("second")).unwrap();
-        // Waiting prompts that were never attempted do not hold the queue.
-        assert_eq!(observe(with_pane(&tree)), Observation::False);
-
-        assert!(tree
-            .mark_queued_prompt_attempted(pane_id, &prompt("first"))
-            .unwrap());
-        assert_eq!(observe(with_pane(&tree)), Observation::True);
     }
 
     #[test]
@@ -966,7 +910,11 @@ mod tests {
             Condition::PaneVisible,
             Condition::ContextAbovePercent(80),
         ] {
-            assert_eq!(condition.observe(&facts), Observation::Unknown, "{condition:?}");
+            assert_eq!(
+                condition.observe(&facts),
+                Observation::Unknown,
+                "{condition:?}"
+            );
         }
 
         facts.supplementary.selected = Some(true);
@@ -1086,8 +1034,14 @@ mod tests {
         assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::True);
         assert_eq!(Condition::PaneFocused.observe(&facts), Observation::False);
         // Unobserved error facts stay Unknown rather than reading false.
-        assert_eq!(Condition::BlockingError.observe(&facts), Observation::Unknown);
-        assert_eq!(Condition::SessionError.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::BlockingError.observe(&facts),
+            Observation::Unknown
+        );
+        assert_eq!(
+            Condition::SessionError.observe(&facts),
+            Observation::Unknown
+        );
         facts.supplementary.blocking_error = Some(true);
         facts.supplementary.session_error = Some(false);
         assert_eq!(Condition::BlockingError.observe(&facts), Observation::True);

@@ -68,6 +68,60 @@ pub fn scene_component_text(ink: u8) -> String {
     )
 }
 
+/// The scene of [`scene_component_text`] (ink 200) that also imports
+/// `ilium:host/location@0.1.0` and whose `status` reports what `location.current` answered:
+/// `located` for a position, `unlocated` for none. Instantiating it needs `location.observer`.
+pub fn scene_component_with_location_text() -> String {
+    let replacements = [
+        (
+            r#"  (alias export $surface "[method]frame-surface.present" (func $present))"#,
+            r#"  (alias export $surface "[method]frame-surface.present" (func $present))
+  (import "ilium:host/location@0.1.0" (instance $location
+    (export "current" (func (result (option (tuple f64 f64)))))))
+  (alias export $location "current" (func $location-current))"#,
+        ),
+        (
+            r#"  (core func $surface-drop (canon resource.drop $fs))"#,
+            r#"  (core func $surface-drop (canon resource.drop $fs))
+  (core func $location-current-core (canon lower (func $location-current) (memory $libc "memory")))"#,
+        ),
+        (
+            r#"    (import "host" "renderer-new" (func $renderer-new (param i32) (result i32)))"#,
+            r#"    (import "host" "renderer-new" (func $renderer-new (param i32) (result i32)))
+    (import "host" "location-current" (func $location-current (param i32)))
+    (data (i32.const 1300) "located")
+    (data (i32.const 1310) "unlocated")"#,
+        ),
+        (
+            r#"    (func (export "status") (param i32) (result i32)
+      (i32.store8 (i32.const 1100) (i32.const 0))
+      (i32.const 1100)))"#,
+            r#"    (func (export "status") (param i32) (result i32)
+      (call $location-current (i32.const 1200))
+      (i32.store8 (i32.const 1100) (i32.const 1))
+      (if (i32.load8_u (i32.const 1200))
+        (then
+          (i32.store (i32.const 1104) (i32.const 1300))
+          (i32.store (i32.const 1108) (i32.const 7)))
+        (else
+          (i32.store (i32.const 1104) (i32.const 1310))
+          (i32.store (i32.const 1108) (i32.const 9))))
+      (i32.const 1100)))"#,
+        ),
+        (
+            r#"(export "renderer-new" (func $renderer-new))"#,
+            r#"(export "renderer-new" (func $renderer-new))
+      (export "location-current" (func $location-current-core))"#,
+        ),
+    ];
+    let mut text = SCENE_COMPONENT.to_owned();
+    for (anchor, replacement) in replacements {
+        debug_assert_eq!(text.matches(anchor).count(), 1, "anchor {anchor}");
+        text = text.replacen(anchor, replacement, 1);
+    }
+    text
+}
+
 const SCENE_COMPONENT: &str = r#"(component
   (import "ilium:anim/surface@0.1.0" (instance $surface
     (export "frame-surface" (type $fs (sub resource)))

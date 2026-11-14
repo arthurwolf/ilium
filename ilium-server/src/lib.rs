@@ -1182,13 +1182,6 @@ mod restore_tests {
             }),
         )
         .unwrap();
-        let scheduled = ilium_core::ScheduledPaneInput {
-            execute_at_unix_millis: 1,
-            text: "must stay queued".into(),
-            send_enter: true,
-        };
-        tree.schedule_pane_input(pane_id, scheduled.clone())
-            .unwrap();
         let original = TerminalOrigin::Command("printf 'unsafe-original-command'".into());
         let persisted_monitor = crate::persistence::PersistedProgressMonitor {
             pane_id,
@@ -1248,12 +1241,6 @@ mod restore_tests {
                 .as_deref(),
             Some(project_root.as_path())
         );
-        let tree = state.tree.read().await;
-        assert_eq!(
-            tree.scheduled_pane_inputs().next(),
-            Some((pane_id, &scheduled))
-        );
-        drop(tree);
         let result = crate::ipc::handlers::submit_terminal_text(
             &state,
             pane_id,

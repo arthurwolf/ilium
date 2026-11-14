@@ -6,6 +6,8 @@
 
 pub mod board;
 pub mod client;
+pub mod control;
+pub mod create_dialog;
 pub mod io;
 pub mod model;
 pub mod store;
@@ -110,6 +112,7 @@ impl Views for KanbanClient {
     fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
         match view {
             ViewTarget::Pane(node) => client::render(node.0, area),
+            ViewTarget::Popup(_) => client::render_popup(&view).unwrap_or_else(empty_tree),
             _ => empty_tree(),
         }
     }
@@ -279,6 +282,7 @@ mod spec_tests {
             "fs.pick",
             "fs.read:picked",
             "editor.read",
+            "ui.panels",
             "services.use:ilium.core.kanban/set-setting",
             "extensions.provide:ilium.core.kanban/card-actions",
             "extensions.provide:ilium.core.kanban/card-moved",
@@ -288,7 +292,7 @@ mod spec_tests {
                 "missing client grant {expected}"
             );
         }
-        assert_eq!(grants.len(), 11);
+        assert_eq!(grants.len(), 12);
     }
 
     /// REQ: COR-050

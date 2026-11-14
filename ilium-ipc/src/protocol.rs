@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
-    AgentClass, BoardStorage, BuiltinAgentProvider, NodeActivityRevision, NodeId, PaneProgress,
-    PaneStatus, PaneTitleSource, ProgressTaskReport, RestructurePlan, SplitOrientation, Tree,
+    AgentClass, BuiltinAgentProvider, NodeActivityRevision, NodeId, PaneProgress, PaneStatus,
+    PaneTitleSource, ProgressTaskReport, RestructurePlan, SplitOrientation, Tree,
     TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
@@ -678,12 +678,6 @@ pub enum ClientRequest {
         project_id: NodeId,
         path: PathBuf,
     },
-    /// Create a persisted, file-backed kanban board under `parent_group`.
-    NewBoard {
-        parent_group: NodeId,
-        name: String,
-        storage: BoardStorage,
-    },
     /// Atomically creates a split-view container and reparents the selected
     /// panes into it in the supplied order. An empty `pane_ids` list creates
     /// an empty split view.
@@ -1171,7 +1165,6 @@ impl ClientRequest {
             Self::NewFolder { .. } => "new_folder",
             Self::NewProject { .. } => "new_project",
             Self::ChangeProjectFolder { .. } => "change_project_folder",
-            Self::NewBoard { .. } => "new_board",
             Self::CreateSplitView { .. } => "create_split_view",
             Self::UpdateSoundSettings { .. } => "update_sound_settings",
             Self::PreviewSound { .. } => "preview_sound",

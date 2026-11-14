@@ -64,6 +64,28 @@ pub(crate) enum ClientEffect {
     },
     /// Freeze an agent pane (`kernel.freeze-agent`): stop its process and keep its screen.
     FreezeAgent(ilium_core::NodeId),
+    /// Set the order and visibility of the tree row slots (`kernel.set-tree-row-layout`).
+    SetTreeRowLayout(crate::tree_row_layout::TreeRowLayout),
+}
+
+/// The kernel command that sets the tree row layout: `{"order": [...], "hidden": [...]}` with
+/// the slot names `identity`, `objective`, `activity` and `title`. The kernel completes a
+/// partial order and drops a hidden title, then saves the layout like the settings page did.
+pub(crate) const SET_TREE_ROW_LAYOUT_COMMAND: &str = "kernel.set-tree-row-layout";
+
+/// The layout of a `kernel.set-tree-row-layout` invocation, or why it is refused.
+pub(crate) fn tree_row_layout_argument(
+    arguments_json: &str,
+) -> Result<crate::tree_row_layout::TreeRowLayout, String> {
+    const USAGE: &str = "kernel.set-tree-row-layout takes {\"order\": [...], \"hidden\": [...]}";
+    let value: serde_json::Value =
+        serde_json::from_str(arguments_json).map_err(|error| format!("{USAGE}: {error}"))?;
+    if !value.is_object() {
+        return Err(USAGE.to_owned());
+    }
+    serde_json::from_value::<crate::tree_row_layout::TreeRowLayout>(value)
+        .map(crate::tree_row_layout::TreeRowLayout::normalized)
+        .map_err(|error| format!("{USAGE}: {error}"))
 }
 
 /// The kernel command that sets an option of an editor pane:
@@ -202,6 +224,10 @@ fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
             Ok((pane, option)) => {
                 Classified::Effect(ClientEffect::SetEditorOption { pane, option })
             }
+            Err(reason) => refused(ErrorCode::InvalidArgument, reason),
+        },
+        SET_TREE_ROW_LAYOUT_COMMAND => match tree_row_layout_argument(&spec.arguments_json) {
+            Ok(layout) => Classified::Effect(ClientEffect::SetTreeRowLayout(layout)),
             Err(reason) => refused(ErrorCode::InvalidArgument, reason),
         },
         other => refused(
@@ -386,6 +412,39 @@ mod tests {
             Classified::Effect(ClientEffect::FreezeAgent(ilium_core::NodeId(4)))
         ));
         assert!(matches!(freeze("{}"), Classified::Refused(_)));
+    }
+
+    #[test]
+    fn set_tree_row_layout_takes_a_normalized_slot_order() {
+        use crate::tree_row_layout::{TreeRowElement, TreeRowLayout};
+        let set = |arguments_json: &str| {
+            classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+                command: SET_TREE_ROW_LAYOUT_COMMAND.to_owned(),
+                arguments_json: arguments_json.to_owned(),
+            }))
+        };
+        let Classified::Effect(ClientEffect::SetTreeRowLayout(layout)) =
+            set(r#"{"order": ["title", "identity"], "hidden": ["title", "activity"]}"#)
+        else {
+            panic!("a valid layout is an effect");
+        };
+        assert_eq!(
+            layout,
+            TreeRowLayout {
+                order: vec![
+                    TreeRowElement::Title,
+                    TreeRowElement::Identity,
+                    TreeRowElement::Objective,
+                    TreeRowElement::Activity,
+                ],
+                hidden: vec![TreeRowElement::Activity],
+            }
+        );
+        assert!(matches!(
+            set(r#"{"order": ["nope"]}"#),
+            Classified::Refused(_)
+        ));
+        assert!(matches!(set("[]"), Classified::Refused(_)));
     }
 
     fn set_editor_option(arguments_json: &str) -> Classified {

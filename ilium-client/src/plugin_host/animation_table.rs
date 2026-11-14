@@ -9,7 +9,8 @@
 
 use crate::background_animation::AnimationKind;
 
-/// The scene the `scene` row of the plugin manifest defaults to.
+/// The scene the `scene` row of the plugin manifest defaults to. Stars overhead is a scene of
+/// the Scenes plugin now, so its saved name loads as the plugin scene kind.
 const DEFAULT_SCENE: &str = "stars";
 
 /// The scene the `[animations]` table asks for, or `None` when it asks for no change.
@@ -53,7 +54,7 @@ mod tests {
     #[test]
     fn a_scene_name_selects_that_scene() {
         assert_eq!(
-            requested_kind(&table("scene = \"clouds\""), AnimationKind::Stars),
+            requested_kind(&table("scene = \"clouds\""), AnimationKind::Images),
             Some(AnimationKind::Clouds)
         );
     }
@@ -61,7 +62,7 @@ mod tests {
     #[test]
     fn the_current_scene_asks_for_no_change() {
         assert_eq!(
-            requested_kind(&table("scene = \"stars\""), AnimationKind::Stars),
+            requested_kind(&table("scene = \"clouds\""), AnimationKind::Clouds),
             None
         );
     }
@@ -69,11 +70,11 @@ mod tests {
     #[test]
     fn an_unknown_scene_asks_for_nothing() {
         assert_eq!(
-            requested_kind(&table("scene = \"no-such-scene\""), AnimationKind::Stars),
+            requested_kind(&table("scene = \"no-such-scene\""), AnimationKind::Images),
             None
         );
         assert_eq!(
-            requested_kind(&table("scene = 3"), AnimationKind::Stars),
+            requested_kind(&table("scene = 3"), AnimationKind::Images),
             None
         );
     }
@@ -83,7 +84,7 @@ mod tests {
         assert_eq!(
             requested_kind(
                 &table("scene = \"clouds\"\nsemantic = true"),
-                AnimationKind::Stars
+                AnimationKind::Images
             ),
             Some(AnimationKind::Semantic)
         );
@@ -104,7 +105,7 @@ mod tests {
     fn semantic_off_without_a_scene_returns_to_the_manifest_default() {
         assert_eq!(
             requested_kind(&table("semantic = false"), AnimationKind::Semantic),
-            Some(AnimationKind::Stars)
+            Some(AnimationKind::PluginScene)
         );
     }
 
@@ -129,7 +130,7 @@ mod tests {
         assert_eq!(
             requested_kind(
                 &table("observer = { lat = 1.0, lon = 2.0 }\n[saved_places]\nhome = { lat = 1.0, lon = 2.0 }"),
-                AnimationKind::Stars
+                AnimationKind::Images
             ),
             None
         );

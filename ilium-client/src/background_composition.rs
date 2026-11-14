@@ -1668,7 +1668,7 @@ mod tests {
             ..Default::default()
         };
         assert!(needs_screen_occupancy(&settings));
-        settings.kind = crate::background_animation::AnimationKind::Shoreline;
+        settings.kind = crate::background_animation::AnimationKind::NightLights;
         assert!(!needs_screen_occupancy(&settings));
     }
 
@@ -1752,39 +1752,6 @@ mod tests {
     }
 
     #[test]
-    fn completed_hillside_cache_keeps_composition_off_the_simulation_path() {
-        let project = tempfile::tempdir().unwrap();
-        let mut app = App::new("cached".to_owned(), project.path().to_path_buf());
-        let area = Rect::new(0, 0, 40, 12);
-        app.set_screen_area(area);
-        app.animation_settings.enabled = true;
-        app.animation_settings.kind = crate::background_animation::AnimationKind::WindyHillside;
-        app.animation_settings.loop_seconds = 1;
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let mut warm = Buffer::empty(area);
-        while !app.animation_frame.cache_status().is_ready {
-            compose_ready_for_test(&mut warm, &mut app, Duration::ZERO);
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(1));
-            // A fresh clock request polls existing cache completion; no second
-            // cache or synchronous UI cache generator is constructed.
-            app.animation_frame
-                .render(&app.animation_settings, 40, 12, Duration::from_nanos(1));
-        }
-        let render_count = app.animation_frame.geometry_render_count;
-        for index in 0..120 {
-            let mut buffer = Buffer::empty(area);
-            compose_ready_for_test(&mut buffer, &mut app, Duration::from_millis(index * 33));
-        }
-        assert_eq!(app.animation_frame.geometry_render_count, render_count);
-        assert_eq!(
-            (app.animation_frame.width(), app.animation_frame.height()),
-            (40, 12)
-        );
-        assert!(app.animation_frame.cache_status().is_ready);
-    }
-
-    #[test]
     fn disabled_off_and_opaque_states_add_no_timer_but_preview_remains_live() {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("clock".to_owned(), project.path().to_path_buf());
@@ -1840,7 +1807,7 @@ mod tests {
         let probe = FakeProbe::new();
         *app.animation_frame.host_mut() = fake_host(&probe);
         app.animation_settings.enabled = true;
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Stars;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::NightLights;
         app.animation_settings.density_percent = 100;
         (app, probe, project)
     }
@@ -1898,7 +1865,7 @@ mod tests {
     fn a_slow_scene_wakes_the_loop_once_per_frame_not_twelve_times_a_second() {
         use crate::background_animation::AnimationKind;
         let (mut app, probe, _project) = ambient_app();
-        app.animation_settings.kind = AnimationKind::Stars;
+        app.animation_settings.kind = AnimationKind::NightLights;
         app.ui_settings.motion_level = MotionLevel::Reduced;
         compose_at(&mut app, 0);
         for (frames_per_second, expected_wakeups) in [(1_u32, 10_u32), (2, 20), (12, 120)] {
@@ -1944,14 +1911,14 @@ mod tests {
     }
 
     #[test]
-    fn built_in_scenes_and_unhosted_kinds_keep_the_thirty_fps_clock() {
+    fn plugin_scenes_and_unhosted_kinds_keep_the_thirty_fps_clock() {
         let (mut app, probe, _project) = ambient_app();
         probe.fps.store(1, std::sync::atomic::Ordering::SeqCst);
         // No scene is hosted yet: the default cadence applies.
         assert_eq!(app.animation_frames_per_second(), 30);
         compose_at(&mut app, 0);
         assert_eq!(app.animation_frames_per_second(), 1);
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Kelp;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::PluginScene;
         assert_eq!(app.animation_frames_per_second(), 30);
     }
 
@@ -2103,8 +2070,8 @@ mod tests {
         compose_at(&mut app, 3);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 3);
         assert_eq!(probe.alive(), 1);
-        // A built-in scene owns no hosted scene.
-        app.animation_settings.kind = AnimationKind::Kelp;
+        // A plugin scene owns no hosted kernel scene.
+        app.animation_settings.kind = AnimationKind::PluginScene;
         compose_at(&mut app, 4);
         assert_eq!(probe.alive(), 0);
         // Back to a hosted kind builds again; hiding drops it.

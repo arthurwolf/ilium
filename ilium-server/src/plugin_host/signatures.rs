@@ -57,10 +57,112 @@ pub(crate) fn manifest_signatures(manifest: &str) -> Vec<AgentSignature> {
         .collect()
 }
 
+/// Most actions one signature may declare.
+const ACTIONS_PER_SIGNATURE: usize = 32;
+/// Longest key string of one action, in bytes.
+const ACTION_KEYS_BYTES: usize = 1024;
+/// The activities an action runs in when it names none (capability-agent-control.md).
+const DEFAULT_ALLOWED_WHEN: [&str; 4] = ["idle", "done", "awaiting-approval", "menu"];
+
+/// One action of a signature: the keys it presses and the activities it may run in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SignatureActionSpec {
+    pub(crate) keys: String,
+    pub(crate) allowed_when: Vec<String>,
+}
+
+impl SignatureActionSpec {
+    pub(crate) fn new(keys: &str, allowed_when: &[&str]) -> Self {
+        Self {
+            keys: keys.to_owned(),
+            allowed_when: allowed_when.iter().map(|name| (*name).to_owned()).collect(),
+        }
+    }
+
+    /// Whether the action may run while the agent shows `activity` (an `agent-activity` name).
+    pub(crate) fn allows(&self, activity: &str) -> bool {
+        self.allowed_when.iter().any(|allowed| allowed == activity)
+    }
+}
+
+/// The actions of one signature entry and the lower-case names that identify its pane: its
+/// id, `process_names` and `aliases`. A pane's class is the matched name, so any of them
+/// finds the entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SignatureActions {
+    names: BTreeSet<String>,
+    actions: BTreeMap<String, SignatureActionSpec>,
+}
+
+/// The actions every signature entry of one manifest declares. An entry without actions, a
+/// malformed manifest and an action without `keys` contribute nothing.
+pub(crate) fn manifest_actions(manifest: &str) -> Vec<SignatureActions> {
+    let Ok(manifest) = serde_json::from_str::<Value>(manifest) else {
+        return Vec::new();
+    };
+    let entries = manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get("signatures"))
+        .and_then(Value::as_array);
+    entries
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?;
+            let declared = entry.get("actions").and_then(Value::as_object)?;
+            let actions: BTreeMap<String, SignatureActionSpec> = declared
+                .iter()
+                .filter_map(|(action_id, action)| {
+                    let keys = action.get("keys").and_then(Value::as_str)?;
+                    if keys.len() > ACTION_KEYS_BYTES {
+                        return None;
+                    }
+                    let allowed_when = match action.get("allowed_when").and_then(Value::as_array) {
+                        Some(list) => list
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                        None => DEFAULT_ALLOWED_WHEN
+                            .iter()
+                            .map(|name| (*name).to_owned())
+                            .collect(),
+                    };
+                    Some((
+                        action_id.clone(),
+                        SignatureActionSpec {
+                            keys: keys.to_owned(),
+                            allowed_when,
+                        },
+                    ))
+                })
+                .take(ACTIONS_PER_SIGNATURE)
+                .collect();
+            if actions.is_empty() {
+                return None;
+            }
+            let names = std::iter::once(id)
+                .chain(
+                    ["process_names", "aliases"]
+                        .into_iter()
+                        .filter_map(|field| entry.get(field).and_then(Value::as_array))
+                        .flatten()
+                        .filter_map(Value::as_str),
+                )
+                .map(|name| name.trim().to_lowercase())
+                .filter(|name| !name.is_empty())
+                .collect();
+            Some(SignatureActions { names, actions })
+        })
+        .collect()
+}
+
 /// The signatures of every catalogue plugin, and which plugins are disabled.
 #[derive(Debug, Default)]
 pub(crate) struct ContributedSignatures {
     by_plugin: BTreeMap<String, Vec<AgentSignature>>,
+    /// The declared actions of each plugin's signatures, for `agent-action` intents.
+    actions: BTreeMap<String, Vec<SignatureActions>>,
     disabled: BTreeSet<String>,
 }
 
@@ -72,17 +174,38 @@ impl ContributedSignatures {
         disabled: BTreeSet<String>,
         core_only: bool,
     ) -> Self {
-        let by_plugin = catalogue
+        let catalogue: Vec<(&str, &str)> = catalogue
             .filter(|(plugin, _)| {
                 !core_only || ilium_plugin_host::lifecycle::is_core_plugin(plugin)
             })
-            .map(|(plugin, manifest)| (plugin.to_owned(), manifest_signatures(manifest)))
+            .collect();
+        let by_plugin = catalogue
+            .iter()
+            .map(|(plugin, manifest)| ((*plugin).to_owned(), manifest_signatures(manifest)))
             .filter(|(_, signatures)| !signatures.is_empty())
+            .collect();
+        let actions = catalogue
+            .iter()
+            .map(|(plugin, manifest)| ((*plugin).to_owned(), manifest_actions(manifest)))
+            .filter(|(_, actions)| !actions.is_empty())
             .collect();
         Self {
             by_plugin,
+            actions,
             disabled,
         }
+    }
+
+    /// The action `action_id` of the enabled signature that identifies a pane whose agent
+    /// class is `class_name` (lower-case), or `None` when no enabled plugin declares it.
+    pub(crate) fn action(&self, class_name: &str, action_id: &str) -> Option<SignatureActionSpec> {
+        let wanted = class_name.to_lowercase();
+        self.actions
+            .iter()
+            .filter(|(plugin, _)| !self.disabled.contains(*plugin))
+            .flat_map(|(_, entries)| entries.iter())
+            .filter(|entry| entry.names.contains(&wanted))
+            .find_map(|entry| entry.actions.get(action_id).cloned())
     }
 
     /// Records that a plugin was enabled or disabled.
@@ -130,6 +253,38 @@ mod tests {
             AgentClass::Other("todo-runner".to_owned())
         );
         assert!(manifest_signatures("not json").is_empty());
+    }
+
+    #[test]
+    fn declared_actions_default_their_activities_and_follow_the_enabled_plugins() {
+        let manifest = r#"{"contributes": {"signatures": [{
+            "id": "example-agent",
+            "process_names": ["example-cli"],
+            "aliases": ["Example"],
+            "actions": {
+                "compact": {"keys": "/compact\r", "allowed_when": ["idle"]},
+                "clear": {"keys": "/clear\r"},
+                "broken": {"allowed_when": ["idle"]}
+            }
+        }]}}"#;
+        let mut contributed = ContributedSignatures::new(
+            [("example.agent", manifest)].into_iter(),
+            BTreeSet::new(),
+            false,
+        );
+        let compact = contributed
+            .action("example-cli", "compact")
+            .expect("a process name finds the signature");
+        assert_eq!(compact.keys, "/compact\r");
+        assert!(compact.allows("idle") && !compact.allows("done"));
+        let clear = contributed
+            .action("EXAMPLE", "clear")
+            .expect("an alias too");
+        assert!(clear.allows("awaiting-approval") && !clear.allows("working"));
+        assert_eq!(contributed.action("example-cli", "broken"), None);
+        assert_eq!(contributed.action("other", "compact"), None);
+        contributed.set_enabled("example.agent", false);
+        assert_eq!(contributed.action("example-cli", "compact"), None);
     }
 
     #[test]

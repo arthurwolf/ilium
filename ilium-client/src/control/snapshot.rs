@@ -90,22 +90,6 @@ pub(super) fn preflight(app: &App) -> Result<(), String> {
                     bytes.saturating_add(line.len()).saturating_add(64)
                 });
             }
-            PaneRuntime::Board(board) => {
-                bytes =
-                    bytes.saturating_add(board.storage.path().as_os_str().len().saturating_mul(3));
-                for column in &board.columns {
-                    bytes = bytes
-                        .saturating_add(column.title.len())
-                        .saturating_add(4096);
-                    for card in &column.cards {
-                        bytes = bytes
-                            .saturating_add(card.title.len())
-                            .saturating_add(card.body.len())
-                            .saturating_add(24_000)
-                            .saturating_add(4096);
-                    }
-                }
-            }
         }
     }
     for text in [
@@ -229,7 +213,6 @@ fn node_snapshot(app: &App, node_id: NodeId) -> Option<NodeSnapshot> {
             match content {
                 PaneContentKind::Terminal => "terminal",
                 PaneContentKind::Editor => "editor",
-                PaneContentKind::Board => "board",
                 PaneContentKind::Plugin => "plugin",
             }
             .to_owned(),
@@ -289,7 +272,6 @@ fn pane_status_snapshot(status: &PaneStatus) -> Value {
             "latest_prompt_unavailable": recovery.latest_prompt_unavailable,
         }),
         PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
-        PaneStatus::Board => json!({ "kind": "board" }),
         PaneStatus::Plugin { dirty } => json!({ "kind": "plugin", "dirty": dirty }),
     }
 }
@@ -333,17 +315,12 @@ enum PaneCapture {
         lines: Vec<String>,
         metadata: serde_json::Map<String, Value>,
     },
-    Board {
-        columns: Vec<crate::board::BoardColumn>,
-        metadata: serde_json::Map<String, Value>,
-    },
 }
 impl std::fmt::Debug for PaneCapture {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Terminal(_) => "TerminalCapture",
             Self::Editor { .. } => "EditorCapture",
-            Self::Board { .. } => "BoardCapture",
         })
     }
 }
@@ -365,42 +342,6 @@ impl PaneCapture {
                 metadata.insert("text".into(), Value::String(full_text[start..].into()));
                 metadata.insert("text_truncated".into(), Value::Bool(start > 0));
                 metadata.insert("text_start_line".into(), Value::from(text_start_line));
-                Value::Object(metadata)
-            }
-            Self::Board {
-                columns,
-                mut metadata,
-            } => {
-                let columns = columns
-                    .into_iter()
-                    .enumerate()
-                    .map(|(column_index, column)| {
-                        let cards = column
-                            .cards
-                            .into_iter()
-                            .enumerate()
-                            .map(|(card_index, card)| {
-                                let mut value = serde_json::Map::new();
-                                value.insert("index".into(), Value::from(card_index));
-                                value.insert("title".into(), Value::String(card.title));
-                                value.insert(
-                                    "body".into(),
-                                    Value::String(suffix_by_characters(
-                                        &card.body,
-                                        MAX_PANE_CONTENT_CHARACTERS,
-                                    )),
-                                );
-                                Value::Object(value)
-                            })
-                            .collect::<Vec<_>>();
-                        let mut value = serde_json::Map::new();
-                        value.insert("index".into(), Value::from(column_index));
-                        value.insert("title".into(), Value::String(column.title));
-                        value.insert("cards".into(), Value::Array(cards));
-                        Value::Object(value)
-                    })
-                    .collect();
-                metadata.insert("columns".into(), Value::Array(columns));
                 Value::Object(metadata)
             }
         }
@@ -426,17 +367,6 @@ fn capture_pane(app: &App, pane_id: NodeId) -> Result<Option<PaneCapture>, Strin
             };
             PaneCapture::Editor {
                 lines: editor.textarea.lines().to_vec(),
-                metadata,
-            }
-        }
-        PaneRuntime::Board(board) => {
-            let metadata = json!({"storage":board.storage.path().display().to_string(),"selected_column":board.selected_column,
-                "selected_card":board.selected_card,"detail_panel_open":board.is_detail_panel_open});
-            let Value::Object(metadata) = metadata else {
-                unreachable!("object literal");
-            };
-            PaneCapture::Board {
-                columns: board.columns.clone(),
                 metadata,
             }
         }
@@ -474,9 +404,8 @@ fn settings_snapshot(app: &App) -> Value {
             "terminal.scrollback_budget_mib", "terminal.engine_memory_budget_mib", "terminal.new_pane_directory",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
-            "session.recovery_policy", "session.backups_enabled", "keyboard.shortcut_base", "keyboard.preset",
-            "keyboard.bindings.<action_name>", "kanban_board.card_preview_lines",
-            "kanban_board.minimum_column_width", "sound.source", "sound.file",
+            "keyboard.shortcut_base", "keyboard.preset",
+            "keyboard.bindings.<action_name>", "sound.source", "sound.file",
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
             "sound.events.task_succeeded", "sound.events.task_failed",
@@ -542,14 +471,6 @@ fn settings_snapshot(app: &App) -> Value {
             "autosave": app.editor_settings.autosave_enabled,
             "autosave_delay_ms": app.editor_settings.autosave_delay_ms,
             "markdown_rendered_by_default": app.editor_settings.markdown_rendered_by_default,
-        },
-        "kanban_board": {
-            "card_preview_lines": app.kanban_board_settings.card_preview_lines,
-            "minimum_column_width": app.kanban_board_settings.minimum_column_width,
-        },
-        "session": {
-            "recovery_policy": app.session_settings.recovery_policy.label(),
-            "backups_enabled": app.session_settings.backups_enabled,
         },
         "git": {
             "default_where": match app.git_settings.default_where {
@@ -716,12 +637,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ConfirmWorkspaceCloseOffer(_) => "confirm_workspace_close_offer",
         Mode::GitSettingPrompt(_, _) => "git_setting_prompt",
         Mode::PluginPopup(_) => "plugin_popup",
-        Mode::CreateBoard(_) => "create_board",
-        Mode::BoardPathPicker(_) => "board_path_picker",
-        Mode::BoardCardPrompt(..) => "board_card_prompt",
-        Mode::BoardColumnPrompt(..) => "board_column_prompt",
-        Mode::BoardRenamePrompt(..) => "board_rename_prompt",
-        Mode::BoardDeleteConfirm(..) => "board_delete_confirm",
         Mode::ConfirmClose(_) => "confirm_close",
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",

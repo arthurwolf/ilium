@@ -19,8 +19,14 @@
 //! A scene may also write the glyph plane (`write-glyphs`): the character it names replaces the
 //! Braille dots of its cell, and [`Scene::native_glyph`] hands it to the client host.
 //!
-//! What scenes cannot use yet: host imports other than the frame surface (a scene's `log`,
-//! `http`, `media` ... calls trap with `host.engine-error`) and owner ids.
+//! Host imports: every scene instance is equipped by
+//! [`ilium_plugin_host::wiring::scene::SceneImportServices`] from the scene side of the manifest
+//! (`capabilities.scene`) only: `log`, `clock`, `codec`, `fonts`, `gpu`, `storage`, `fs` (its
+//! private scopes and `minecraft-saves`), frame-bound `http`, `jobs` (run between frames in job
+//! instances of the same component), `audio`, `media` (ffmpeg), the observer `location` and
+//! `geocode`, each linked only when a grant unlocks it. Before each frame
+//! [`SceneGuest::pump_background`] starts queued jobs and delivers import events to a scene that
+//! exports `handler`. Scenes get no owner ids.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -35,14 +41,12 @@ use ilium_plugin_api::generated::anim::surface::{OccupancyGrid, ScenePointer};
 use ilium_plugin_api::generated::anim::Readiness;
 use ilium_plugin_host::calls::ResolvedLimits;
 use ilium_plugin_host::engine::{CompiledComponent, PluginEngine};
-use ilium_plugin_host::imports::env::ImportEnv;
-use ilium_plugin_host::imports::generated_dispatch::ImportSet;
-use ilium_plugin_host::imports::http::HttpImport;
+use ilium_plugin_host::imports::location::OBSERVER_GRANT;
 use ilium_plugin_host::runtime::CataloguePlugin;
 use ilium_plugin_host::scene_guest::{
     PresentedFrame, SceneFrameInput, SceneGuest, SceneTraits, PIXELS_PER_COLUMN, PIXELS_PER_ROW,
 };
-use ilium_plugin_host::store_data::GuestIdentity;
+use ilium_plugin_host::wiring::scene::{SceneImportServices, SceneInstanceRequest};
 use serde_json::{json, Value};
 
 use super::scene_controls::SceneControlSchema;
@@ -61,6 +65,8 @@ pub(crate) struct SceneDeclaration {
     pub(crate) frame_rate_cap: u32,
     /// The scene's own settings rows, from `settings_schema`.
     pub(crate) controls: SceneControlSchema,
+    /// The scene shows the observer location (`uses_location`), so settings offer the row.
+    pub(crate) uses_location: bool,
 }
 
 /// The scenes and the scene-side grants a manifest declares. Scenes without an id are skipped.
@@ -94,6 +100,10 @@ pub(crate) fn declared_scenes(manifest: &str) -> (Vec<SceneDeclaration>, Vec<Str
                         title,
                         frame_rate_cap,
                         controls,
+                        uses_location: scene
+                            .get("uses_location")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     })
                 })
                 .collect()
@@ -120,6 +130,7 @@ pub(crate) fn declared_scenes(manifest: &str) -> (Vec<SceneDeclaration>, Vec<Str
 pub(crate) fn register_catalogue(
     scenes: &mut ExternalScenes,
     engine: &Arc<PluginEngine>,
+    services: &SceneImportServices,
     catalogue: &[CataloguePlugin],
     disabled: &BTreeSet<String>,
 ) -> usize {
@@ -135,6 +146,9 @@ pub(crate) fn register_catalogue(
         if declared.is_empty() {
             continue;
         }
+        // `declared_scenes` parsed the same text, so this only fails for an empty manifest.
+        let manifest =
+            Arc::new(serde_json::from_str::<Value>(&plugin.manifest).unwrap_or_default());
         let compiled = match engine.compile(component) {
             Ok(compiled) => compiled,
             Err(error) => {
@@ -150,6 +164,8 @@ pub(crate) fn register_catalogue(
                 engine: Arc::clone(engine),
                 compiled: compiled.clone(),
                 granted: granted.clone(),
+                manifest: Arc::clone(&manifest),
+                services: services.clone(),
             };
             match scenes.register(Box::new(factory)) {
                 Ok(()) => registered += 1,
@@ -165,11 +181,12 @@ pub(crate) fn register_catalogue(
 /// Registers the scenes of `catalogue` in the process-wide registry.
 pub(crate) fn register_bundled(
     engine: &Arc<PluginEngine>,
+    services: &SceneImportServices,
     catalogue: &[CataloguePlugin],
     disabled: &BTreeSet<String>,
 ) -> usize {
     match external_scenes().write() {
-        Ok(mut scenes) => register_catalogue(&mut scenes, engine, catalogue, disabled),
+        Ok(mut scenes) => register_catalogue(&mut scenes, engine, services, catalogue, disabled),
         Err(_) => {
             tracing::error!("plugin scene registry is poisoned; no plugin scenes registered");
             0
@@ -182,6 +199,7 @@ pub(crate) fn register_bundled(
 /// registered (0 when disabling).
 pub(crate) fn set_plugin_enabled(
     engine: &Arc<PluginEngine>,
+    services: &SceneImportServices,
     catalogue: &[CataloguePlugin],
     plugin: &str,
     enabled: bool,
@@ -200,7 +218,7 @@ pub(crate) fn set_plugin_enabled(
         .filter(|candidate| candidate.id == plugin)
         .cloned()
         .collect();
-    register_catalogue(&mut scenes, engine, &own, &BTreeSet::new())
+    register_catalogue(&mut scenes, engine, services, &own, &BTreeSet::new())
 }
 
 /// A scene of a plugin's scene component.
@@ -211,6 +229,10 @@ pub(crate) struct PluginSceneFactory {
     engine: Arc<PluginEngine>,
     compiled: CompiledComponent,
     granted: Vec<String>,
+    /// The plugin's manifest, for `contributes.jobs` and `limits_tier`.
+    manifest: Arc<Value>,
+    /// Builds the host imports of each scene instance.
+    services: SceneImportServices,
 }
 
 impl PluginSceneFactory {
@@ -223,41 +245,46 @@ impl PluginSceneFactory {
         values: &SceneValues,
     ) -> PluginScene {
         let palette_rgb = palette_rgb(palette);
+        // The observer position reaches only a scene holding `location.observer`, in the spec
+        // and through the `location` import alike.
+        let observer = self
+            .granted
+            .iter()
+            .any(|grant| grant == OBSERVER_GRANT)
+            .then_some((location.latitude, location.longitude));
         let spec = json!({
             "scene": self.declaration.id,
             "settings": self.declaration.controls.settings_json(values),
             "palette": palette_rgb,
-            "location": {"latitude": location.latitude, "longitude": location.longitude},
+            "location": observer.map(|(latitude, longitude)| {
+                json!({"latitude": latitude, "longitude": longitude})
+            }),
             "mode": "live",
         })
         .to_string();
-        let identity = GuestIdentity {
-            plugin: self.plugin.clone(),
-            side: ilium_plugin_api::Side::Scene,
-            granted: self.granted.clone(),
-        };
-        // A scene draws inside a render frame, so its http import never waits for an answer
-        // (`take-response` reports a running fetch as not ready) and reaches only the hosts
-        // the scene side of the manifest grants.
-        let imports = ImportSet {
-            http: Some(Box::new(
-                HttpImport::new(
-                    ImportEnv::unrestricted()
-                        .with_identity(&self.plugin, 1)
-                        .with_grants(self.granted.clone()),
-                )
-                .without_waiting(),
-            )),
-            ..ImportSet::default()
-        };
+        let limits = ResolvedLimits(Default::default());
+        // Each instance gets its own imports, job book and event queue, built from the scene
+        // grants only; `http` never waits inside a frame.
+        let equipped = self.services.equip(
+            &SceneInstanceRequest {
+                plugin: &self.plugin,
+                granted: &self.granted,
+                manifest: &self.manifest,
+                observer,
+            },
+            &self.engine,
+            &self.compiled,
+            &limits,
+        );
         let guest = SceneGuest::instantiate(
             Arc::clone(&self.engine),
             &self.compiled,
-            ResolvedLimits(Default::default()),
-            imports,
-            identity,
+            limits,
+            equipped.imports,
+            equipped.identity,
             &spec,
-        );
+        )
+        .map(|guest| guest.with_background(equipped.background));
         PluginScene::new(guest, self.declaration.frame_rate_cap, palette_rgb)
     }
 }
@@ -282,6 +309,10 @@ impl ExternalSceneFactory for PluginSceneFactory {
         value: ControlValue,
     ) -> Result<bool, String> {
         self.declaration.controls.set_control(values, id, value)
+    }
+
+    fn uses_location(&self) -> bool {
+        self.declaration.uses_location
     }
 
     fn create(&self, env: &SceneEnv, values: &SceneValues) -> Box<dyn Scene> {
@@ -421,6 +452,13 @@ impl Scene for PluginScene {
             .wants_occupancy
             .then(|| self.occupancy.clone())
             .flatten();
+        // Jobs the scene queued in the last frame start, and what its imports delivered reaches
+        // its event handler, before it draws the next frame.
+        if let Some(guest) = self.guest.as_mut() {
+            if let Err(trap) = guest.pump_background() {
+                self.fail(&trap);
+            }
+        }
         if let Some(guest) = self.guest.as_mut() {
             if let Ok(mut surface) = guest.surface().lock() {
                 surface.set_pointer(pointer);
@@ -550,7 +588,9 @@ mod tests {
     use ilium_ambient::Raster;
     use ilium_plugin_api::ProcessKind;
     use ilium_plugin_host::engine::EngineConfig;
-    use ilium_plugin_host::testing::wat::scene_component_text;
+    use ilium_plugin_host::testing::wat::{
+        scene_component_text, scene_component_with_location_text,
+    };
     use ilium_plugin_host::testing::wat_component;
     use std::borrow::Cow;
 
@@ -610,12 +650,14 @@ mod tests {
                     title: "Grey field".to_owned(),
                     frame_rate_cap: 5,
                     controls: SceneControlSchema::default(),
+                    uses_location: false,
                 },
                 SceneDeclaration {
                     id: "second".to_owned(),
                     title: "second".to_owned(),
                     frame_rate_cap: 30,
                     controls: SceneControlSchema::default(),
+                    uses_location: false,
                 },
             ]
         );
@@ -627,7 +669,13 @@ mod tests {
     fn every_declared_scene_of_an_enabled_plugin_is_registered() {
         let mut scenes = ExternalScenes::default();
         let engine = engine();
-        let count = register_catalogue(&mut scenes, &engine, &catalogue(1), &BTreeSet::new());
+        let count = register_catalogue(
+            &mut scenes,
+            &engine,
+            &SceneImportServices::default(),
+            &catalogue(1),
+            &BTreeSet::new(),
+        );
         assert_eq!(count, 2);
         assert_eq!(
             scenes.entries(),
@@ -639,7 +687,13 @@ mod tests {
         assert_eq!(scenes.unregister_plugin("test.scenes"), 2);
         let disabled = BTreeSet::from(["test.scenes".to_owned()]);
         assert_eq!(
-            register_catalogue(&mut scenes, &engine, &catalogue(1), &disabled),
+            register_catalogue(
+                &mut scenes,
+                &engine,
+                &SceneImportServices::default(),
+                &catalogue(1),
+                &disabled,
+            ),
             0
         );
     }
@@ -658,10 +712,13 @@ mod tests {
                 title: "Grey field".to_owned(),
                 frame_rate_cap: 5,
                 controls: SceneControlSchema::default(),
+                uses_location: false,
             },
             engine,
             compiled,
             granted: Vec::new(),
+            manifest: Arc::new(Value::Null),
+            services: SceneImportServices::default(),
         };
         let mut scene = factory.build(
             &ScenePalette::default(),
@@ -695,10 +752,13 @@ mod tests {
                 title: "None".to_owned(),
                 frame_rate_cap: 30,
                 controls: SceneControlSchema::default(),
+                uses_location: false,
             },
             engine,
             compiled,
             granted: Vec::new(),
+            manifest: Arc::new(Value::Null),
+            services: SceneImportServices::default(),
         };
         let mut scene = factory.build(
             &ScenePalette::default(),
@@ -709,6 +769,63 @@ mod tests {
         assert!(matches!(scene.readiness(), SceneReadiness::Unavailable(_)));
         let (raster, _) = draw(&mut scene, 2, 1);
         assert!(raster.dots.iter().all(|dot| *dot == 0.0));
+    }
+
+    fn location_factory(engine: &Arc<PluginEngine>, granted: &[&str]) -> PluginSceneFactory {
+        let compiled = engine
+            .compile(&wat_component(&scene_component_with_location_text()))
+            .expect("component");
+        PluginSceneFactory {
+            id: "test.scenes.located".to_owned(),
+            plugin: "test.scenes".to_owned(),
+            declaration: SceneDeclaration {
+                id: "located".to_owned(),
+                title: "Located".to_owned(),
+                frame_rate_cap: 30,
+                controls: SceneControlSchema::default(),
+                uses_location: false,
+            },
+            engine: Arc::clone(engine),
+            compiled,
+            granted: granted.iter().map(|grant| (*grant).to_owned()).collect(),
+            manifest: Arc::new(Value::Null),
+            services: SceneImportServices::default(),
+        }
+    }
+
+    #[test]
+    fn a_plugin_scene_reads_the_observer_position_through_its_location_import() {
+        let engine = engine();
+        let lisbon = GeoLocation {
+            label: "Lisbon".to_owned(),
+            latitude: 38.72,
+            longitude: -9.14,
+        };
+        let mut scene = location_factory(&engine, &["location.observer"]).build(
+            &ScenePalette::default(),
+            &lisbon,
+            &SceneValues::new(),
+        );
+        assert_eq!(scene.readiness(), SceneReadiness::Ready);
+        // The status line is asked every STATUS_EVERY_FRAMES frames; the guest's `status` calls
+        // `location.current` and says whether a position came back.
+        for _ in 0..STATUS_EVERY_FRAMES {
+            draw(&mut scene, 3, 2);
+        }
+        assert_eq!(scene.status(), Some("located".to_owned()));
+    }
+
+    #[test]
+    fn a_plugin_scene_without_the_location_grant_does_not_start() {
+        let engine = engine();
+        let mut scene = location_factory(&engine, &["http:api.example.org"]).build(
+            &ScenePalette::default(),
+            &GeoLocation::default(),
+            &SceneValues::new(),
+        );
+        assert!(matches!(scene.readiness(), SceneReadiness::Unavailable(_)));
+        let status = scene.status().unwrap_or_default();
+        assert!(status.contains("import-ungranted"), "{status}");
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //! Flatpak's distribution wrapper hands the *whole trusted CLI* to the host.
 //!
 //! This avoids trying to create nested namespaces inside Flatpak. The host CLI
-//! then owns its normal server, animation helper, and native resource domains.
-//! The host command permission is a full sandbox escape for the trusted CLI;
-//! unverified animation code must still enter only the existing sealed helper.
+//! then owns its normal server and native resource domains.
+//! The host command permission is a full sandbox escape for the trusted CLI,
+//! so the handoff verifies the exact `ilium` and `ilium-server` payload first.
 
 use std::{io, process::ExitStatus};
 
@@ -69,7 +69,6 @@ pub fn maybe_handoff() -> io::Result<Option<ExitStatus>> {
     let identity = [
         hash_executable(Path::new("/proc/self/exe"))?,
         hash_executable(&payload.join("ilium-server"))?,
-        hash_executable(&payload.join("ilium-animation-helper"))?,
     ]
     .join(":");
     let host_executable = app_path.join(PAYLOAD_DIRECTORY).join("ilium");
@@ -180,7 +179,7 @@ fn hash_executable(path: &Path) -> io::Result<String> {
 #[cfg(target_os = "linux")]
 fn verify_host_identity(expected: &str) -> io::Result<()> {
     let digests: Vec<&str> = expected.split(':').collect();
-    if digests.len() != 3
+    if digests.len() != 2
         || digests.iter().any(|digest| {
             digest.len() != 64
                 || !digest
@@ -202,7 +201,6 @@ fn verify_host_identity(expected: &str) -> io::Result<()> {
     let actual = [
         hash_executable(Path::new("/proc/self/exe"))?,
         hash_executable(&sibling.join("ilium-server"))?,
-        hash_executable(&sibling.join("ilium-animation-helper"))?,
     ];
     if actual
         .iter()

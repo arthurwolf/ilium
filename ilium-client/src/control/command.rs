@@ -1,6 +1,6 @@
 //! Typed semantic commands accepted by every control transport.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Stable node reference. An omitted target means the currently selected or
 /// active node; callers should prefer `id` after reading `ilium_get_state`.
@@ -275,7 +275,7 @@ pub struct BoardCommand {
     pub checkbox: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoardAction {
     SelectColumn,

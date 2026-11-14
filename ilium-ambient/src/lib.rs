@@ -11,7 +11,6 @@ pub mod dither;
 pub mod external;
 pub mod geocode;
 pub mod gpu;
-pub mod live_data;
 pub mod location;
 pub mod minecraft;
 pub mod plugin_scene;
@@ -38,14 +37,8 @@ pub use scenes::spectrum::{
 
 pub use scenes::{
     clouds::CloudsSettings, images::ImagesSettings, night_lights::NightLightsSettings,
-    spectrum::SpectrumSettings, stars::StarsSettings, video::VideoSettings,
+    spectrum::SpectrumSettings, video::VideoSettings,
 };
-
-// Pure world/renderer contracts support offline capture and acceptance probes.
-pub use scenes::voxel_landscape;
-pub use scenes::voxel_landscape::VoxelLandscapeSettings;
-
-pub use scenes::topographic_maps::TopographicMapsSettings;
 
 pub use scenes::openstreetmap::address_search as openstreetmap_address_search;
 pub use scenes::openstreetmap::{

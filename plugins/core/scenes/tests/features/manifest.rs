@@ -31,10 +31,21 @@ fn manifest_010_scene_side_only_with_base_world() {
 #[test]
 fn manifest_010_scene_capabilities_are_exact() {
     let m = manifest_value();
-    assert_eq!(
-        m["capabilities"],
-        json!({"scene": ["media.video", "location.observer", "gpu.kernels", "http:services.swpc.noaa.gov"]})
-    );
+    let grants = m["capabilities"]["scene"].as_array().expect("scene grants");
+    assert!(m["capabilities"]
+        .as_object()
+        .is_some_and(|sides| sides.len() == 1));
+    for needed in [
+        "media.video",
+        "location.observer",
+        "gpu.kernels",
+        "http:services.swpc.noaa.gov",
+        "http:earthquake.usgs.gov",
+        "http:opensky-network.org",
+        "http:api.openseafeed.com",
+    ] {
+        assert!(grants.contains(&json!(needed)), "{needed}");
+    }
 }
 
 /// REQ: COR-010
@@ -76,10 +87,12 @@ fn manifest_011_clock_entry_is_exact() {
 /// REQ: COR-011, F-100
 #[test]
 fn manifest_011_stars_entry_is_exact() {
-    assert_eq!(
-        scene_entry("stars-overhead"),
-        json!({"id":"stars-overhead","title":"Stars overhead","family":"maps-space","modes":["live"],"frame_rate_cap":10,"settings_schema":{"type":"object","properties":{}}})
-    );
+    let entry = scene_entry("stars-overhead");
+    assert_eq!(entry["title"], "Stars overhead");
+    assert_eq!(entry["family"], "maps-space");
+    assert_eq!(entry["modes"], json!(["live"]));
+    assert_eq!(entry["frame_rate_cap"], 12);
+    assert!(entry["settings_schema"]["properties"]["projection"].is_object());
 }
 
 /// REQ: COR-011

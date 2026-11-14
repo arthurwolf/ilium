@@ -27,7 +27,7 @@ The picker groups conditions as the table below does. The table is checked by a 
 | Condition | Group | Meaning |
 | --- | --- | --- |
 | `always` | Pane | Matches every pane. Use it as the last rule to pick a fallback icon. |
-| `pane-kind` | Pane | The kind of pane: a live agent, a plain terminal, a lost agent, an editor or a board. Custom icons apply to agent and terminal panes. |
+| `pane-kind` | Pane | The kind of pane: a live agent, a plain terminal, a lost agent or an editor. Custom icons apply to agent and terminal panes. |
 | `editor-dirty` | Pane | The editor pane has unsaved changes. Unknown for any other pane kind. |
 | `pane-bookmarked` | Pane | You bookmarked the pane in the sidebar. |
 | `prompts-queued` | Pane | At least one prompt waits in the pane's prompt queue. |

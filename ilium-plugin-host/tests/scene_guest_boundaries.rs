@@ -147,3 +147,80 @@ fn a_component_without_a_renderer_does_not_become_a_scene() {
     );
     assert!(refused.is_err());
 }
+
+/// Equips a scene the way the client does (`wiring::scene`) and runs one frame.
+fn equipped_scene(
+    engine: Arc<PluginEngine>,
+    text: &str,
+    granted: &[&str],
+    observer: Option<(f64, f64)>,
+) -> Result<SceneGuest, ilium_plugin_host::HostError> {
+    use ilium_plugin_host::wiring::scene::{SceneImportServices, SceneInstanceRequest};
+    let compiled = compile(&engine, text);
+    let granted: Vec<String> = granted.iter().map(|grant| (*grant).to_owned()).collect();
+    let limits = ResolvedLimits(BTreeMap::new());
+    let equipped = SceneImportServices::default().equip(
+        &SceneInstanceRequest {
+            plugin: "test.scene",
+            granted: &granted,
+            manifest: &serde_json::Value::Null,
+            observer,
+        },
+        &engine,
+        &compiled,
+        &limits,
+    );
+    SceneGuest::instantiate(
+        engine,
+        &compiled,
+        limits,
+        equipped.imports,
+        equipped.identity,
+        "{}",
+    )
+    .map(|guest| guest.with_background(equipped.background))
+}
+
+#[test]
+fn an_equipped_scene_pumps_its_background_and_draws() {
+    let mut guest = equipped_scene(
+        engine(),
+        &scene_component_text(9),
+        &["jobs.run", "http:api.example.org"],
+        None,
+    )
+    .expect("equipped scene starts");
+    let pump = guest.pump_background().expect("pump");
+    assert_eq!(pump.jobs_started, 0);
+    assert!(!guest.handles_events());
+    let frame = guest
+        .render(&input(1, 1))
+        .expect("renders")
+        .expect("presented");
+    assert!(frame.pixels.iter().all(|pixel| *pixel == 9));
+}
+
+#[test]
+fn the_location_import_answers_the_observer_position_to_a_granted_scene() {
+    let text = ilium_plugin_host::testing::wat::scene_component_with_location_text();
+    let mut located = equipped_scene(
+        engine(),
+        &text,
+        &["location.observer"],
+        Some((-33.87, 151.21)),
+    )
+    .expect("granted scene starts");
+    assert_eq!(
+        located.status().expect("status"),
+        Some("located".to_owned())
+    );
+    let mut unset = equipped_scene(engine(), &text, &["location.observer"], None)
+        .expect("granted scene starts");
+    assert_eq!(
+        unset.status().expect("status"),
+        Some("unlocated".to_owned())
+    );
+    let refused = equipped_scene(engine(), &text, &[], Some((-33.87, 151.21)));
+    let error = refused.expect_err("an ungranted location import is refused");
+    assert!(error.to_string().contains("import-ungranted"), "{error}");
+}

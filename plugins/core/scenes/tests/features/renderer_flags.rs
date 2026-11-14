@@ -34,7 +34,7 @@ fn flags_011_scenes_without_pointer_interest_do_not_ask_for_the_pointer() {
 /// REQ: COR-011
 #[test]
 fn flags_011_tone_only_scenes_do_not_use_cell_colours() {
-    for id in ["waves", "stars-overhead"] {
+    for id in ["waves"] {
         assert!(!fake_scene(id, 40, 10).uses_cell_colors(), "{id}");
     }
 }
@@ -65,12 +65,8 @@ fn flags_011_reconfigure_with_malformed_json_is_refused() {
 
 /// REQ: F-100
 #[test]
-fn flags_100_stars_status_names_the_observer_after_a_frame() {
+fn flags_100_stars_status_is_empty_while_the_sky_runs_in_real_time() {
     let mut scene = fake_scene_at("stars-overhead", 40, 20, 38.72, -9.14);
     scene.frame(braille_frame(40, 20, 0));
-    let status = status_of(&scene).expect("status after a frame");
-    assert!(
-        status.contains("38.72") && status.contains("9.14"),
-        "{status}"
-    );
+    assert_eq!(status_of(&scene), None);
 }

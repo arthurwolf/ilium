@@ -59,7 +59,6 @@ const REPLY_CAPACITY: usize = 16;
 /// Content kind names of the built-in pane kinds (`NodeView::content_kind`).
 pub(crate) const TERMINAL_KIND: &str = "ilium.terminal";
 const EDITOR_KIND: &str = "ilium.editor";
-const BOARD_KIND: &str = "ilium.board";
 
 /// Where the runtime thread lives. The facade posts to it (a server-side message), the host
 /// handle takes it out at shutdown; nobody blocks on the runtime while holding this lock.
@@ -205,7 +204,6 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
             Some(match content {
                 PaneContentKind::Terminal => TERMINAL_KIND.to_owned(),
                 PaneContentKind::Editor => EDITOR_KIND.to_owned(),
-                PaneContentKind::Board => BOARD_KIND.to_owned(),
                 // A plugin pane reads as its global kind id, `<plugin-id>.<local-id>`.
                 PaneContentKind::Plugin => plugin_pane
                     .as_ref()
@@ -223,9 +221,9 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
             // A folder reads as its own directory, resolved against its project, so a plugin
             // can tell which panes run inside it.
             NodeKind::Folder { path, .. } if path.is_absolute() => Some(path.clone()),
-            NodeKind::Folder { path, .. } => tree
-                .project_path_for(id)
-                .map(|project| project.join(path)),
+            NodeKind::Folder { path, .. } => {
+                tree.project_path_for(id).map(|project| project.join(path))
+            }
             _ => tree.pane_cwd(id).map(std::path::Path::to_path_buf),
         }
         .map(|path| path.to_string_lossy().into_owned()),

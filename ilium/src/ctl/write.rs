@@ -125,18 +125,6 @@ fn to_operation(command: CtlCommand, link: &Link) -> Result<Operation, CtlFailur
         CtlCommand::ReplaceCommand { id, command } => {
             Operation::ReplaceCommand { pane: id, command }
         }
-        CtlCommand::NewBoard {
-            name,
-            path,
-            markdown,
-            project,
-            parent,
-        } => Operation::NewBoard {
-            parent: container(parent, project, link)?,
-            name,
-            path,
-            markdown_file: markdown,
-        },
         CtlCommand::Freeze { id, resume_command } => Operation::Freeze {
             pane: id,
             resume_command,

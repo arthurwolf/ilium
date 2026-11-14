@@ -327,11 +327,10 @@ fn pinned_control_help_rows(detail_rows: u16) -> u16 {
 
 pub(crate) fn has_saved_scene_activity(app: &App) -> bool {
     let context = app.animation_row_context();
-    context.effective_kind == Some(AnimationKind::VoxelLandscape)
-        && context
-            .scene_status
-            .as_deref()
-            .is_some_and(|status| status.lines().count() > 1)
+    context
+        .scene_status
+        .as_deref()
+        .is_some_and(|status| status.lines().count() > 1)
 }
 
 pub(crate) fn page_saved_scene_activity(app: &App, state: &mut SettingsState, older: bool) -> bool {
@@ -1483,7 +1482,6 @@ mod tests {
             "seed_mode",
             "selection",
             "series",
-            "shoreline_style",
             "shuffle",
             "source",
             "source_kind",
@@ -1564,29 +1562,6 @@ mod tests {
                 }
             }
         }
-        if kind == AnimationKind::VoxelLandscape {
-            for source in [0, 1] {
-                let controls = variants
-                    .iter()
-                    .map(AnimationSettings::scene_controls)
-                    .find(|controls| {
-                        controls.iter().any(|control| {
-                            control.id == "world_source"
-                                && control.value == ControlValue::Index(source)
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        panic!("VoxelLandscape: metadata walk never reached world source {source}")
-                    });
-                for id in ["seed", "atmosphere", "detail", "pan_direction"] {
-                    assert_eq!(
-                        controls.iter().any(|control| control.id == id),
-                        source == 0,
-                        "VoxelLandscape: world source {source} exposed incorrect {id} visibility"
-                    );
-                }
-            }
-        }
         let expected: &[&str] = match kind {
             AnimationKind::Clouds => &[
                 "land_underlay_percent",
@@ -1595,7 +1570,6 @@ mod tests {
                 "rotation_deg_per_min",
                 "smoothing_percent",
             ],
-            AnimationKind::Graph => &["falling_hue", "rising_hue"],
             AnimationKind::Images => &[
                 "builtin_image",
                 "display_seconds",
@@ -1614,23 +1588,6 @@ mod tests {
             AnimationKind::OpenStreetMap => {
                 &["destination", "dwell_seconds", "place", "selection", "tour"]
             }
-            AnimationKind::Shoreline => &[
-                "shoreline_backwash",
-                "shoreline_big_wave_every",
-                "shoreline_chop",
-                "shoreline_foam_breakup",
-                "shoreline_foam_unevenness",
-                "shoreline_lace",
-                "shoreline_meander",
-                "shoreline_set_irregularity",
-                "shoreline_sparkle",
-                "shoreline_stick_amount",
-                "shoreline_stick_linger",
-                "shoreline_swell_angle",
-                "shoreline_wave_sets",
-                "shoreline_wet_darkness",
-                "shoreline_wet_memory",
-            ],
             AnimationKind::Spectrum => &[
                 "band_scale",
                 "bands",
@@ -1645,8 +1602,6 @@ mod tests {
                 "spectrogram_speed",
                 "tilt",
             ],
-            AnimationKind::Stars => &["lens", "look_altitude", "star_size"],
-            AnimationKind::TopographicMaps => &["tide_seconds"],
             AnimationKind::Video => &["scene_seconds", "seed", "slowed_percent"],
             AnimationKind::Wikipedia => &["wiki_zoom"],
             _ => &[],
@@ -2549,7 +2504,7 @@ mod tests {
     #[test]
     fn saved_scene_activity_report_expands_the_live_footer() {
         let settings = AnimationSettings {
-            kind: AnimationKind::VoxelLandscape,
+            kind: AnimationKind::PluginScene,
             ..Default::default()
         };
         let status = "Saved worlds [====......] phase 3/6\nNow: Projecting covered chunks\nElapsed: 00:42\nETA: about 00:18 for this measured scan\nTotal ETA: incomplete; about 00:18 for the measured stage; up to 13 route candidates remain without a measured duration\nRecent activity:\n+00:08 Scanned region files\n+00:19 Loaded 64 chunks";
@@ -2598,7 +2553,7 @@ mod tests {
     #[test]
     fn saved_scene_activity_footer_accounts_for_wrapped_event_lines() {
         let settings = AnimationSettings {
-            kind: AnimationKind::VoxelLandscape,
+            kind: AnimationKind::PluginScene,
             ..Default::default()
         };
         let long_event = format!("+00:19 {}", "detail ".repeat(120));
@@ -2636,7 +2591,7 @@ mod tests {
     #[test]
     fn saved_scene_activity_pages_keep_control_help_reachable() {
         let (mut app, probe, _project) = settings_app(100, 20);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::PluginScene;
         let selected = row_index(&app, &AnimationRow::Common("speed"));
         set_selected_row(&mut app, selected);
         let events = (0..24)
@@ -2711,7 +2666,7 @@ mod tests {
     #[test]
     fn saved_scene_route_eta_stays_visible_on_a_short_terminal() {
         let (mut app, probe, _project) = settings_app(80, 12);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::PluginScene;
         let selected = row_index(&app, &AnimationRow::Common("speed"));
         set_selected_row(&mut app, selected);
         prepare_saved_scene_activity(
@@ -2743,7 +2698,7 @@ mod tests {
     #[test]
     fn saved_scene_selected_status_help_can_be_scrolled_to_its_last_event() {
         let (mut app, probe, _project) = settings_app(100, 20);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::PluginScene;
         let selected = row_index(&app, &AnimationRow::SceneStatus);
         set_selected_row(&mut app, selected);
         let events = (0..24)
@@ -2775,7 +2730,7 @@ mod tests {
     #[test]
     fn saved_scene_help_view_scrolls_through_the_full_selected_status() {
         let (mut app, probe, _project) = settings_app(100, 20);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::PluginScene;
         let selected = row_index(&app, &AnimationRow::SceneStatus);
         set_selected_row(&mut app, selected);
         let events = (0..24)
@@ -2882,7 +2837,7 @@ mod tests {
         height: u16,
         status: &str,
     ) {
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::PluginScene;
         // Opening Settings -> Animations actively previews the selected scene
         // even when its background toggle is off. Model that preview in this
         // fixture so the status row receives the hosted scene's live report.
@@ -3102,70 +3057,24 @@ mod tests {
                 .filter(|row| matches!(row, AnimationRow::SceneControl(_)))
                 .count();
             assert_eq!(control_rows, controls.len(), "{kind:?}");
-            if !kind.is_ambient()
-                && !matches!(kind, AnimationKind::Wikipedia | AnimationKind::Semantic)
-            {
-                // The shoreline lists its style choice and, in the default Rich
-                // style, fifteen more sliders after the four named ones.
-                let expected = if kind == AnimationKind::Shoreline {
-                    4 + 1 + 15
-                } else if kind == AnimationKind::QuietPond {
-                    5
-                } else {
-                    4
-                };
-                assert_eq!(
-                    control_rows, expected,
-                    "legacy scenes keep four named sliders"
-                );
-                assert!(list.contains(&AnimationRow::Common("playback")));
-                assert!(list.contains(&AnimationRow::Common("loop_seconds")));
-                assert!(list.contains(&AnimationRow::CacheStatus));
-                assert!(!list.contains(&AnimationRow::SceneStatus));
-                assert!(!list.contains(&AnimationRow::Location));
-            } else {
-                for hidden in [
-                    AnimationRow::Common("playback"),
-                    AnimationRow::Common("loop_seconds"),
-                    AnimationRow::CacheStatus,
-                ] {
-                    assert!(!list.contains(&hidden), "{kind:?} is live-only");
-                }
-                assert!(list.contains(&AnimationRow::SceneStatus));
-                assert_eq!(
-                    list.contains(&AnimationRow::Location),
-                    kind == AnimationKind::OpenStreetMap
-                        || kind
-                            .ambient()
-                            .is_some_and(|ambient| ambient.uses_location()),
-                    "{kind:?}"
-                );
+            for hidden in [
+                AnimationRow::Common("playback"),
+                AnimationRow::Common("loop_seconds"),
+                AnimationRow::CacheStatus,
+            ] {
+                assert!(!list.contains(&hidden), "{kind:?} is live-only");
             }
-        }
-    }
-
-    #[test]
-    fn topographic_maps_rows_are_live_only_and_list_every_control() {
-        let settings = AnimationSettings {
-            kind: AnimationKind::TopographicMaps,
-            ..Default::default()
-        };
-        let list = rows(&settings, &RowContext::default());
-        let controls = settings.scene_controls();
-        let control_rows = list
-            .iter()
-            .filter(|row| matches!(row, AnimationRow::SceneControl(_)))
-            .count();
-        assert_eq!(control_rows, controls.len());
-        assert!(controls.len() > 15, "all world, view and contour controls");
-        assert!(list.contains(&AnimationRow::SceneStatus));
-        assert!(!list.contains(&AnimationRow::Location));
-        for hidden in [
-            AnimationRow::Common("playback"),
-            AnimationRow::Common("loop_seconds"),
-            AnimationRow::CacheStatus,
-        ] {
-            assert!(!list.contains(&hidden));
+            assert!(list.contains(&AnimationRow::SceneStatus));
+            assert_eq!(
+                list.contains(&AnimationRow::Location),
+                kind == AnimationKind::OpenStreetMap
+                    || kind
+                        .ambient()
+                        .is_some_and(|ambient| ambient.uses_location())
+                    || (kind == AnimationKind::PluginScene
+                        && settings.ambient.plugin_scene.uses_location()),
+                "{kind:?}"
+            );
         }
     }
 
@@ -3173,11 +3082,9 @@ mod tests {
     fn dependent_rows_hide_and_show() {
         let mut settings = AnimationSettings::default();
         let context = RowContext::default();
-        assert!(rows(&settings, &context).contains(&AnimationRow::CacheStatus));
-        settings.playback_mode = AnimationPlaybackMode::Live;
+        // Every remaining scene is live, so the loop-cache rows never appear.
         let live = rows(&settings, &context);
-        assert!(live.contains(&AnimationRow::Common("playback")));
-        assert!(!live.contains(&AnimationRow::Common("loop_seconds")));
+        assert!(!live.contains(&AnimationRow::Common("playback")));
         assert!(!live.contains(&AnimationRow::CacheStatus));
         // The ink rows appear only in Monotone mode; the palette only in Color.
         let list = rows(&settings, &context);
@@ -3196,11 +3103,11 @@ mod tests {
         assert!(list.contains(&AnimationRow::Common("look_grey_tint")));
         assert!(list.contains(&AnimationRow::Common("speed")));
         // Location only for observer-aware scenes.
-        let stars = AnimationSettings {
-            kind: AnimationKind::Stars,
+        let night_lights = AnimationSettings {
+            kind: AnimationKind::NightLights,
             ..Default::default()
         };
-        assert!(rows(&stars, &context).contains(&AnimationRow::Location));
+        assert!(rows(&night_lights, &context).contains(&AnimationRow::Location));
         let video = AnimationSettings {
             kind: AnimationKind::Video,
             ..Default::default()
@@ -3340,6 +3247,8 @@ mod tests {
         let (mut app, _probe, project) = settings_app(80, 24);
         let area = content_area(&app);
         let scene_count = AnimationKind::ALL.len();
+        // The saved default is the plugin scene; start the walk from the first row.
+        app.animation_settings.kind = AnimationKind::ALL[0];
         for scene in 0..scene_count {
             if scene > 0 {
                 key(&mut app, KeyCode::Down);
@@ -3372,15 +3281,15 @@ mod tests {
             state.global_scroll > 0,
             "the global settings need their own scrolling at 80x24"
         );
-        // A built-in scene's slider persists through the same path.
-        app.settings_adjust_animation_row(9, 1);
-        assert_eq!(app.animation_settings.kind, AnimationKind::QuietPond);
-        let before = app.animation_settings.quiet_pond.drift_percent;
-        let drift = row_index(&app, &AnimationRow::SceneControl("scene_control_3"));
-        app.settings_set_animation_slider(drift, 175);
+        // A shared slider persists through the same path.
+        app.settings_adjust_animation_row(4, 1);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        let before = app.animation_settings.speed_percent;
+        let speed = row_index(&app, &AnimationRow::Common("speed"));
+        app.settings_set_animation_slider(speed, 175);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
-        assert!(app.animation_settings.quiet_pond.drift_percent > before);
+        assert!(app.animation_settings.speed_percent > before);
         assert_eq!(
             crate::project_config::load(project.path())
                 .unwrap()
@@ -3393,22 +3302,22 @@ mod tests {
     fn keyboard_and_mouse_select_the_same_persisted_scene() {
         let (mut app, _probe, project) = settings_app(140, 40);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.animation_settings.kind, AnimationKind::MoonlitWater);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Clouds);
         let area = content_area(&app);
         let model = app.animation_row_model();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
             area.x,
-            row_y(area, &model, 5, Scrolls::default()).unwrap(),
+            row_y(area, &model, 4, Scrolls::default()).unwrap(),
         );
-        assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
         assert_eq!(
             crate::project_config::load(project.path())
                 .unwrap()
                 .animation
                 .kind,
-            AnimationKind::Kelp
+            AnimationKind::Images
         );
     }
 
@@ -3657,28 +3566,21 @@ mod tests {
         app.settings_set_animation_slider(saturation, 50);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
-        app.settings_adjust_animation_row(5, 1);
+        app.settings_adjust_animation_row(4, 1);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
-        let first_control = app.animation_row_model().first_control_index();
-        app.settings_set_animation_slider(first_control, 175);
+        let speed = row(&app, "speed");
+        app.settings_set_animation_slider(speed, 175);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
         app.settings_adjust_animation_row(1, 1);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
-        app.settings_set_animation_slider(first_control, 35);
-        app.settle_filesystem_for_test();
-        app.animation_frame.settle_for_test();
-        app.settings_adjust_animation_row(5, 1);
+        app.settings_adjust_animation_row(4, 1);
         app.settle_filesystem_for_test();
         app.animation_frame.settle_for_test();
         app.settle_filesystem_for_test();
-        assert_eq!(app.animation_settings.kelp.plant_density_percent, 175);
-        assert_eq!(
-            app.animation_settings.moonlit_water.wave_strength_percent,
-            35
-        );
+        assert_eq!(app.animation_settings.speed_percent, 175);
         assert_eq!(
             (
                 app.animation_settings.lightness_percent,
@@ -3714,10 +3616,10 @@ mod tests {
     fn actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches() {
         let (mut app, _probe, project) = settings_app(80, 24);
         app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
-        for _ in 0..5 {
+        for _ in 0..4 {
             key(&mut app, KeyCode::Down);
         }
-        assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
         key(&mut app, KeyCode::Enter);
         let first_control = app.animation_row_model().first_control_index();
         assert_eq!(
@@ -3725,9 +3627,11 @@ mod tests {
             first_control,
             "Enter focuses scene controls"
         );
-        assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        let untouched = app.animation_settings.ambient.clone();
         key(&mut app, KeyCode::Right);
-        assert_eq!(app.animation_settings.kelp.plant_density_percent, 105);
+        assert_ne!(app.animation_settings.ambient, untouched);
+        let edited_images = app.animation_settings.ambient.clone();
         for common in ["lightness", "hue", "saturation"] {
             let target = row_index(&app, &AnimationRow::Common(common));
             press_until_row(&mut app, target);
@@ -3742,16 +3646,10 @@ mod tests {
             (61, 211, 1)
         );
         press_until_row(&mut app, 1);
-        assert_eq!(app.animation_settings.kind, AnimationKind::MoonlitWater);
-        key(&mut app, KeyCode::Enter);
-        key(&mut app, KeyCode::Right);
-        assert_eq!(
-            app.animation_settings.moonlit_water.wave_strength_percent,
-            105
-        );
-        press_until_row(&mut app, 5);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
-        assert_eq!(app.animation_settings.kelp.plant_density_percent, 105);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Clouds);
+        press_until_row(&mut app, 4);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        assert_eq!(app.animation_settings.ambient, edited_images);
         let reloaded = crate::project_config::load(project.path())
             .unwrap()
             .animation;
@@ -3764,12 +3662,11 @@ mod tests {
             ),
             (61, 211, 1)
         );
-        assert_eq!(reloaded.moonlit_water.wave_strength_percent, 105);
     }
 
     #[test]
     fn choice_toggle_and_action_rows_activate_from_keyboard_and_mouse() {
-        // Tall enough to show every row of the default (Rich shoreline) list.
+        // Tall enough to show every row of the default list.
         let (mut app, _probe, project) = settings_app(140, 80);
         let area = content_area(&app);
         let background = row_index(&app, &AnimationRow::Common("background"));
@@ -3794,18 +3691,6 @@ mod tests {
             app.animation_settings.dither,
             crate::background_animation::DitherMode::Stippled
         );
-        let playback = row_index(&app, &AnimationRow::Common("playback"));
-        set_selected_row(&mut app, playback);
-        key(&mut app, KeyCode::Char(' '));
-        assert_eq!(
-            app.animation_settings.playback_mode,
-            AnimationPlaybackMode::Live
-        );
-        // Live playback removes the dependent loop rows.
-        assert!(!app
-            .animation_row_model()
-            .rows()
-            .contains(&AnimationRow::CacheStatus));
         assert_eq!(
             crate::project_config::load(project.path())
                 .unwrap()
@@ -3913,10 +3798,10 @@ mod tests {
     #[test]
     fn inspired_by_credit_shows_bottom_right_in_the_demo_only_for_credited_scenes() {
         let (mut app, _probe, _project) = settings_app(120, 36);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
         let windowed = draw(&mut app, 120, 36);
         let credit = credit_row(&windowed, 120, 36).expect("credit is drawn in the demo");
-        assert!(credit.contains("\u{ab}inspired by https://www.minecraft.net/"));
+        assert!(credit.contains("\u{ab}inspired by https://www.openstreetmap.org/copyright"));
         let panel = layout(content_area(&app)).panel;
         let model = app.animation_row_model();
         assert!(
@@ -3931,20 +3816,27 @@ mod tests {
         key(&mut app, KeyCode::Char('f'));
         let full = draw(&mut app, 120, 36);
         assert!(
-            credit_row(&full, 120, 36)
-                .is_some_and(|row| row.trim_end().ends_with("https://www.minecraft.net/\u{bb}")),
+            credit_row(&full, 120, 36).is_some_and(|row| row
+                .trim_end()
+                .ends_with("https://www.openstreetmap.org/copyright\u{bb}")),
             "the whole URL fits full screen"
         );
         // Scenes with no recorded inspiration show no credit.
-        app.animation_settings.kind = AnimationKind::Shoreline;
+        app.animation_settings.kind = AnimationKind::Images;
         let plain = draw(&mut app, 120, 36);
         assert!(credit_row(&plain, 120, 36).is_none());
     }
 
     #[test]
-    fn game_inspired_scenes_credit_their_game_in_the_demo() {
+    fn inspired_scenes_credit_their_source_in_the_demo() {
         let (mut app, _probe, _project) = settings_app(160, 36);
-        for (kind, url) in [(AnimationKind::VoxelLandscape, "https://www.minecraft.net/")] {
+        for (kind, url) in [
+            (
+                AnimationKind::OpenStreetMap,
+                "https://www.openstreetmap.org/copyright",
+            ),
+            (AnimationKind::Clouds, "https://earthdata.nasa.gov/gibs"),
+        ] {
             app.animation_settings.kind = kind;
             let drawn = draw(&mut app, 160, 36);
             let credit = credit_row(&drawn, 160, 36).unwrap_or_else(|| {
@@ -3960,7 +3852,7 @@ mod tests {
     #[test]
     fn inspired_by_credit_never_appears_outside_the_settings_demo() {
         let (mut app, _probe, _project) = settings_app(120, 36);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
         app.mode = Mode::Normal;
         let terminal = draw(&mut app, 120, 36);
         for y in 0..36 {
@@ -4427,12 +4319,12 @@ mod tests {
         let (mut app, _probe, _project) = settings_app(80, 24);
         let target = AnimationKind::ALL
             .iter()
-            .position(|kind| *kind == AnimationKind::VoxelLandscape)
+            .position(|kind| *kind == AnimationKind::OpenStreetMap)
             .unwrap();
         for _ in 0..target {
             key(&mut app, KeyCode::Down);
         }
-        assert_eq!(app.animation_settings.kind, AnimationKind::VoxelLandscape);
+        assert_eq!(app.animation_settings.kind, AnimationKind::OpenStreetMap);
         assert_eq!(state_of(&app).selected_row, target);
         let terminal = draw(&mut app, 80, 24);
         let area = content_area(&app);
@@ -4440,7 +4332,7 @@ mod tests {
         let row = row_y(area, &model, target, state_of(&app).scrolls())
             .expect("the acknowledged scene must remain inside its list window");
         assert!(
-            screen_text(&terminal)[usize::from(row)].contains("Voxel landscape"),
+            screen_text(&terminal)[usize::from(row)].contains(AnimationKind::OpenStreetMap.label()),
             "the selected scene must be rendered in the list, not only in the heading"
         );
     }
@@ -4533,88 +4425,5 @@ mod tests {
                 eprintln!("--- {width}x{height}\n{joined}");
             }
         }
-    }
-
-    #[test]
-    fn voxel_seed_exact_keyboard_entry_persists_the_complete_u32_domain_and_cancel_is_inert() {
-        let (mut app, _probe, project) = settings_app(140, 120);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
-        for text in ["0", "2147483647", "2147483648", "4294967295"] {
-            let row = row_index(&app, &AnimationRow::SceneControl("seed"));
-            set_selected_row(&mut app, row);
-            crate::keys::handle_event(
-                &mut app,
-                Event::Key(KeyEvent::new(KeyCode::Char('*'), KeyModifiers::NONE)),
-            );
-            let Mode::ValueDialog(host) = &mut app.mode else {
-                panic!("voxel seed number dialog");
-            };
-            let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
-                panic!("voxel seed numeric state");
-            };
-            number.draft = crate::text_prompt::TextPromptState::new(text);
-            crate::keys::handle_event(
-                &mut app,
-                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            );
-            assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-            app.settle_filesystem_for_test();
-            assert!(matches!(app.mode, Mode::Settings(_)));
-            assert_eq!(
-                app.animation_settings
-                    .scene_control("seed")
-                    .expect("voxel seed control")
-                    .value,
-                ControlValue::Text(text.to_owned()),
-            );
-            assert_eq!(
-                crate::project_config::load(project.path())
-                    .unwrap()
-                    .animation
-                    .scene_control("seed")
-                    .expect("persisted voxel seed control")
-                    .value,
-                ControlValue::Text(text.to_owned()),
-            );
-        }
-        let before = app
-            .animation_settings
-            .scene_control("seed")
-            .expect("voxel seed control")
-            .value;
-        let row = row_index(&app, &AnimationRow::SceneControl("seed"));
-        set_selected_row(&mut app, row);
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('*'), KeyModifiers::NONE)),
-        );
-        let Mode::ValueDialog(host) = &mut app.mode else {
-            panic!("voxel seed number dialog");
-        };
-        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
-            panic!("voxel seed numeric state");
-        };
-        number.draft = crate::text_prompt::TextPromptState::new("0");
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        );
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        assert_eq!(
-            app.animation_settings
-                .scene_control("seed")
-                .expect("voxel seed control")
-                .value,
-            before,
-        );
-        assert_eq!(
-            crate::project_config::load(project.path())
-                .unwrap()
-                .animation
-                .scene_control("seed")
-                .expect("persisted voxel seed control")
-                .value,
-            before,
-        );
     }
 }

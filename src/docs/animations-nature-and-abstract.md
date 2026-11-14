@@ -5,7 +5,7 @@ This guide documents the quiet, mostly procedural animations: water and shore sc
 ## Contents
 
 - [Using scene controls](#using-scene-controls)
-- [Built-in scenes with cached loops](#built-in-scenes-with-cached-loops): Shoreline, Moonlit water, Sleeping ridge, Windy hillside, Tea steam, Kelp, Stone caustics, Cloudlets, Two ripples, Lily pads (Quiet pond)
+- [Classic water and sky scenes](#classic-water-and-sky-scenes): Shoreline, Moonlit water, Sleeping ridge, Windy hillside, Tea steam, Kelp, Stone caustics, Cloudlets, Two ripples, Lily pads (Quiet pond)
 - [Quiet procedural scenes](#quiet-procedural-scenes): Aurora, Pollen, Fireflies, Window sunlight, Frost, Lighthouse
 - [Geometry and mathematics](#geometry-and-mathematics): Paper-fold trace, Embroidery orbit, Prime constellations, Turning wallpaper, Unfinished circle, Threads through a needle, Ink that hesitates, Crop circles, Delayed reflection, Almost touching, Hidden wheel
 - [3D pipes](#3d-pipes)
@@ -26,15 +26,15 @@ This guide documents the quiet, mostly procedural animations: water and shore sc
 
 Conventions in the tables below:
 
-- **Id** is the stable control id used in saved settings, Semantic recommendations and automation. Built-in scenes with four sliders use `scene_control_0` to `scene_control_3`, in the order shown.
+- **Id** is the stable control id used in saved settings, Semantic recommendations and automation. The classic scenes' sliders use the control ids listed in their tables, for example `reach_percent` or `drift_percent`.
 - **Seed** controls choose a repeatable layout: the same seed always draws the same scene. A seed change starts a new variation.
 - Values outside a range are clamped to the range. Percent values are plain percentages of the scene designer's reference size.
 - Defaults are deliberately quiet so the animation stays a background.
-- Scenes marked "loop-cached" support **Playback: Loop** and **Loop seconds**; the others are always live. See [Playback](animations.md#playback-loop-and-live).
+- Every scene is live: it is drawn as the animation clock runs, with no precomputed loop.
 
-## Built-in scenes with cached loops
+## Classic water and sky scenes
 
-These ten scenes are drawn by Ilium itself, are deterministic, and can be played from a precomputed loop (Playback **Loop**, default) or live. Their four main sliders use the ids `scene_control_0` to `scene_control_3`.
+These ten scenes are scenes of the Scenes plugin (`ilium.core.scenes`) and are deterministic. Disable the plugin and they leave the Animations list. A project saved before they moved still names them (for example `kind: shoreline`) and opens the Plugin scene animation. Each scene has its own sliders, listed below by control id.
 
 ### Shoreline
 
@@ -42,10 +42,10 @@ Shown in Settings as **Wave washing up sand** (`shoreline`). A diagonal wash wit
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Tide reach | `scene_control_0` | 50 to 150%, step 5 | 100% | Maximum extent of each wash up the sand. |
-| Foam width | `scene_control_1` | 25 to 200%, step 5 | 75% | Width of the moving foam ribbon. |
-| Sand grains | `scene_control_2` | 0 to 100%, step 5 | 20% | Intensity of the deterministic sand grains. |
-| Wash cycle | `scene_control_3` | 6 to 30 s, step 1 | 12 s | Duration of a complete advance, hold and retreat. |
+| Tide reach | `reach_percent` | 50 to 150%, step 5 | 100% | Maximum extent of each wash up the sand. |
+| Foam width | `foam_width_percent` | 25 to 200%, step 5 | 75% | Width of the moving foam ribbon. |
+| Sand grains | `grain_percent` | 0 to 100%, step 5 | 20% | Intensity of the deterministic sand grains. |
+| Wash cycle | `cycle_seconds` | 6 to 30 s, step 1 | 12 s | Duration of a complete advance, hold and retreat. |
 | Style | `shoreline_style` | Classic, Rich | Rich | Classic is the original single wash. Rich adds wave sets, uneven foam, trailing lace and clinging foam. |
 
 The following fifteen sliders appear only while **Style** is **Rich**:
@@ -76,10 +76,10 @@ Shown as **Moon over moving water** (`moonlit_water`). Crossing fine wavelets br
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Wave strength | `scene_control_0` | 0 to 200%, step 5 | 100% | Strength of the wavelets that fracture the reflection. |
-| Ripple scale | `scene_control_1` | 50 to 200%, step 5 | 100% | Size of the ripples. |
-| Reflection width | `scene_control_2` | 25 to 200%, step 5 | 100% | Width of the moon's reflection on the water. |
-| Moon size | `scene_control_3` | 50 to 150%, step 5 | 100% | Size of the moon. |
+| Wave strength | `wave_strength_percent` | 0 to 200%, step 5 | 100% | Strength of the wavelets that fracture the reflection. |
+| Ripple scale | `ripple_scale_percent` | 50 to 200%, step 5 | 100% | Size of the ripples. |
+| Reflection width | `reflection_width_percent` | 25 to 200%, step 5 | 100% | Width of the moon's reflection on the water. |
+| Moon size | `moon_size_percent` | 50 to 150%, step 5 | 100% | Size of the moon. |
 
 ### Sleeping ridge
 
@@ -87,10 +87,10 @@ Shown as **Clouds over a sleeping ridge** (`sleeping_ridge`). Cloud banks and la
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Cloud cover | `scene_control_0` | 0 to 100%, step 5 | 60% | How much of the sky is covered by cloud. |
-| Valley mist | `scene_control_1` | 0 to 100%, step 5 | 40% | Amount of layered mist in the valleys. |
-| Ridge height | `scene_control_2` | 50 to 150%, step 5 | 100% | Height of the ridge. |
-| Cloud drift | `scene_control_3` | 25 to 200%, step 5 | 100% | Speed at which the clouds drift. |
+| Cloud cover | `cloud_cover_percent` | 0 to 100%, step 5 | 60% | How much of the sky is covered by cloud. |
+| Valley mist | `mist_percent` | 0 to 100%, step 5 | 40% | Amount of layered mist in the valleys. |
+| Ridge height | `ridge_height_percent` | 50 to 150%, step 5 | 100% | Height of the ridge. |
+| Cloud drift | `drift_percent` | 25 to 200%, step 5 | 100% | Speed at which the clouds drift. |
 
 ### Windy hillside
 
@@ -98,10 +98,10 @@ Shown as **Hillside brushed by wind** (`windy_hillside`). Many fine, irregularly
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Plant density | `scene_control_0` | 25 to 200%, step 5 | 100% | How densely the meadow is planted. |
-| Wind strength | `scene_control_1` | 0 to 200%, step 5 | 100% | Strength of the traveling gusts. 0% leaves the plants still. |
-| Plant height | `scene_control_2` | 50 to 150%, step 5 | 100% | Height of the stems. |
-| Gust breadth | `scene_control_3` | 50 to 200%, step 5 | 100% | Breadth of each gust as it crosses the hill. |
+| Plant density | `plant_density_percent` | 25 to 200%, step 5 | 100% | How densely the meadow is planted. |
+| Wind strength | `wind_strength_percent` | 0 to 200%, step 5 | 100% | Strength of the traveling gusts. 0% leaves the plants still. |
+| Plant height | `plant_height_percent` | 50 to 150%, step 5 | 100% | Height of the stems. |
+| Gust breadth | `gust_scale_percent` | 50 to 200%, step 5 | 100% | Breadth of each gust as it crosses the hill. |
 
 ### Tea steam
 
@@ -109,10 +109,10 @@ Shown as **Steam above a tea cup** (`tea_steam`). A smooth porcelain cup with a 
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Cup size | `scene_control_0` | 60 to 140%, step 5 | 100% | Size of the cup. |
-| Steam wisps | `scene_control_1` | 1 to 6, step 1 | 4 | Number of steam filaments. |
-| Steam curl | `scene_control_2` | 25 to 200%, step 5 | 100% | How much the steam curls. |
-| Steam height | `scene_control_3` | 50 to 150%, step 5 | 100% | How high the steam rises. |
+| Cup size | `cup_size_percent` | 60 to 140%, step 5 | 100% | Size of the cup. |
+| Steam wisps | `steam_ribbons` | 1 to 6, step 1 | 4 | Number of steam filaments. |
+| Steam curl | `curl_percent` | 25 to 200%, step 5 | 100% | How much the steam curls. |
+| Steam height | `steam_height_percent` | 50 to 150%, step 5 | 100% | How high the steam rises. |
 
 ### Kelp
 
@@ -120,10 +120,10 @@ Shown as **Kelp in a gentle current** (`kelp`). Uneven clusters of tapered kelp 
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Plant density | `scene_control_0` | 25 to 200%, step 5 | 100% | How many ribbons grow. |
-| Current strength | `scene_control_1` | 0 to 200%, step 5 | 100% | Strength of the current that sways the kelp. |
-| Ribbon length | `scene_control_2` | 50 to 175%, step 5 | 100% | Length of the ribbons. |
-| Clustering | `scene_control_3` | 0 to 100%, step 5 | 65% | How strongly plants gather into clusters. |
+| Plant density | `plant_density_percent` | 25 to 200%, step 5 | 100% | How many ribbons grow. |
+| Current strength | `current_strength_percent` | 0 to 200%, step 5 | 100% | Strength of the current that sways the kelp. |
+| Ribbon length | `leaf_length_percent` | 50 to 175%, step 5 | 100% | Length of the ribbons. |
+| Clustering | `cluster_percent` | 0 to 100%, step 5 | 65% | How strongly plants gather into clusters. |
 
 ### Stone caustics
 
@@ -131,10 +131,10 @@ Shown as **Water caustics on stone** (`stone_caustics`). A moving light web bend
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Stone relief | `scene_control_0` | 25 to 200%, step 5 | 100% | How strongly the stones dome up. |
-| Light web scale | `scene_control_1` | 50 to 200%, step 5 | 100% | Size of the moving caustic web. |
-| Small stones | `scene_control_2` | 0 to 100%, step 5 | 65% | Amount of small stones among the large ones. |
-| Sand grains | `scene_control_3` | 0 to 100%, step 5 | 20% | Amount of sand between the stones. |
+| Stone relief | `dome_height_percent` | 25 to 200%, step 5 | 100% | How strongly the stones dome up. |
+| Light web scale | `caustic_scale_percent` | 50 to 200%, step 5 | 100% | Size of the moving caustic web. |
+| Small stones | `small_stones_percent` | 0 to 100%, step 5 | 65% | Amount of small stones among the large ones. |
+| Sand grains | `sand_percent` | 0 to 100%, step 5 | 20% | Amount of sand between the stones. |
 
 ### Cloudlets
 
@@ -142,10 +142,10 @@ Shown as **Drifting cloud islands** (`cloudlets`). Soft rounded islands drift, j
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Cloud islands | `scene_control_0` | 2 to 10, step 1 | 6 | Number of cloud islands. |
-| Island size | `scene_control_1` | 50 to 175%, step 5 | 100% | Size of each island. |
-| Joining softness | `scene_control_2` | 25 to 200%, step 5 | 100% | How softly neighbouring islands merge. |
-| Drift breadth | `scene_control_3` | 25 to 150%, step 5 | 100% | How far the islands wander. |
+| Cloud islands | `form_count` | 2 to 10, step 1 | 6 | Number of cloud islands. |
+| Island size | `form_size_percent` | 50 to 175%, step 5 | 100% | Size of each island. |
+| Joining softness | `cohesion_percent` | 25 to 200%, step 5 | 100% | How softly neighbouring islands merge. |
+| Drift breadth | `orbit_radius_percent` | 25 to 150%, step 5 | 100% | How far the islands wander. |
 
 ### Two ripples
 
@@ -153,10 +153,10 @@ Shown as **Two gentle wave sources** (`two_ripples`). Faster radial wave crests 
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Source separation | `scene_control_0` | 10 to 90%, step 2 | 54% | Distance between the two wave sources. |
-| Wavelength | `scene_control_1` | 50 to 200%, step 5 | 100% | Distance between successive crests. |
-| Interference | `scene_control_2` | 0 to 100%, step 5 | 65% | Strength of the interference pattern where the waves cross. |
-| Damping | `scene_control_3` | 0 to 100%, step 5 | 25% | How quickly the waves fade with distance. |
+| Source separation | `source_separation_percent` | 10 to 90%, step 2 | 54% | Distance between the two wave sources. |
+| Wavelength | `wavelength_percent` | 50 to 200%, step 5 | 100% | Distance between successive crests. |
+| Interference | `interference_percent` | 0 to 100%, step 5 | 65% | Strength of the interference pattern where the waves cross. |
+| Damping | `damping_percent` | 0 to 100%, step 5 | 25% | How quickly the waves fade with distance. |
 
 ### Lily pads (Quiet pond)
 
@@ -164,10 +164,10 @@ Shown as **Lily pads on a quiet pond** (`quiet_pond`; the older name `breathing_
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Lily pads | `scene_control_0` | 3 to 64, step 1 | 7 | Number of opaque leaves. Up to 64 are supported. |
-| Pad size | `scene_control_1` | 50 to 175%, step 5 | 100% | Size of each pad. |
-| Water ripples | `scene_control_2` | 0 to 100%, step 5 | 70% | Strength of the ripples on the water. |
-| Surface drift | `scene_control_3` | 25 to 200%, step 5 | 100% | Drift speed of the water surface. |
+| Lily pads | `pad_count` | 3 to 64, step 1 | 7 | Number of opaque leaves. Up to 64 are supported. |
+| Pad size | `pad_size_percent` | 50 to 175%, step 5 | 100% | Size of each pad. |
+| Water ripples | `ripple_strength_percent` | 0 to 100%, step 5 | 70% | Strength of the ripples on the water. |
+| Surface drift | `drift_percent` | 25 to 200%, step 5 | 100% | Drift speed of the water surface. |
 | Rooted placement | `natural_placement` | on / off | off | Cluster leaves around underwater root groups, with bounded petiole reach and spacing, instead of spreading them freely. |
 
 ## Quiet procedural scenes

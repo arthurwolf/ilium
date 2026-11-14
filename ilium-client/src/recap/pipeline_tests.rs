@@ -442,35 +442,3 @@ async fn cache_reuses_summarized_text_for_unchanged_evidence_only() {
         "changed screen evidence must call the model"
     );
 }
-
-#[tokio::test]
-async fn final_fence_drops_text_when_session_changed_after_inference() {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let inputs = vec![shell_input("s1", directory.path(), Some("$ make"))];
-    let provider = FakeProvider::answering(GOOD_ANSWER);
-    let mut batch = run_recaps(
-        inputs.clone(),
-        context(provider, never_cancelled(), stable_lookup(&inputs), vec![]),
-    )
-    .await;
-    assert_eq!(batch.panes[0].state, RecapPaneState::Summarized);
-
-    let captured: HashMap<String, PaneFence> = inputs
-        .iter()
-        .map(|input| (input.pane_id.clone(), input.fence.clone()))
-        .collect();
-    let closed = |_: &str| -> Option<PaneFence> { None };
-    super::apply_final_fence(&mut batch, &captured, &closed);
-    assert_eq!(batch.panes[0].state, RecapPaneState::Stale);
-    assert!(batch.panes[0].short.is_none());
-    assert!(batch.panes[0].long.is_none());
-}
-
-#[tokio::test]
-async fn permission_denied_gives_one_denied_record_per_pane_without_inference() {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let inputs = vec![shell_input("s1", directory.path(), Some("$ ls"))];
-    let batch = super::permission_denied(&inputs, "AI is off");
-    assert_eq!(batch.panes[0].state, RecapPaneState::Denied);
-    assert_eq!(batch.panes[0].failure.as_deref(), Some("AI is off"));
-}

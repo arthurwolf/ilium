@@ -3248,7 +3248,6 @@ dependencies = [
  "tokenizers",
  "tokio",
  "toml 0.8.23",
- "toml_edit 0.25.12+spec-1.1.0",
  "tracing",
  "tui-term",
  "tui-tree-widget",
@@ -3640,6 +3639,7 @@ dependencies = [
 name = "ilium-plugin-core-scenes"
 version = "0.1.1"
 dependencies = [
+ "chrono",
  "ilium-plugin-sdk",
  "proptest",
  "serde",

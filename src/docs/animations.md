@@ -7,7 +7,7 @@ Ilium can draw a slow Braille-dot animation behind your terminals: a quiet shore
 - [Quick start](#quick-start)
 - [How the Animations settings tab is laid out](#how-the-animations-settings-tab-is-laid-out)
 - [Saving: one global setting](#saving-one-global-setting)
-- [Playback: Loop and Live](#playback-loop-and-live)
+- [Playback: always live](#playback-always-live)
 - [Semantic animation](#semantic-animation)
 - [The shared look](#the-shared-look)
 - [Shared dithering](#shared-dithering)
@@ -31,7 +31,7 @@ If the animation is too prominent, lower **Brightness** (down to 1%) or pick the
 
 The tab has two columns.
 
-- Left: the scene list with previous/next navigation, then the shared rows (Background, Speed, Dot density, Dither, Frame rate cap, Show in, the shared look rows, pattern rows, Playback and loop rows).
+- Left: the scene list with previous/next navigation, then the shared rows (Background, Speed, Dot density, Dither, Frame rate cap, Show in, the shared look rows, pattern rows).
 - Right: the selected animation's own rows ("scene controls"), plus a scene status line for hosted scenes and a location row for the scenes that use one.
 
 Row behaviour, shared by every scene control:
@@ -56,24 +56,11 @@ Your animation choices are one global setting, saved as soon as you change them 
 
 Global settings (providers, keys, sounds and so on) live in `~/.config/ilium/config.toml` on Linux and are unrelated to animation choices; see [Settings](settings.md).
 
-Defaults when nothing is saved: Background off, scene **Wave washing up sand**, Speed 100%, Dot density 60%, Dither **Ordered (Bayer 8x8)**, Show in **Both panels**, frame-rate cap 0 (each scene's own rate), Playback **Loop** with a 60 second loop, Color mode **Color** with **Scene colors** and no preset.
+Defaults when nothing is saved: Background off, scene **Plugin scene**, Speed 100%, Dot density 60%, Dither **Ordered (Bayer 8x8)**, Show in **Both panels**, frame-rate cap 0 (each scene's own rate), Color mode **Color** with **Scene colors** and no preset.
 
-## Playback: Loop and Live
+## Playback: always live
 
-The **Playback** row is shown only for the ten built-in procedural scenes that can be cached: Wave washing up sand, Moon over moving water, Clouds over a sleeping ridge, Hillside brushed by wind, Steam above a tea cup, Kelp in a gentle current, Water caustics on stone, Drifting cloud islands, Two gentle wave sources and Lily pads on a quiet pond. Every other animation (all hosted scenes, Wikipedia and Semantic) is always live and the row is hidden for them, because their output depends on data, processes, the wall clock or audio.
-
-| Mode | What it does |
-| --- | --- |
-| Loop (default) | Plays a precomputed loop from RAM. Smooth and cheap while playing. |
-| Live | Evaluates the scene at every frame. No loop cache is built. |
-
-Loop details:
-
-- **Loop seconds** is 1 to 120 seconds, default 60. The slider is exponential, so short loops are easy to fine-tune; arrow keys adjust one second at a time. The row appears only while Playback is Loop.
-- Loop generation runs in a cancellable background worker at 30 frames per second. Until a replacement cache is complete after you change something, the live renderer may be used.
-- The **Cache status** line shows resident packed-frame RAM against the projected RAM, then recomputation progress and an ETA. The projection uses the current terminal geometry.
-- A 128 MiB packed-frame ceiling limits each cache. A request that would exceed it stays editable and plays in Live mode instead. Scene scratch space and whole-process RAM are counted separately.
-- The cache stores packed Braille geometry only. Changing colour, palette, preset, filter, brightness or panel never rebuilds it.
+Every animation is drawn live: the scene is evaluated at each frame from the animation clock, with no precomputed loop. Their output can depend on data, processes, the wall clock or audio, and the scenes that were once played from a cached loop (the classic water and sky scenes) are now scenes of the Scenes plugin that draw live as well. Settings therefore has no Playback, Loop seconds or Cache status rows.
 
 ## Semantic animation
 
@@ -409,8 +396,6 @@ Related: [Settings](settings.md), [Demos](demos.md) (the recorded animation gall
 | --- | --- |
 | Nothing appears | **Background** is off, or Show in is set to the other panel. Switch it on; try the Full screen preview (`f`). |
 | Animation is distracting | Lower Brightness, raise Pattern contrast carefully, lower Dot density, or apply the Whisper preset. |
-| Playback row is missing | The selected scene is live-only (hosted scenes, Wikipedia, Semantic). Only the ten built-in procedural scenes can loop. |
-| Loop starts in Live mode | The projected cache would exceed 128 MiB. Shorten Loop seconds or shrink the terminal. |
-| High CPU use | Set a Frame rate cap (for example 10 fps) or use Loop playback where available. |
+| High CPU use | Set a Frame rate cap (for example 10 fps). |
 | Semantic shows a "reorganize" status | No recommendation is stored for the selected project or entry. Reorganize the tree. |
 | Video, Earth or map scenes show a status message | Read Scene status: missing `ffmpeg`/`ffprobe`, offline, or a download in progress. See the matching scene guide. |

@@ -1054,9 +1054,18 @@ impl App {
                 if let Some(plugins) = self.wasm_plugins.as_ref() {
                     plugins.dismiss_popup(&state.plugin, &state.popup);
                 }
-                self.mode = Mode::Normal;
+                self.close_plugin_popup_mode();
             }
         }
+    }
+
+    /// Leaves the popup screen: back to the Settings page that asked for the popup, or to the
+    /// normal view.
+    pub(crate) fn close_plugin_popup_mode(&mut self) {
+        self.mode = match self.settings_suspended_for_popup.take() {
+            Some(settings) => Mode::Settings(settings),
+            None => Mode::Normal,
+        };
     }
 
     pub(crate) fn popup_screen(&self) -> (u16, u16) {
@@ -1703,5 +1712,27 @@ mod tests {
         let (label_room, field) = input_split(narrow);
         assert_eq!(label_room, 0);
         assert_eq!(field.width, 6);
+    }
+
+    #[test]
+    fn closing_a_popup_returns_to_the_settings_page_that_asked_for_it() {
+        let mut app = App::new("popup over settings".to_owned(), std::env::temp_dir());
+        // A popup that nothing asked for from a settings page closes to the normal view.
+        app.mode = Mode::PluginPopup(PopupState::new("p".to_owned(), "q".to_owned()));
+        app.close_plugin_popup_mode();
+        assert!(matches!(app.mode, Mode::Normal));
+        // A popup opened over Settings brings the page back where it was.
+        let settings = crate::app::SettingsState {
+            selected_row: 7,
+            ..crate::app::SettingsState::default()
+        };
+        app.settings_suspended_for_popup = Some(Box::new(settings));
+        app.mode = Mode::PluginPopup(PopupState::new("p".to_owned(), "q".to_owned()));
+        app.close_plugin_popup_mode();
+        let Mode::Settings(back) = &app.mode else {
+            panic!("the settings page returns");
+        };
+        assert_eq!(back.selected_row, 7);
+        assert!(app.settings_suspended_for_popup.is_none());
     }
 }

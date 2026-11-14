@@ -123,7 +123,6 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::SetPaneFocus { pane_id, .. } => Some(*pane_id),
         ClientRequest::NewFolder { parent_group, .. } => Some(*parent_group),
         ClientRequest::ChangeProjectFolder { project_id, .. } => Some(*project_id),
-        ClientRequest::NewBoard { parent_group, .. } => Some(*parent_group),
         ClientRequest::CreateSplitView { parent_group, .. } => Some(*parent_group),
         ClientRequest::SetSessionPaneTitle { pane_id, .. } => Some(*pane_id),
         ClientRequest::ApplyProjectRestructurePlan { project_id, .. } => Some(*project_id),
@@ -634,18 +633,6 @@ async fn handle_scoped_request(
         }
         ClientRequest::ChangeProjectFolder { project_id, path } => {
             handle_change_project_folder(state, project_id, path, direct_tx).await;
-            false
-        }
-        ClientRequest::NewBoard {
-            parent_group,
-            name,
-            storage,
-        } => {
-            handle_tree_mutation(state, direct_tx, |tree| {
-                let parent_group = resolve_parent_group(tree, parent_group, &state.session_cwd);
-                tree.add_board(parent_group, name, storage).map(|_id| ())
-            })
-            .await;
             false
         }
         ClientRequest::CreateSplitView {
@@ -7537,48 +7524,6 @@ async fn write_key_input_with_origin(
     .await
 }
 
-/// Raw scheduled text and Enter-only countdowns use the same missing-worktree
-/// fence as staged automated submissions, without restricting user keystrokes.
-pub(crate) async fn write_scheduled_key_input(
-    state: &ServerState,
-    pane_id: NodeId,
-    bytes: &[u8],
-    submission: Option<PromptSubmissionSource>,
-) -> Result<(), String> {
-    let input_gate = pane_input_gate(state, pane_id).await?;
-    let _input_guard = input_gate.lock().await;
-    {
-        let panes = state.panes.read().await;
-        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-            return Err(format!("pane {pane_id:?} closed before scheduled input"));
-        };
-        if !std::sync::Arc::ptr_eq(&input_gate, &runtime.input_gate) {
-            return Err(format!("pane {pane_id:?} changed before scheduled input"));
-        }
-        if let Some(reason) = &runtime.missing_workspace {
-            return Err(format!(
-                "pane {pane_id:?} is waiting for its worktree; scheduled input was held: {reason}"
-            ));
-        }
-    }
-    write_key_input_unlocked(
-        state,
-        pane_id,
-        bytes,
-        submission,
-        InputWriteOrigin {
-            is_initial_prompt: false,
-            is_user_directed: false,
-            prompt_epoch: None,
-            expected_invocation: None,
-            required_ready_agent_class: None,
-            required_statusline_generation: None,
-        },
-        &input_gate,
-    )
-    .await
-}
-
 async fn pane_input_gate(
     state: &ServerState,
     pane_id: NodeId,
@@ -14449,7 +14394,7 @@ mod tests {
         let revisions = before.project_activity_revisions(project_id).unwrap();
         let recommendation = AnimationRecommendation {
             version: 1,
-            kind: "shoreline".into(),
+            kind: "night_lights".into(),
             resources: ResourcePolicy::Catalog,
             parameters: vec![],
         };

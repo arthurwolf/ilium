@@ -1,6 +1,6 @@
 //! Deterministic confirmation policy for semantic commands.
 
-use crate::app::{App, PaneRuntime};
+use crate::app::App;
 
 use super::command::{
     BoardAction, BoardCommand, ControlCommand, EditorAction, NodeTarget, SessionAction,
@@ -121,49 +121,42 @@ fn pinned_close_plan(app: &App, command: &TreeCommand) -> Result<Option<Confirma
     }))
 }
 
-/// Resolves the board pane and the exact column/card the delete would remove,
-/// pins the pane into the confirmed command's target, and names the doomed
-/// item in the question. Mirrors the executor's own required-field and bounds
-/// validation (control/executor.rs's DeleteCard/DeleteColumn handling) so the
-/// confirmation question never promises a deletion the execution step would
-/// reject -- and, like `pinned_close_plan`, prevents a focus change while the
+/// Resolves the board pane the delete is aimed at, pins it into the confirmed command's target
+/// and names the doomed column or card by its position. The board's contents live in the Kanban
+/// plugin, so the question cannot quote titles; the plugin validates the indices when the
+/// confirmed command runs. Like `pinned_close_plan`, pinning prevents a focus change while the
 /// question is pending from redirecting the delete to a different board.
 fn pinned_board_delete_plan(
     app: &App,
     command: &BoardCommand,
 ) -> Result<Option<ConfirmationPlan>, String> {
     let pane_id = resolve_node(app, &command.target)?;
-    let Some(PaneRuntime::Board(board)) = app.panes.get(&pane_id) else {
+    let is_board = app
+        .tree
+        .plugin_pane_kind(pane_id)
+        .is_some_and(|kind| kind.kind_id() == crate::plugin_host::commands::BOARD_PANE_KIND);
+    if !is_board {
         return Err(ilium_prompts::voice::VOICE_POLICY_TARGET_IS_NOT_A_BOARD_PANE.to_owned());
-    };
+    }
 
     let column_index = command
         .column
         .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?;
-    let column = board.columns.get(column_index).ok_or_else(|| {
-        ilium_prompts::render_value(
-            "voice/policy/board-has-no-column",
-            &serde_json::json!({"v0": (column_index).to_string()}),
-        )
-    })?;
+    let column_label = format!("number {column_index}");
 
     let question = match command.action {
         BoardAction::DeleteCard => {
             let card_index = command
                 .card
                 .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?;
-            let card = column
-                .cards
-                .get(card_index)
-                .ok_or_else(|| ilium_prompts::render_value("voice/policy/board-has-no-card-v0-in-column", &serde_json::json!({"v0": (card_index).to_string(), "v1": (column_index).to_string()})))?;
             ilium_prompts::render_value(
                 "voice/policy/permanently-delete-the-card-v0-from-column",
-                &serde_json::json!({"v0": format!("{:?}", card.title), "v1": format!("{:?}", column.title)}),
+                &serde_json::json!({"v0": format!("number {card_index}"), "v1": column_label}),
             )
         }
         BoardAction::DeleteColumn => ilium_prompts::render_value(
             "voice/policy/permanently-delete-the-column-v0-and-its",
-            &serde_json::json!({"v0": format!("{:?}", column.title), "v1": (column.cards.len()).to_string()}),
+            &serde_json::json!({"v0": column_label, "v1": "all of its"}),
         ),
         // `confirmation_plan` only routes DeleteCard/DeleteColumn here.
         _ => return Ok(None),
@@ -350,17 +343,15 @@ mod tests {
     #[test]
     fn board_delete_confirmation_pins_the_board_and_names_the_card() {
         let (app, board_id) = board_fixture();
-        let command = board_delete_card_command(Some(0), Some(0));
+        let command = board_delete_card_command(Some(0), Some(2));
 
         let plan = confirmation_plan(&app, &command)
             .expect("policy should resolve")
             .expect("board deletion must be guarded");
 
-        // The question must describe the exact card the delete would remove,
-        // and the confirmed command must carry the board resolved *now* --
-        // otherwise a later focus change before the user answers would
-        // redirect the delete to whatever board happens to be focused then.
-        assert!(plan.question.contains("Ship it"));
+        // The question names the card by position, and the confirmed command carries the board
+        // resolved *now*, so a later focus change cannot redirect the delete.
+        assert!(plan.question.contains("number 2"));
         assert!(matches!(
             plan.confirmed_command,
             ControlCommand::Board(BoardCommand {
@@ -372,33 +363,37 @@ mod tests {
     }
 
     #[test]
-    fn board_delete_confirmation_rejects_an_out_of_range_card_before_asking() {
+    fn board_delete_confirmation_requires_a_card_before_asking() {
         let (app, _) = board_fixture();
-        let command = board_delete_card_command(Some(0), Some(5));
-
-        // Mirroring the executor's bounds validation: the policy must fail
-        // loudly instead of asking a question the execution step would then
-        // reject anyway.
+        let command = board_delete_card_command(Some(0), None);
         assert!(confirmation_plan(&app, &command).is_err());
     }
 
+    #[test]
+    fn board_delete_confirmation_refuses_a_pane_that_is_not_a_board() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group_id, "notes", ilium_core::PaneContentKind::Editor)
+            .unwrap();
+        app.focus_pane(editor_id);
+        assert!(confirmation_plan(&app, &board_delete_card_command(Some(0), Some(0))).is_err());
+    }
+
     fn board_fixture() -> (App, ilium_core::NodeId) {
-        let directory = tempfile::tempdir().unwrap();
-        let storage = ilium_core::BoardStorage::MarkdownFile {
-            path: directory.path().join("board.md"),
-        };
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
         let board_id = app
             .tree
-            .add_board(group_id, "Board".to_owned(), storage.clone())
+            .add_plugin_pane(
+                group_id,
+                "Board",
+                ilium_core::PluginPaneKind::new(crate::plugin_host::commands::BOARD_PANE_KIND)
+                    .unwrap(),
+            )
             .unwrap();
-        let mut board = crate::board::BoardPane::create(storage).unwrap();
-        board.add_card("Ship it".to_owned()).unwrap();
-        app.panes
-            .insert(board_id, PaneRuntime::Board(Box::new(board)));
         app.focus_pane(board_id);
-
         (app, board_id)
     }
 

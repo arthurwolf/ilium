@@ -18,9 +18,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
-    AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, ContextMenu,
-    CreateBoardState, FocusTarget, Mode, PaneRuntime, RightPanelTarget, SubmenuItemAction,
-    FROZEN_DIALOG_BUTTON_LABEL,
+    AgentToolbarModelSubmenuState, App, ContextMenu, FocusTarget, Mode, PaneRuntime,
+    RightPanelTarget, SubmenuItemAction, FROZEN_DIALOG_BUTTON_LABEL,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -478,7 +477,6 @@ fn status_tooltip_content(
     let NodeKind::Pane {
         status,
         progress_monitors,
-        scheduled_input,
         ..
     } = &node.kind
     else {
@@ -512,7 +510,7 @@ fn status_tooltip_content(
         app.ui_settings.attention_running_indicator,
         status,
         progress_monitors,
-        scheduled_input.is_some(),
+        false,
         shell_output,
     );
     // The tree row shows one glyph for all of the pane's monitors; explain
@@ -577,11 +575,7 @@ fn status_tooltip_content(
                         progress.last_observed_unix_millis,
                     )
                 }),
-                ilium_core::ObjectiveSignal::ScheduledInput => scheduled_input.as_ref().map(|input| format!(
-                    "Why: the server-owned tree has an input scheduled for Unix millisecond {}; it will {}.",
-                    input.execute_at_unix_millis,
-                    if input.send_enter { "submit with Enter" } else { "type without Enter" },
-                )),
+                ilium_core::ObjectiveSignal::ScheduledInput => None,
                 ilium_core::ObjectiveSignal::None => None,
             },
             StatusSlot::Now => match signals.now {
@@ -1022,8 +1016,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::Explorer(overlay, _)
         | Mode::FolderExplorer(overlay, _)
         | Mode::ProjectFolderExplorer(overlay, _)
-        | Mode::PluginFilePicker(overlay, _)
-        | Mode::BoardPathPicker(overlay) => {
+        | Mode::PluginFilePicker(overlay, _) => {
             explorer_overlay::render(frame, area, overlay, std::time::SystemTime::now());
         }
         Mode::ExplorerFileMenu(menu) => {
@@ -1096,47 +1089,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         }
         Mode::WorktreeManager(state) => crate::worktree_manager::render(frame, area, state),
         Mode::PluginPopup(state) => crate::plugin_host::popup::draw(frame, area, state, app),
-        Mode::CreateBoard(state) => {
-            cursor = draw_create_board(frame, area, state).or(cursor);
-        }
-        Mode::BoardCardPrompt(_, state) => {
-            cursor =
-                modal::render_text_prompt_cursor(frame, area, "New card", state, "Create card")
-                    .or(cursor);
-        }
-        Mode::BoardColumnPrompt(_, state) => {
-            cursor =
-                modal::render_text_prompt_cursor(frame, area, "New column", state, "Create column")
-                    .or(cursor);
-        }
-        Mode::BoardRenamePrompt(_, target, state) => {
-            let title = match target {
-                BoardRenameTarget::Card => "Rename card",
-                BoardRenameTarget::Column => "Rename column",
-            };
-            cursor =
-                modal::render_text_prompt_cursor(frame, area, title, state, "Rename").or(cursor);
-        }
-        Mode::BoardDeleteConfirm(_, target) => {
-            let (title, message) = match target {
-                BoardDeleteTarget::Card => ("Delete card?", "Delete the selected card?"),
-                BoardDeleteTarget::Column => {
-                    ("Delete column?", "Delete the empty selected column?")
-                }
-            };
-            modal::render_confirm(
-                frame,
-                area,
-                title,
-                message,
-                modal::DialogActions::confirmation(
-                    "Cancel",
-                    modal::DialogButtonTone::Neutral,
-                    "Delete",
-                    modal::DialogButtonTone::Danger,
-                ),
-            );
-        }
         Mode::CommandPrompt(state) => {
             cursor = modal::render_text_prompt_cursor(frame, area, "Run command", state, "Run")
                 .or(cursor);
@@ -1341,65 +1293,6 @@ fn workspace_close_wait_lines(inner_width: u16) -> Vec<&'static str> {
     vec!["…"]
 }
 
-fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) -> Option<Position> {
-    let mut cursor = None;
-    let layout = modal::create_board_dialog_layout(area);
-    frame.render_widget(Clear, layout.popup);
-    let block = theme::block(true).title(theme::chrome_title("New board"));
-    frame.render_widget(block, layout.popup);
-    cursor = draw_scheduled_input_field(
-        frame,
-        layout.name_box,
-        "Board name",
-        &state.name,
-        !state.editing_path,
-    )
-    .or(cursor);
-
-    modal::create_board_storage_control(area, state.storage_kind.label()).render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: Style::new(),
-            label: Style::new().fg(Color::Cyan),
-            value: theme::selected_style(),
-            button: Style::new().fg(Color::Cyan),
-            disabled: Style::new().add_modifier(Modifier::DIM),
-        },
-    );
-
-    cursor = draw_scheduled_input_field(
-        frame,
-        layout.path_box,
-        "Storage path",
-        &state.path,
-        state.editing_path,
-    )
-    .or(cursor);
-    frame.render_widget(
-        Paragraph::new("[ Browse path… ]")
-            .style(
-                Style::new()
-                    .fg(Color::Black)
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .alignment(Alignment::Center),
-        layout.browse_button,
-    );
-    modal::render_dialog_actions(
-        frame,
-        layout.actions,
-        modal::DialogActions::form("Cancel", "Create board"),
-    );
-    frame.render_widget(
-        Paragraph::new("Tab fields · Ctrl+P browse · Ctrl+Space storage list")
-            .style(Style::new().add_modifier(Modifier::DIM))
-            .alignment(Alignment::Center),
-        layout.hint_row,
-    );
-    cursor
-}
-
 /// Draws the close-confirmation popup, falling back to a generic message
 /// if the target somehow no longer exists (e.g. removed by another path
 /// the same tick) rather than panicking mid-render.
@@ -1482,40 +1375,6 @@ fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu, ui: &crate::config::
     let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(&title)));
     frame.render_widget(Clear, submenu.area);
     frame.render_widget(widget, submenu.area);
-}
-
-fn draw_scheduled_input_field(
-    frame: &mut Frame,
-    area: Rect,
-    label: &str,
-    state: &crate::text_prompt::TextPromptState,
-    focused: bool,
-) -> Option<Position> {
-    let border_style = if focused {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().add_modifier(Modifier::DIM)
-    };
-    let block = theme::block(focused)
-        .title(theme::chrome_title(label))
-        .border_style(border_style);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(state.buf.as_str()), inner);
-    if !focused || inner.width == 0 || inner.height == 0 {
-        return None;
-    }
-    let prefix: String = state.buf.chars().take(state.cursor).collect();
-    let cursor_offset = u16::try_from(prefix.width()).unwrap_or(u16::MAX);
-    let cursor_position = Position::new(
-        inner
-            .x
-            .saturating_add(cursor_offset)
-            .min(inner.right().saturating_sub(1)),
-        inner.y,
-    );
-    frame.set_cursor_position(cursor_position);
-    Some(cursor_position)
 }
 
 /// Draws the line-specific right-click action without implying that its file
@@ -2100,18 +1959,6 @@ fn draw_pane_runtime(
             frame.render_widget(block, viewport.outer_area);
             draw_editor(frame, inner, editor.as_ref());
         }
-        PaneRuntime::Board(board) => {
-            let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
-            let inner = block.inner(viewport.outer_area);
-            frame.render_widget(block, viewport.outer_area);
-            crate::board_ui::render(
-                frame,
-                inner,
-                board.as_ref(),
-                app.kanban_board_settings.card_preview_lines,
-                app.kanban_board_settings.minimum_column_width,
-            );
-        }
     }
 
     draw_stats_icon(frame, app, viewport);
@@ -2636,12 +2483,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::WaitingWorkspaceCloseOffer { .. } => "CHECKING WORKTREE",
         Mode::ConfirmWorkspaceCloseOffer(..) => "WORKTREE CLOSE",
         Mode::PluginPopup(_) => "PLUGIN DIALOG",
-        Mode::CreateBoard(_) => "NEW BOARD",
-        Mode::BoardPathPicker(_) => "BOARD PATH",
-        Mode::BoardCardPrompt(_, _) => "NEW CARD",
-        Mode::BoardColumnPrompt(_, _) => "NEW COLUMN",
-        Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
-        Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",

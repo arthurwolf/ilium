@@ -35,6 +35,16 @@ impl PluginSceneSettings {
         external_scenes().read().ok()?.resolve(&self.scene)
     }
 
+    /// Whether the selected scene shows the shared observer location.
+    pub fn uses_location(&self) -> bool {
+        let Ok(scenes) = external_scenes().read() else {
+            return false;
+        };
+        scenes
+            .resolve(&self.scene)
+            .is_some_and(|id| scenes.uses_location(&id))
+    }
+
     /// The Scene row followed by the selected scene's own rows.
     pub fn controls(&self) -> Vec<Control> {
         let Ok(scenes) = external_scenes().read() else {

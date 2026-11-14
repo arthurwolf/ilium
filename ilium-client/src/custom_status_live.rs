@@ -149,7 +149,6 @@ pub(crate) fn with_pane_facts<T>(
     let NodeKind::Pane {
         status,
         progress_monitors,
-        scheduled_input,
         ..
     } = &node.kind
     else {
@@ -179,7 +178,7 @@ pub(crate) fn with_pane_facts<T>(
     let facts = PaneFacts {
         status,
         progress: progress_monitors,
-        scheduled_input: scheduled_input.is_some(),
+        scheduled_input: false,
         shell_output,
         activity_stale: client.activity_stale,
         supplementary: client.supplementary,
@@ -420,7 +419,7 @@ mod tests {
         assert_eq!(facts.supplementary.frozen, Some(true));
         assert_eq!(facts.supplementary.session_cost_cents, Some(123));
         assert_eq!(facts.supplementary.bookmarked, Some(false));
-        assert_eq!(facts.supplementary.queued_prompts, Some(0));
+        assert_eq!(facts.supplementary.queued_prompts, None);
         // Error facts are copied through unchanged; unobserved stays None.
         assert_eq!(facts.supplementary.blocking_error, Some(true));
         assert_eq!(facts.supplementary.session_error, None);
@@ -437,7 +436,7 @@ mod tests {
         assert_eq!(unfocused.supplementary.selected, None);
         assert_eq!(unfocused.supplementary.visible, None);
         assert_eq!(unfocused.supplementary.context_permille, None);
-        assert_eq!(unfocused.supplementary.prompt_queue_held, Some(false));
+        assert_eq!(unfocused.supplementary.prompt_queue_held, None);
     }
 
     #[test]

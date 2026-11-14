@@ -1180,7 +1180,8 @@ const MANIFEST_SCHEMA: &str = r###"{
               "settings_schema": {"type": "object"},
               "frame_rate_cap": {"type": "integer", "minimum": 1, "maximum": 60},
               "prerender": {"type": "object"},
-              "glyph_plane": {"type": "boolean"}
+              "glyph_plane": {"type": "boolean"},
+              "uses_location": {"type": "boolean"}
             },
             "required": ["id", "title"]
           },
@@ -2447,6 +2448,7 @@ fn check_data_schema(value: &Value, path: &str, errors: &mut Vec<Diagnostic>) {
         "multiline",
         "enum_titles",
         "order",
+        "visible_when",
         "picker",
         "extensions",
         "items",

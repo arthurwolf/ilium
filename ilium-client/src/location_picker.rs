@@ -2621,7 +2621,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
-        app.animation_settings.kind = AnimationKind::Stars;
+        app.animation_settings.kind = AnimationKind::NightLights;
         app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
@@ -3126,7 +3126,7 @@ mod tests {
             .rows()
             .iter()
             .position(|row| *row == AnimationRow::Location)
-            .expect("Stars has a Location row");
+            .expect("Earth at night has a Location row");
         let Mode::Settings(state) = &mut app.mode else {
             panic!("Settings is open");
         };

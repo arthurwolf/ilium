@@ -688,35 +688,20 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
     // All heap-owning settings fields reachable from AnimationSettings. Update
     // this inventory when introducing another dynamic settings field.
     let ambient = &settings.ambient;
-    let voxel = &ambient.voxel_landscape;
     let strings = [
-        &ambient.graph.source_id,
         &ambient.location.label,
         &ambient.video.source,
-        &ambient.stars.start_datetime,
         &ambient.spectrum.device_name,
         &ambient.images.folders,
         &ambient.images.urls,
         &ambient.openstreetmap.local_path,
         &ambient.openstreetmap.endpoint,
         &ambient.openstreetmap.coordinates,
-        &voxel.saved_maps.saves_folder,
-        &voxel.pack_path,
-        &voxel.pack_root,
-        &voxel.pack_addon_path,
     ];
     // std's B-tree nodes contain at most eleven key/value entries. Charging a
     // whole 4KiB node per entry (plus an empty root) conservatively covers the
     // current String/PackSourceSettings node layout and child links.
-    let Some(mut retained) = voxel
-        .pack_custom_sources
-        .len()
-        .checked_add(1)
-        .and_then(|entries| entries.checked_mul(4096))
-        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<AnimationSettings>()))
-    else {
-        return false;
-    };
+    let mut retained = std::mem::size_of::<AnimationSettings>();
     for string in strings {
         let Some(next) = retained.checked_add(string.capacity()) else {
             return false;
@@ -724,17 +709,6 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
         retained = next;
         if retained > MAX_SETTINGS_RETAINED_BYTES {
             return false;
-        }
-    }
-    for (key, source) in &voxel.pack_custom_sources {
-        for string in [key, &source.path, &source.root, &source.addon_path] {
-            let Some(next) = retained.checked_add(string.capacity()) else {
-                return false;
-            };
-            retained = next;
-            if retained > MAX_SETTINGS_RETAINED_BYTES {
-                return false;
-            }
         }
     }
     if retained > MAX_SETTINGS_RETAINED_BYTES {
@@ -1408,7 +1382,7 @@ mod tests {
         RenderRequest {
             revision,
             settings: AnimationSettings {
-                kind: AnimationKind::Stars,
+                kind: AnimationKind::NightLights,
                 ..Default::default()
             },
             width: 2,
@@ -1899,7 +1873,7 @@ mod tests {
         let old = snapshot(&service);
         let lease = presentation(&old);
         let mut next = request(2, 1);
-        next.settings.kind = AnimationKind::Shoreline;
+        next.settings.kind = AnimationKind::Clouds;
         assert_eq!(
             service.try_request(next.clone()).unwrap_err().reason,
             AdmissionError::RevisionNeedsBarrier

@@ -374,20 +374,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         app.plugin_popup_mouse(state, mouse);
         return;
     }
-    if matches!(app.mode, Mode::CreateBoard(_)) {
-        let Mode::CreateBoard(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::CreateBoard");
-        };
-        handle_create_board_mouse(app, state, mouse);
-        return;
-    }
     if matches!(
         app.mode,
         Mode::Explorer(..)
             | Mode::FolderExplorer(..)
             | Mode::ProjectFolderExplorer(..)
             | Mode::PluginFilePicker(..)
-            | Mode::BoardPathPicker(..)
     ) {
         match std::mem::replace(&mut app.mode, Mode::Normal) {
             Mode::Explorer(overlay, target) => handle_explorer_mouse(app, overlay, target, mouse),
@@ -399,16 +391,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             }
             Mode::PluginFilePicker(overlay, pick) => {
                 app.plugin_file_picker_event(overlay, pick, &Event::Mouse(mouse), false)
-            }
-            Mode::BoardPathPicker(mut overlay) => {
-                match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-                    Ok(ExplorerOutcome::Picked(path)) => app.return_to_create_board(Some(path)),
-                    Ok(_) => app.mode = Mode::BoardPathPicker(overlay),
-                    Err(error) => {
-                        app.status_message = Some(format!("Board path picker error: {error}"));
-                        app.mode = Mode::BoardPathPicker(overlay);
-                    }
-                }
             }
             _ => unreachable!("folder explorer match must preserve its mode"),
         }
@@ -510,10 +492,6 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::ConfirmClose(_)
             | Mode::ConfirmWorkspaceCloseOffer(_)
             | Mode::ConfirmRemoveWorkspace(_)
-            | Mode::BoardCardPrompt(_, _)
-            | Mode::BoardColumnPrompt(_, _)
-            | Mode::BoardRenamePrompt(_, _, _)
-            | Mode::BoardDeleteConfirm(_, _)
             | Mode::ConfirmSessionRecovery { .. }
     )
 }
@@ -532,7 +510,6 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         Mode::ConfirmClose(_)
             | Mode::ConfirmWorkspaceCloseOffer(_)
             | Mode::ConfirmRemoveWorkspace(_)
-            | Mode::BoardDeleteConfirm(_, _)
             | Mode::ConfirmSessionRecovery { .. }
     ) {
         let layout = crate::modal::confirm_dialog_layout(app.layout.screen_area);
@@ -579,10 +556,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::GitSettingPrompt(_, state)
         | Mode::AnimationTextPrompt(_, state)
         | Mode::AgentSetupPathPrompt(_, state)
-        | Mode::SaveAs(_, state)
-        | Mode::BoardCardPrompt(_, state)
-        | Mode::BoardColumnPrompt(_, state)
-        | Mode::BoardRenamePrompt(_, _, state) => state,
+        | Mode::SaveAs(_, state) => state,
         _ => return,
     };
     place_prompt_cursor(state, layout.input_box, position);
@@ -1251,7 +1225,7 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             return;
         }
         TreeToolbarAction::Board => {
-            app.open_create_board_dialog();
+            app.action_new_board(ilium_plugin_api::generated::types::CommandOrigin::TreeToolbar);
             return;
         }
         TreeToolbarAction::Folder => {
@@ -1766,85 +1740,6 @@ fn place_prompt_cursor(
     prompt.cursor = clicked_offset.min(prompt.buf.chars().count());
 }
 
-/// Gives board creation the same direct field selection and explicit
-/// Cancel/Create targets as the shared prompt dialogs.
-fn handle_create_board_mouse(
-    app: &mut App,
-    mut state: crate::app::CreateBoardState,
-    mouse: MouseEvent,
-) {
-    let position = Position::new(mouse.column, mouse.row);
-    let control = crate::modal::create_board_storage_control(
-        app.layout.screen_area,
-        state.storage_kind.label(),
-    );
-    if control.geometry().row.contains(position)
-        && matches!(
-            mouse.kind,
-            MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
-        )
-    {
-        let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
-            crate::value_control::PointerButton::Right
-        } else {
-            crate::value_control::PointerButton::Left
-        };
-        match control.hit(position, button) {
-            Some(crate::value_control::ControlAction::OpenChoices) => {
-                app.begin_board_storage_dialog(state)
-            }
-            Some(
-                crate::value_control::ControlAction::PreviousChoice
-                | crate::value_control::ControlAction::NextChoice,
-            ) => {
-                state.storage_kind = match state.storage_kind {
-                    crate::app::BoardStorageKind::Folder => {
-                        crate::app::BoardStorageKind::MarkdownFile
-                    }
-                    crate::app::BoardStorageKind::MarkdownFile => {
-                        crate::app::BoardStorageKind::Folder
-                    }
-                };
-                app.mode = Mode::CreateBoard(state);
-            }
-            _ => app.mode = Mode::CreateBoard(state),
-        }
-        return;
-    }
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::CreateBoard(state);
-        return;
-    }
-    let position = Position::new(mouse.column, mouse.row);
-    let layout = crate::modal::create_board_dialog_layout(app.layout.screen_area);
-    if let Some(action) = layout.actions.action_at(position) {
-        app.mode = Mode::CreateBoard(state);
-        dispatch_form_action(app, action);
-        return;
-    }
-    if layout.name_box.contains(position) {
-        state.editing_path = false;
-        place_prompt_cursor(&mut state.name, layout.name_box, position);
-        app.mode = Mode::CreateBoard(state);
-        return;
-    }
-    if layout.path_box.contains(position) {
-        state.editing_path = true;
-        place_prompt_cursor(&mut state.path, layout.path_box, position);
-        app.mode = Mode::CreateBoard(state);
-        return;
-    }
-    if layout.browse_button.contains(position) {
-        app.open_board_path_picker(state);
-        return;
-    }
-    if layout.popup.contains(position) {
-        app.mode = Mode::CreateBoard(state);
-    } else {
-        app.mode = Mode::Normal;
-    }
-}
-
 /// Rows scrolled per wheel notch over the settings screen's content panel --
 /// matches `App`'s own `TERMINAL_WHEEL_SCROLL_LINES`/`tree_state.scroll_up(3)`
 /// per-notch amount elsewhere in this crate.
@@ -2237,45 +2132,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             editor.keep_selected_visible(regions.rules.height);
                         }
                         app.custom_status_rules_editor = Some(editor);
-                    }
-                }
-            }
-        }
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
-    if state.tree_layout_editor.is_some() {
-        let layout =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
-        let position = Position::new(mouse.column, mouse.row);
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            if crate::settings_ui::close_button_hit(layout.header_area, position) {
-                crate::tree_layout_settings::dismiss(app, &mut state);
-                app.mode = Mode::Normal;
-                return;
-            }
-            if let Some(entry) = crate::settings_ui::settings_rail_entry_at(
-                app,
-                layout.tab_list_area,
-                position,
-                state.tab,
-            ) {
-                crate::tree_layout_settings::dismiss(app, &mut state);
-                select_settings_pointer_rail_entry(app, &mut state, entry, layout.content_area);
-            } else if layout.content_area.contains(position) {
-                let row = position.y.saturating_sub(layout.content_area.y + 2);
-                let editor_width = if layout.content_area.width < 86 {
-                    layout.content_area.width
-                } else {
-                    46
-                };
-                if row < 4 && position.x < layout.content_area.x.saturating_add(editor_width) {
-                    if let Some(editor) = state
-                        .tree_layout_editor
-                        .as_mut()
-                        .filter(|editor| !editor.moving)
-                    {
-                        editor.selected = usize::from(row);
                     }
                 }
             }
@@ -3329,18 +3185,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_adjust_editor_row(row, direction);
                     }
                 }
-            } else if state.tab == crate::app::SettingsTab::Session {
-                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    crate::app::SessionRow::ALL.len(),
-                ) {
-                    state.selected_row = index;
-                    if let Some(row) = crate::app::SessionRow::ALL.get(index).copied() {
-                        app.settings_adjust_session_row(row, direction);
-                    }
-                }
             } else if state.tab == crate::app::SettingsTab::Git {
                 if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
                     layout.content_area,
@@ -3407,20 +3251,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             state.keyboard_picker = Some(action);
                         }
                     }
-                }
-            } else if state.tab == crate::app::SettingsTab::KanbanBoard {
-                if let Some((row, direction)) = crate::settings_ui::kanban_board_content_hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                ) {
-                    if let Some(index) = crate::app::KanbanBoardRow::ALL
-                        .iter()
-                        .position(|candidate| *candidate == row)
-                    {
-                        state.selected_row = index;
-                    }
-                    app.settings_adjust_kanban_board_row(row, direction);
                 }
             } else if state.tab == crate::app::SettingsTab::Sound {
                 match crate::settings_ui::sound_content_hit(
@@ -3587,7 +3417,11 @@ fn handle_explorer_file_menu_mouse(
     if menu.area.contains(Position::new(mouse.column, mouse.row))
         && mouse.row == menu.area.y.saturating_add(1)
     {
-        app.request_new_markdown_board(menu.target_group, menu.file_path);
+        app.action_new_markdown_board(
+            menu.target_group,
+            &menu.file_path,
+            ilium_plugin_api::generated::types::CommandOrigin::Menu,
+        );
         app.close_modal_flow();
     } else {
         app.pop_modal();
@@ -4285,97 +4119,6 @@ mod tree_order_context_mouse_tests {
 }
 
 #[cfg(test)]
-mod markdown_board_context_mouse_tests {
-    use super::*;
-    use crossterm::event::KeyModifiers;
-
-    #[test]
-    fn right_clicking_a_markdown_editor_row_exposes_and_runs_create_board() {
-        let path = std::env::temp_dir().join(format!(
-            "ilium-board-mouse-{}-{}.md",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        std::fs::write(&path, "# Work\n\n* [ ] Mouse task\n").unwrap();
-        // Canonicalized through the same helper the app uses: `%TEMP%` hands
-        // out an 8.3 short path (`RUNNER~1`) while resolving it yields the long
-        // name, so an unresolved expectation cannot match what the app stores.
-        let path = ilium_platform::paths::canonicalize(&path).unwrap_or(path);
-
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let editor_id = app
-            .tree
-            .add_pane(group, "work.md", ilium_core::PaneContentKind::Editor)
-            .unwrap();
-        let editor = crate::editor_pane::EditorPane::load(path.clone()).unwrap();
-        app.panes
-            .insert(editor_id, crate::app::PaneRuntime::Editor(Box::new(editor)));
-        app.tree_state.open(vec![group]);
-        let tree_area = app.layout.tree_area;
-        let editor_row = (tree_area.y..tree_area.bottom())
-            .find(|row| {
-                app.tree_node_at(Position::new(tree_area.x + 1, *row))
-                    .is_some_and(|hit| hit.id == editor_id)
-            })
-            .expect("editor row should be visible");
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Right),
-                column: tree_area.x + 1,
-                row: editor_row,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        let (action_column, action_row) = match &app.mode {
-            Mode::ContextMenu(menu) => {
-                assert_eq!(menu.target, editor_id);
-                let action_index = menu
-                    .actions
-                    .iter()
-                    .position(|action| {
-                        *action == crate::app::ContextMenuAction::CreateBoardFromMarkdown
-                    })
-                    .expect("Markdown editor menu should contain create-board action");
-                (
-                    menu.area.x + 1,
-                    menu.area.y + 1 + menu.layout().row_for_action(action_index).unwrap(),
-                )
-            }
-            _ => panic!("right click should open the tree context menu"),
-        };
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: action_column,
-                row: action_row,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        app.settle_filesystem_for_test();
-        let requests = app.take_outbound_requests();
-        assert!(
-            matches!(
-                requests.as_slice(),
-                [ilium_ipc::ClientRequest::NewBoard {
-                    parent_group,
-                    storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
-                    ..
-                }] if *parent_group == group && board_path == &path
-            ),
-            "{requests:?}"
-        );
-        let _ = std::fs::remove_file(path);
-    }
-}
-
-#[cfg(test)]
 mod row_action_click_tests {
     use super::*;
     use crate::app::App;
@@ -4675,7 +4418,6 @@ mod row_action_click_tests {
 #[cfg(test)]
 mod shared_dialog_mouse_tests {
     use super::*;
-    use crate::app::{BoardStorageKind, CreateBoardState};
     use crate::text_prompt::TextPromptState;
     use crossterm::event::KeyModifiers;
     use ilium_ipc::ClientRequest;
@@ -4854,61 +4596,6 @@ mod shared_dialog_mouse_tests {
             matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == AgentLaunchType::Codex && state.prompt_text() == authored)
         );
         assert!(app.take_outbound_requests().is_empty());
-    }
-
-    #[test]
-    fn board_form_fields_and_create_button_are_fully_mouse_operable() {
-        let project_path = std::env::temp_dir().join(format!(
-            "ilium-board-dialog-mouse-{}-{}",
-            std::process::id(),
-            crate::wall_clock::unix_millis_now()
-        ));
-        std::fs::create_dir_all(&project_path).unwrap();
-        let mut app = App::new("dialog-mouse-test".to_owned(), project_path.clone());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let board_path = project_path.join("planning.md");
-        app.mode = Mode::CreateBoard(CreateBoardState {
-            parent_group: group_id,
-            name: TextPromptState::new("Planning"),
-            path: TextPromptState::new(board_path.display().to_string()),
-            storage_kind: BoardStorageKind::Folder,
-            editing_path: false,
-        });
-        let layout = crate::modal::create_board_dialog_layout(app.layout.screen_area);
-
-        let storage = crate::modal::create_board_storage_control(
-            app.layout.screen_area,
-            BoardStorageKind::Folder.label(),
-        );
-        click(&mut app, storage.geometry().next);
-        assert!(matches!(
-            &app.mode,
-            Mode::CreateBoard(state)
-                if state.storage_kind == BoardStorageKind::MarkdownFile
-        ));
-
-        click(&mut app, layout.path_box);
-        assert!(matches!(
-            &app.mode,
-            Mode::CreateBoard(state) if state.editing_path
-        ));
-
-        click(&mut app, layout.actions.confirm_button);
-        app.settle_filesystem_for_test();
-        assert!(board_path.is_file());
-        // The queued request carries the created file's canonical identity
-        // (macOS `/var` -> `/private/var`, Windows 8.3 short names).
-        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::NewBoard {
-                parent_group,
-                name,
-                storage: ilium_core::BoardStorage::MarkdownFile { path },
-            }] if *parent_group == group_id && name == "Planning" && path == &canonical_board_path
-        ));
-        std::fs::remove_dir_all(project_path).unwrap();
     }
 }
 

@@ -1,0 +1,3 @@
+### Changed
+- Topographic maps is now a scene of the Scenes plugin instead of built-in code. Its elevation data (about 12 MB of Earth, Moon, Mars, Venus, Mercury and Ceres grids) ships inside the plugin, and world loading and generation run a slice per frame instead of on a worker thread. A saved animation of `topographic_maps` opens the Plugin scene animation. The Elevation tints control keeps its choices but its setting key is now `tint` (it was `palette`, a name the shared look owns). Disabling the Scenes plugin removes the scene from the list.
+- The manifest validator accepts `visible_when` on settings-schema properties, which the scene rows already honoured.

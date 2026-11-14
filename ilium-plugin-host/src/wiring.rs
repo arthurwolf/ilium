@@ -30,6 +30,7 @@ use crate::runtime::{
 };
 use crate::storage::{StorageContext, BUCKET_MAX_BYTES};
 
+pub mod scene;
 pub mod wave_two;
 
 /// The shared cache ceiling of one plugin (reference-errors-and-limits.md, storage).

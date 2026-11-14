@@ -5,8 +5,6 @@ pub(crate) mod editor_snapshot;
 pub mod editors;
 pub mod ordered;
 
-pub(crate) mod board_app;
-pub(crate) mod boards;
 pub mod configuration;
 mod configuration_app;
 pub mod configurations;

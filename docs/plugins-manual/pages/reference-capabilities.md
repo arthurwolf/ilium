@@ -61,6 +61,7 @@ The `fs` grants take a scope argument. Each scope has a fixed preopen name in th
 | `agent-sessions:<agent>` | `/agent-sessions/<agent>` | the agent's transcript folder, read only | grant, H, read and watch only |
 | `agent-config:<agent>` | `/agent-config/<agent>` | the agent's configuration folder | grant, H for read; a write grant is refused, changes go through `agent-config.propose:<agent>` (H) |
 | `minecraft-saves` | `/minecraft-saves` | the Minecraft saves folder | grant |
+| `minecraft-java` | `/minecraft-java` | the Minecraft Java folder (versions and resource packs), read only | grant |
 | `path:<template>` | `/paths/<n>` | a template with `{home}`, `{config}`, `{data}`, `{cache}`, `{project}` or `{worktrees}` | grant |
 
 A `path:` template ends either with a name (that file or folder, plus the direct children of a folder) or with `/**` (the whole subtree). A literal absolute path such as `path:/srv/logs/**` is always H. A path that escapes its scope root with `..`, or through a symbolic link, is refused with `not-permitted`.

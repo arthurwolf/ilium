@@ -294,7 +294,7 @@ impl RowModel {
             .map(|(row, control)| {
                 control.as_ref().map_or_else(
                     || row.view(settings, scene_controls, context),
-                    |control| control_view(row, settings.kind, control),
+                    |control| control_view(control),
                 )
             })
             .collect();
@@ -485,6 +485,7 @@ fn rows_with_scene_controls(
         || kind
             .ambient()
             .is_some_and(|ambient| ambient.uses_location())
+        || (kind == AnimationKind::PluginScene && settings.ambient.plugin_scene.uses_location())
     {
         rows.push(AnimationRow::Location);
     }
@@ -502,33 +503,21 @@ fn rows_with_scene_controls(
     rows
 }
 
-fn control_view(row: &AnimationRow, animation_kind: AnimationKind, control: &Control) -> RowView {
-    let wide_number = matches!(row, AnimationRow::SceneControl("seed"))
-        .then(|| crate::value_animation::animation_number_spec(animation_kind, control))
-        .flatten();
-    let kind = if let Some((minimum, maximum, step, value)) = wide_number {
-        RowKind::Number {
-            minimum,
-            maximum,
-            step,
-            value,
-        }
-    } else {
-        match &control.kind {
-            ControlKind::Slider { min, max, step, .. } => RowKind::Slider(SliderSpec {
-                logarithmic: control.id == "loop_seconds",
-                minimum: *min,
-                maximum: *max,
-                step: *step,
-                value: match &control.value {
-                    ControlValue::Number(number) => *number,
-                    _ => *min,
-                },
-            }),
-            ControlKind::Choice { .. } => RowKind::Choice,
-            ControlKind::Toggle => RowKind::Toggle,
-            ControlKind::Text { .. } => RowKind::Text,
-        }
+fn control_view(control: &Control) -> RowView {
+    let kind = match &control.kind {
+        ControlKind::Slider { min, max, step, .. } => RowKind::Slider(SliderSpec {
+            logarithmic: control.id == "loop_seconds",
+            minimum: *min,
+            maximum: *max,
+            step: *step,
+            value: match &control.value {
+                ControlValue::Number(number) => *number,
+                _ => *min,
+            },
+        }),
+        ControlKind::Choice { .. } => RowKind::Choice,
+        ControlKind::Toggle => RowKind::Toggle,
+        ControlKind::Text { .. } => RowKind::Text,
     };
     let disabled_options = disabled_options_of(control);
     // Why an option is greyed out comes first: the help line is only two
@@ -630,11 +619,11 @@ impl AnimationRow {
             },
             Self::Common(id) => settings
                 .common_control(id)
-                .map_or_else(missing, |control| control_view(self, settings.kind, &control)),
+                .map_or_else(missing, |control| control_view(&control)),
             Self::SceneControl(id) => scene_controls
                 .iter()
                 .find(|control| control.id == *id)
-                .map_or_else(missing, |control| control_view(self, settings.kind, control)),
+                .map_or_else(missing, |control| control_view(control)),
             Self::Location => {
                 if settings.kind == AnimationKind::OpenStreetMap {
                     let value = settings.ambient.openstreetmap.picker_location()
@@ -673,13 +662,8 @@ impl AnimationRow {
                 value: context
                     .scene_status
                     .as_deref()
-                    .map(|status| {
-                        if settings.kind == AnimationKind::VoxelLandscape {
-                            status.lines().next().unwrap_or_default().to_owned()
-                        } else {
-                            status.to_owned()
-                        }
-                    })
+                    // A multi-line report keeps its headline in the bar; the rest is the help.
+                    .map(|status| status.lines().next().unwrap_or_default().to_owned())
                     .unwrap_or_else(|| {
                         if settings.kind == AnimationKind::Semantic {
                             "Awaiting tree recommendation"
@@ -695,7 +679,7 @@ impl AnimationRow {
                 } else if settings.kind == AnimationKind::Wikipedia {
                     "Article title, source URL, revision, offline state, missing images and font coverage."
                         .to_owned()
-                } else if settings.kind == AnimationKind::VoxelLandscape {
+                } else {
                     context
                         .scene_status
                         .as_deref()
@@ -703,12 +687,9 @@ impl AnimationRow {
                         .map(|status| status.lines().skip(1).collect::<Vec<_>>().join("\n"))
                         .filter(|details| !details.is_empty())
                         .unwrap_or_else(|| {
-                            "What the saved-world scene is doing while it prepares and renders."
+                            "What the running scene reports: downloads, missing tools, missing devices."
                                 .to_owned()
                         })
-                } else {
-                    "What the running scene reports: downloads, missing tools, missing devices."
-                        .to_owned()
                 },
                 disabled_options: Vec::new(),
             },
@@ -729,17 +710,10 @@ impl AnimationRow {
     pub fn help_id(&self, scene_controls: &[Control]) -> String {
         match self {
             Self::Scene(AnimationKind::Wikipedia) => "AN-54".to_owned(),
-            Self::Scene(AnimationKind::VoxelLandscape) => "AN-52".to_owned(),
-            Self::Scene(AnimationKind::TopographicMaps) => "AN-56".to_owned(),
             Self::Scene(AnimationKind::OpenStreetMap) => "AN-55".to_owned(),
-            Self::Scene(AnimationKind::Graph) => "AN-57".to_owned(),
-            Self::Scene(AnimationKind::Earthquakes) => "AN-59".to_owned(),
-            Self::Scene(AnimationKind::Aircraft) => "AN-60".to_owned(),
-            Self::Scene(AnimationKind::Boats) => "AN-61".to_owned(),
             Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
             // The scenes after the ones that moved into the Scenes plugin (3D pipes, Atlantic
             // dusk, Machine screen, Hex expedition) keep the topic numbers they had.
-            Self::Scene(AnimationKind::Stars) => "AN-12".to_owned(),
             Self::Scene(AnimationKind::NightLights) => "AN-13".to_owned(),
             Self::Scene(AnimationKind::Clouds) => "AN-14".to_owned(),
             Self::Scene(AnimationKind::Video) => "AN-15".to_owned(),
@@ -856,28 +830,6 @@ mod overhaul_tests {
     use super::*;
 
     #[test]
-    fn voxel_world_seed_is_a_wide_number_over_the_original_text_control() {
-        let settings = AnimationSettings {
-            kind: AnimationKind::VoxelLandscape,
-            ..Default::default()
-        };
-        let model = RowModel::new(&settings, &RowContext::default());
-        let row = model
-            .rows()
-            .iter()
-            .position(|row| *row == AnimationRow::SceneControl("seed"))
-            .expect("voxel seed row");
-        let control = model.control(row).expect("native seed control");
-        assert!(matches!(control.kind, ControlKind::Text { .. }));
-        assert!(matches!(control.value, ControlValue::Text(_)));
-        assert_eq!(
-            model.view(row).and_then(RowView::number),
-            Some((0, u32::MAX as i128, 1, 71_839)),
-        );
-        assert!(model.view(row).unwrap().slider().is_none());
-    }
-
-    #[test]
     fn displayed_controls_retain_their_full_option_and_numeric_metadata() {
         for kind in AnimationKind::ALL {
             let settings = AnimationSettings {
@@ -954,61 +906,4 @@ mod overhaul_tests {
         assert!(!view.value.contains("Shared observer"));
         assert!(view.value.contains("Paris"));
     }
-
-    #[test]
-    fn saved_scene_status_keeps_the_bar_compact_and_the_activity_log_in_help() {
-        let settings = AnimationSettings {
-            kind: AnimationKind::VoxelLandscape,
-            ..Default::default()
-        };
-        let status = "Route [====......] 4/16\nElapsed: 00:42 · ETA unavailable\nRecent activity:\n+00:08 · Scanning saved region files";
-        let model = RowModel::new(
-            &settings,
-            &RowContext {
-                scene_status: Some(status.to_owned()),
-                ..Default::default()
-            },
-        );
-        let index = model
-            .rows()
-            .iter()
-            .position(|row| *row == AnimationRow::SceneStatus)
-            .unwrap();
-        let view = model.view(index).unwrap();
-
-        assert_eq!(view.value, "Route [====......] 4/16");
-        assert!(view.help.contains("Elapsed: 00:42 · ETA unavailable"));
-        assert!(view.help.contains("Scanning saved region files"));
-    }
 }
-
-#[cfg(test)] // Verify full source values reach the existing openable Text row path.
-mod boat_information_tests {
-    // No private UI state or network fixture.
-    use super::*; // Production row model and view conversion.
-    #[test] // Long source references must not exist only in truncated status/help text.
-    fn boat_information_is_exposed_as_full_text_prompt_values() {
-        // The normal Text action opens the shared input prompt.
-        let settings = AnimationSettings {
-            kind: AnimationKind::Boats,
-            ..Default::default()
-        }; // Broader default source.
-        let controls = settings.scene_controls(); // Actual client-to-ambient control bridge.
-        for (id, expected) in [
-            ("boat_credit", "OpenSeaFeed contributors"),
-            ("boat_provider", "https://openseafeed.com/"),
-            (
-                "boat_license",
-                "https://creativecommons.org/licenses/by/4.0/",
-            ),
-            ("boat_coverage", "position age unavailable"),
-            ("boat_changes", "projected"),
-        ] {
-            // Required provenance and limitations.
-            let view =
-                AnimationRow::SceneControl(id).view(&settings, &controls, &RowContext::default()); // Actual row conversion, without renderer truncation.
-            assert_eq!(view.kind, RowKind::Text);
-            assert!(view.value.contains(expected)); // Full value survives to the openable prompt path.
-        } // End block.
-    } // End block.
-} // End block.

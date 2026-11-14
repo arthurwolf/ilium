@@ -273,10 +273,6 @@ impl App {
                 self.collect_settings_number_read(token, completion);
                 continue;
             }
-            if let Some(ConfigurationIntent::SessionValueDialog { desired, token }) = &intent {
-                self.collect_session_choice_configuration(*desired, token, completion);
-                continue;
-            }
             if let Some(ConfigurationIntent::ValueDialog { token }) = &intent {
                 self.collect_value_dialog_configuration(token, completion);
                 continue;
@@ -294,7 +290,7 @@ impl App {
                 WriteCompletion::Outcome { outcome, .. } => {
                     let _retained=outcome.map(|outcome|{result=Some(match outcome {
                     JobOutcome::Finished(result)=>result,
-                    JobOutcome::NotStarted { .. }|JobOutcome::Panicked=>Err(super::configuration::ConfigurationFailure{message:"Configuration worker did not complete the write; publication is unconfirmed".into(),observed_session:None,observed_agent_setup:None}),
+                    JobOutcome::NotStarted { .. }|JobOutcome::Panicked=>Err(super::configuration::ConfigurationFailure{message:"Configuration worker did not complete the write; publication is unconfirmed".into(),observed_agent_setup:None}),
                 });});
                 }
                 WriteCompletion::Rejected { rejection, .. } => {
@@ -357,12 +353,6 @@ impl App {
                     }
                     match saved {
                         ConfigurationSaved::NumberRead(_) => {}
-                        ConfigurationSaved::Session(saved) => {
-                            if matches!(&intent,Some(ConfigurationIntent::Session{desired}) if self.session_settings==*desired)
-                            {
-                                self.session_settings = saved;
-                            }
-                        }
                         ConfigurationSaved::AgentSetup(saved) => {
                             if matches!(&intent,Some(ConfigurationIntent::AgentSetup{desired,..}) if &self.agent_setup_settings==desired)
                             {
@@ -537,13 +527,6 @@ impl App {
                     match intent {
                         Some(ConfigurationIntent::ProjectName) => {
                             self.is_project_name_loading = false;
-                        }
-                        Some(ConfigurationIntent::Session { desired })
-                            if self.session_settings == desired =>
-                        {
-                            if let Some(observed) = failure.observed_session {
-                                self.session_settings = observed;
-                            }
                         }
                         Some(ConfigurationIntent::AgentSetup { desired, .. })
                             if self.agent_setup_settings == desired =>

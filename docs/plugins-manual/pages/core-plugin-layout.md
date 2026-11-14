@@ -169,6 +169,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "new-split",
         "title": "New split view"
+      },
+      {
+        "id": "tree-layout",
+        "title": "Tree row layout"
       }
     ],
     "panels": [
@@ -277,6 +281,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "activation": [
     "command:ilium.core.layout/preset",
     "command:ilium.core.layout/new-split",
+    "command:ilium.core.layout/tree-layout",
     "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"
@@ -667,7 +672,11 @@ In every state the data is not deleted ([COR-022]). A user who finds the presets
 
 ### Padding and tree row settings
 
-Layout declares two groups of settings rows (see the complete manifest). The **Padding** tab sets the empty cells between a panel border and its content: `mode` (`disabled`, `width_dependent` or `enabled`), `width_threshold` (11 to 1000 columns, default 200, used only by `width_dependent`), `right_panels_shared`, `tree_all` and `right_shared_all` (0 to 3 cells, default 1). A value outside its range is refused and the stored value stays. A terminal narrower than the padding keeps its full extent on that axis, so padding never removes the last cell of a panel. The **Tree rows** section of the user interface tab chooses the preset `tree_row_preset` (`default`, `all_right` or `mixed`) of the order of the identity, objective, activity and title slots of a tree row; the title cannot be hidden. The fine-tuning dialogs with per-side numbers and the live specimen stay in the kernel until a popup view can edit text.
+Layout declares two groups of settings rows (see the complete manifest). The **Padding** tab sets the empty cells between a panel border and its content: `mode` (`disabled`, `width_dependent` or `enabled`), `width_threshold` (11 to 1000 columns, default 200, used only by `width_dependent`), `right_panels_shared`, `tree_all` and `right_shared_all` (0 to 3 cells, default 1). A value outside its range is refused and the stored value stays. A terminal narrower than the padding keeps its full extent on that axis, so padding never removes the last cell of a panel. The **Tree rows** section of the user interface tab chooses the preset `tree_row_preset` (`default`, `all_right` or `mixed`) of the order of the identity, objective, activity and title slots of a tree row; the title cannot be hidden.
+
+#### Tree row layout dialog
+
+The Icons page of the kernel Settings screen runs the command `ilium.core.layout/tree-layout` when the user presses `L`. The kernel passes the layout in use and the icon glyphs of the specimen rows as the JSON arguments `{"layout": {"order": [...], "hidden": [...]}, "glyphs": {...}}`, each glyph already padded to the width of its slot in the live tree. The plugin opens the popup `tree-layout`: a list of the four slots (each with its side of the title and whether it shows), a specimen of a small dummy tree drawn with the layout being edited, and the buttons Done, Cancel, Up, Down, Show/hide, Default, All right and Mixed. Every change is sent at once as the kernel command `kernel.set-tree-row-layout` with `{"order": [...], "hidden": [...]}`, which completes a partial order, drops a hidden title and saves the layout. Done and Escape keep what is shown; Cancel sends the layout back that was in use when the dialog opened. Closing the popup returns to the Icons page.
 
 ### See also
 

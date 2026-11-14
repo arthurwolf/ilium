@@ -34,12 +34,12 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
     App, AppearanceRow, GitRow, IconPickerColumnMode, IconPickerSearchStatus, InferenceRow,
-    InferenceSettingField, InferenceTestState, KanbanBoardRow, ModelDiscoveryState, SettingsState,
-    SettingsTab, SoundRow,
+    InferenceSettingField, InferenceTestState, ModelDiscoveryState, SettingsState, SettingsTab,
+    SoundRow,
 };
 use crate::config::{
-    DebugSettings, EditorSettings, GitSettings, KanbanBoardSettings, KeyboardSettings,
-    LeftPanelSizingMode, SessionSettings, TerminalSettings, UiSettings,
+    DebugSettings, EditorSettings, GitSettings, KeyboardSettings, LeftPanelSizingMode,
+    TerminalSettings, UiSettings,
 };
 use crate::icon_settings::{
     catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
@@ -456,10 +456,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     render_header(frame, layout.header_area);
     render_settings_rail(frame, layout.tab_list_area, app, state.tab);
     if state.tab == SettingsTab::Icons {
-        if let Some(editor) = &state.tree_layout_editor {
-            crate::tree_layout_settings::render(frame, layout.content_area, app, editor);
-            return;
-        }
         render_icons_tab(frame, layout.content_area, app, state);
         render_icons_scrollbar(frame, layout.content_area, state.scroll);
         render_settings_help_anchors(frame, &layout, app, state);
@@ -544,12 +540,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             editor_lines(&app.editor_settings, state.selected_row),
             state.scroll,
         ),
-        SettingsTab::Session => render_scrollable(
-            frame,
-            layout.content_area,
-            session_lines(&app.session_settings, state.selected_row),
-            state.scroll,
-        ),
         SettingsTab::Git => render_scrollable(
             frame,
             layout.content_area,
@@ -569,10 +559,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             if let Some(dialog) = &state.padding.dialog {
                 crate::padding_dialog::render(frame, area, app, dialog);
             }
-        }
-        SettingsTab::KanbanBoard => {
-            let lines = kanban_board_lines(&app.kanban_board_settings, state.selected_row);
-            render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::Sound => {
             let view = sound_view(app, state.selected_row, layout.content_area.width);
@@ -839,18 +825,6 @@ pub fn settings_help_anchors(
                 );
             }
         }
-        SettingsTab::Session => {
-            for (i, id) in simple_rows("SES-", 2) {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &id,
-                    1 + i as u16 * 3,
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-        }
         SettingsTab::Git => {
             for (i, id) in simple_rows("GIT-", 7) {
                 push_help_anchor(
@@ -875,18 +849,6 @@ pub fn settings_help_anchors(
                     layout,
                     &id,
                     lines[i],
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-        }
-        SettingsTab::KanbanBoard => {
-            for (i, id) in simple_rows("KAN-", 2) {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &id,
-                    1 + i as u16 * 3,
                     state.scroll,
                     state.selected_row == i,
                 );
@@ -1325,9 +1287,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Keyboard => "⌨",
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
-        SettingsTab::Session => "▣",
         SettingsTab::Git => "⑂",
-        SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
         SettingsTab::Sound => "♪",
         SettingsTab::VoiceControl => "🎙",
@@ -1349,7 +1309,6 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
         SettingsTab::Cost => "Cost",
-        SettingsTab::KanbanBoard => "Kanban",
         SettingsTab::Animations => "Motion",
         SettingsTab::VoiceControl => "Voice",
         SettingsTab::Inference => "Models",
@@ -2038,7 +1997,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
-        SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
         SettingsTab::Git => git_lines(
             &app.git_settings,
             app.git_settings_error.as_deref(),
@@ -2047,9 +2005,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         .len() as u16,
         SettingsTab::Keyboard => {
             keyboard_lines(&app.keyboard_settings, &app.keybindings).len() as u16
-        }
-        SettingsTab::KanbanBoard => {
-            kanban_board_lines(&app.kanban_board_settings, selected_row).len() as u16
         }
         SettingsTab::Sound => sound_view(app, selected_row, content_area.width)
             .lines
@@ -3977,99 +3932,6 @@ pub fn inference_content_hit(
     ))
 }
 
-fn kanban_board_row_label(row: KanbanBoardRow) -> &'static str {
-    match row {
-        KanbanBoardRow::CardPreviewLines => "Card preview lines",
-        KanbanBoardRow::MinimumColumnWidth => "Minimum column width",
-    }
-}
-
-fn kanban_board_row_description(row: KanbanBoardRow) -> &'static str {
-    match row {
-        KanbanBoardRow::CardPreviewLines => {
-            "Number of wrapped text lines shown on each card, from 1 to 10."
-        }
-        KanbanBoardRow::MinimumColumnWidth => {
-            "Minimum terminal columns per board column before horizontal scrolling is used."
-        }
-    }
-}
-
-fn kanban_board_row_value(row: KanbanBoardRow, settings: &KanbanBoardSettings) -> String {
-    match row {
-        KanbanBoardRow::CardPreviewLines => format!("‹ {} ›", settings.card_preview_lines),
-        KanbanBoardRow::MinimumColumnWidth => {
-            format!("‹ {} ›", settings.minimum_column_width)
-        }
-    }
-}
-
-/// Kanban Board tab content. Both controls are client-global presentation
-/// settings, so board-owned Markdown/folder data remains purely domain data.
-fn kanban_board_lines(settings: &KanbanBoardSettings, selected_row: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from("")];
-    for (index, row) in KanbanBoardRow::ALL.into_iter().enumerate() {
-        let label = kanban_board_row_label(row);
-        let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
-        let label_style = if index == selected_row {
-            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        } else {
-            Style::new()
-        };
-        let value_style = if index == selected_row {
-            theme::selected_style().add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().fg(theme::accent_bg())
-        };
-        lines.push(Line::from(vec![
-            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
-            Span::styled(label, label_style),
-            leader_span(padding),
-            Span::styled(kanban_board_row_value(row, settings), value_style),
-        ]));
-        lines.push(Line::from(Span::styled(
-            format!("    {}", kanban_board_row_description(row)),
-            Style::new().add_modifier(Modifier::DIM),
-        )));
-        lines.push(Line::from(""));
-    }
-    lines.push(Line::from(Span::styled(
-        "Click a card to open and edit it in the board's right-hand panel.",
-        Style::new().add_modifier(Modifier::DIM),
-    )));
-    lines
-}
-
-/// Returns the row plus decrement/increment direction for either Kanban
-/// Board stepper using the same three-line row geometry as rendering.
-pub fn kanban_board_content_hit(
-    content_area: Rect,
-    scroll: u16,
-    position: Position,
-) -> Option<(KanbanBoardRow, i32)> {
-    if !content_area.contains(position) {
-        return None;
-    }
-    let line_index =
-        usize::try_from(i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll))
-            .ok()?;
-    let row_offset = line_index.checked_sub(usize::from(APPEARANCE_TOP_PADDING))?;
-    if row_offset % usize::from(APPEARANCE_ROW_HEIGHT) != 0 {
-        return None;
-    }
-    let row = *KanbanBoardRow::ALL.get(row_offset / usize::from(APPEARANCE_ROW_HEIGHT))?;
-    let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
-    if position.x < control_start_x {
-        return None;
-    }
-    let direction = if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
-        -1
-    } else {
-        1
-    };
-    Some((row, direction))
-}
-
 fn sound_row_label(row: SoundRow) -> &'static str {
     match row {
         SoundRow::Source => "Sound source",
@@ -5111,7 +4973,6 @@ fn settings_control_row(
     state: &SettingsState,
     row: usize,
 ) -> Option<(Rect, String, u16)> {
-    use crate::value_config::BoardNumber;
     let (virtual_y, label, label_width) = match state.tab {
         SettingsTab::Appearance => {
             let current_row =
@@ -5193,12 +5054,6 @@ fn settings_control_row(
                 Some(crate::value_settings::SettingsNumber::EditorAutosaveDelay) => {
                     "Autosave delay"
                 }
-                Some(crate::value_settings::SettingsNumber::Board(
-                    BoardNumber::CardPreviewLines,
-                )) => "Card preview lines",
-                Some(crate::value_settings::SettingsNumber::Board(
-                    BoardNumber::MinimumColumnWidth,
-                )) => "Minimum column width",
                 Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
@@ -5378,10 +5233,8 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         }
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
-        SettingsTab::Session => crate::app::SessionRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
-        SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
         SettingsTab::Api => crate::app::ApiRow::ALL.len(),
         _ => 0,
     }
@@ -5680,24 +5533,6 @@ fn editor_lines(settings: &EditorSettings, selected: usize) -> Vec<Line<'static>
         selected,
     )
 }
-fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'static>> {
-    setting_lines(
-        &[
-            (
-                "Recovery policy",
-                settings.recovery_policy.label().to_string(),
-                "Used by the detached server when it next starts this project session.",
-            ),
-            (
-                "Automatic backups",
-                on_off(settings.backups_enabled),
-                "Copy this project's native session snapshot every 30 minutes. Older copies thin to daily, weekly, monthly, then yearly history.",
-            ),
-        ],
-        selected,
-    )
-}
-
 fn git_lines(settings: &GitSettings, error: Option<&str>, selected: usize) -> Vec<Line<'static>> {
     let rows = [
         (
@@ -6868,7 +6703,6 @@ mod number_control_tests {
                 SettingsTab::AgentMonitoring,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
-                SettingsTab::KanbanBoard,
                 SettingsTab::Api,
                 SettingsTab::Inference,
                 SettingsTab::Sound,
@@ -6980,7 +6814,6 @@ mod number_control_tests {
                 SettingsTab::AgentMonitoring,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
-                SettingsTab::KanbanBoard,
                 SettingsTab::Api,
                 SettingsTab::Inference,
                 SettingsTab::Sound,
@@ -7177,7 +7010,6 @@ mod number_control_tests {
         let mut found = Vec::new();
         let mut cases: Vec<_> = [
             SettingsTab::Git,
-            SettingsTab::Session,
             SettingsTab::Appearance,
             SettingsTab::AgentMonitoring,
             SettingsTab::Terminal,
@@ -7278,7 +7110,6 @@ mod number_control_tests {
         }];
         let mut cases: Vec<_> = [
             SettingsTab::Git,
-            SettingsTab::Session,
             SettingsTab::Appearance,
             SettingsTab::AgentMonitoring,
             SettingsTab::Titles,
@@ -7489,8 +7320,8 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
-            "🎙", "⚡", "≡", "≔", "⚑", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
+            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "⑂", "▥", "▷", "♪", "🎙",
+            "⚡", "≡", "≔", "⚑", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
@@ -9470,38 +9301,6 @@ mod tests {
         assert_eq!(
             keyboard_content_hit(area, 0, Position::new(control_start_x, 4)),
             None
-        );
-    }
-
-    #[test]
-    fn kanban_board_tab_renders_and_hits_both_layout_steppers() {
-        let settings = KanbanBoardSettings {
-            card_preview_lines: 3,
-            minimum_column_width: 20,
-        };
-        let rendered = kanban_board_lines(&settings, 0)
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let area = Rect::new(0, 0, 70, 20);
-        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
-
-        assert!(rendered.contains("Card preview lines"));
-        assert!(rendered.contains("‹ 3 ›"));
-        assert!(rendered.contains("Minimum column width"));
-        assert!(rendered.contains("‹ 20 ›"));
-        assert_eq!(
-            kanban_board_content_hit(area, 0, Position::new(control_start_x, 1)),
-            Some((KanbanBoardRow::CardPreviewLines, -1))
-        );
-        assert_eq!(
-            kanban_board_content_hit(area, 0, Position::new(control_start_x + 3, 1)),
-            Some((KanbanBoardRow::CardPreviewLines, 1))
-        );
-        assert_eq!(
-            kanban_board_content_hit(area, 0, Position::new(control_start_x + 3, 4)),
-            Some((KanbanBoardRow::MinimumColumnWidth, 1))
         );
     }
 

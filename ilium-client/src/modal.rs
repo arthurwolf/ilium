@@ -178,21 +178,6 @@ pub struct ConfirmDialogLayout {
     pub hint_row: Rect,
 }
 
-/// Layout for the board-creation form, which needs two text fields plus a
-/// storage selector and a path picker before its shared action row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CreateBoardDialogLayout {
-    pub popup: Rect,
-    pub name_box: Rect,
-    pub name_input: Rect,
-    pub storage_row: Rect,
-    pub path_box: Rect,
-    pub path_input: Rect,
-    pub browse_button: Rect,
-    pub actions: DialogActionLayout,
-    pub hint_row: Rect,
-}
-
 /// Fixed size of a single-line prompt. The extra vertical space gives the
 /// input and both mouse targets room to read as real controls.
 const PROMPT_WIDTH: u16 = 68;
@@ -250,71 +235,6 @@ pub fn multiline_prompt_dialog_layout(screen_area: Rect) -> MultilinePromptDialo
         actions: dialog_action_layout(rows[2]),
         hint_row: rows[3],
     }
-}
-
-/// Computes spacious board-form geometry shared by rendering and mouse input.
-pub fn create_board_dialog_layout(screen_area: Rect) -> CreateBoardDialogLayout {
-    let popup = centered_fixed_rect(78, 20, screen_area);
-    let inner = Rect::new(
-        popup.x.saturating_add(3),
-        popup.y.saturating_add(2),
-        popup.width.saturating_sub(6),
-        popup.height.saturating_sub(4),
-    );
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .split(inner);
-    let browse_button = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(18)])
-        .split(rows[5])[0];
-    CreateBoardDialogLayout {
-        popup,
-        name_box: rows[0],
-        name_input: inset_rect(rows[0], 1),
-        storage_row: rows[2],
-        path_box: rows[4],
-        path_input: inset_rect(rows[4], 1),
-        browse_button,
-        actions: dialog_action_layout(rows[7]),
-        hint_row: rows[8],
-    }
-}
-
-/// Size-only board-form geometry for the real-binary PTY suite.
-pub fn create_board_dialog_layout_for_size(width: u16, height: u16) -> CreateBoardDialogLayout {
-    create_board_dialog_layout(Rect::new(0, 0, width, height))
-}
-
-/// Prepared storage selector shared by the board painter and pointer handler.
-pub fn create_board_storage_control(
-    screen_area: Rect,
-    value: &str,
-) -> crate::value_control::ValueControl {
-    crate::value_control::ValueControl::new(
-        create_board_dialog_layout(screen_area).storage_row,
-        crate::value_control::ControlSpec {
-            kind: crate::value_control::ControlKind::Choice,
-            label: "Storage",
-            value,
-            label_width: 9,
-            previous_enabled: true,
-            next_enabled: true,
-            open_enabled: true,
-        },
-    )
 }
 
 /// Insets a rectangle without underflow on very small terminals.

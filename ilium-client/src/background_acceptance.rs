@@ -37,7 +37,10 @@ fn ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_backgr
     app.right_panel_target = RightPanelTarget::Pane { pane_id };
     app.set_screen_area(Rect::new(0, 0, 140, 40));
     app.animation_settings.enabled = true;
-    app.animation_settings.kind = AnimationKind::TwoRipples;
+    // A fake hosted scene keeps the test offline.
+    let probe = crate::background_animation::test_support::FakeProbe::new();
+    *app.animation_frame.host_mut() = crate::background_animation::test_support::fake_host(&probe);
+    app.animation_settings.kind = AnimationKind::NightLights;
     app.animation_settings.density_percent = 100;
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
     draw_ready(&mut terminal, &mut app);
@@ -170,7 +173,7 @@ fn colour_controls_survive_scene_switch_and_project_reload() {
     assert_eq!(value["lightness_percent"], 35);
     assert_eq!(value["hue_degrees"], 275);
     assert_eq!(value["saturation_percent"], 40);
-    assert_eq!(saved.kind, AnimationKind::MoonlitWater);
+    assert_eq!(saved.kind, AnimationKind::Clouds);
     assert_eq!(
         crate::project_config::load(tempfile::tempdir().unwrap().path())
             .unwrap()
@@ -203,7 +206,7 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
         .animation;
     let value = serde_json::to_value(&saved).unwrap();
     assert_eq!(value["lightness_percent"], expected_lightness);
-    assert_eq!(saved.kind, AnimationKind::Shoreline);
+    assert_eq!(saved.kind, AnimationKind::PluginScene);
     let Mode::Settings(state) = &app.mode else {
         panic!("slider keeps Settings open")
     };

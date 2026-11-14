@@ -72,11 +72,7 @@ fn kind_for(id: &str) -> Result<AnimationKind, String> {
 /// come exclusively from scene_controls(). Numeric axes are sampled at bounds.
 fn axes(kind: AnimationKind) -> &'static [&'static str] {
     match kind {
-        AnimationKind::Shoreline => &["shoreline_style"],
         AnimationKind::Wikipedia => &["wiki_render_mode"],
-        AnimationKind::Stars => &["projection", "star_style", "start_from"],
-        AnimationKind::TopographicMaps => &["tide_range_m"],
-        AnimationKind::Graph => &["source", "mode"],
         AnimationKind::Images => &["mode", "source_kind", "order", "motion", "display_seconds"],
         AnimationKind::Video => &["mode", "shuffle"],
         AnimationKind::Spectrum => &["style", "floor_db"],
@@ -115,64 +111,12 @@ fn adaptable(kind: AnimationKind, row: &Control) -> bool {
     {
         return false;
     }
-    kind != AnimationKind::VoxelLandscape
-        || matches!(
-            row.id,
-            "zoom"
-                | "detail"
-                | "pan_speed"
-                | "pan_direction"
-                | "color_mode"
-                | "palette"
-                | "hue"
-                | "saturation"
-                | "lightness"
-                | "vegetation"
-                | "structures"
-                | "rivers"
-                | "ravines"
-                | "caves"
-        )
+    true
 }
 
 /// Check indirect setter/normalization effects as well as writable controls.
 fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) -> bool {
     match after.kind {
-        AnimationKind::VoxelLandscape => {
-            // Compare every authored field except the explicitly adaptable
-            // appearance controls. Newly added resource fields are protected
-            // automatically, without depending on another scene's private API.
-            let protected = |settings: &ilium_ambient::VoxelLandscapeSettings| {
-                let mut value = serde_json::to_value(settings).ok()?;
-                let fields = value.as_object_mut()?;
-                for name in [
-                    "zoom_percent",
-                    "detail",
-                    "pan_speed_percent",
-                    "pan_direction",
-                    "color_mode",
-                    "palette",
-                    "hue_degrees",
-                    "saturation_percent",
-                    "lightness_percent",
-                    "vegetation_percent",
-                    "structures_percent",
-                    "rivers",
-                    "ravines",
-                    "caves",
-                ] {
-                    fields.remove(name);
-                }
-                Some(value)
-            };
-            match (
-                protected(&before.ambient.voxel_landscape),
-                protected(&after.ambient.voxel_landscape),
-            ) {
-                (Some(left), Some(right)) => left == right,
-                _ => false,
-            }
-        }
         AnimationKind::OpenStreetMap => {
             let left = &before.ambient.openstreetmap;
             let right = &after.ambient.openstreetmap;
@@ -190,18 +134,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
         AnimationKind::NightLights => {
             before.ambient.night_lights.refresh_hours == after.ambient.night_lights.refresh_hours
         }
-        AnimationKind::Graph => {
-            before.ambient.graph.poll_seconds == after.ambient.graph.poll_seconds
-        }
-        AnimationKind::Earthquakes => {
-            before.ambient.earthquakes.poll_seconds == after.ambient.earthquakes.poll_seconds
-        }
-        AnimationKind::Aircraft => {
-            before.ambient.aircraft.poll_seconds == after.ambient.aircraft.poll_seconds
-        }
-        AnimationKind::Boats => {
-            before.ambient.boats.poll_seconds == after.ambient.boats.poll_seconds
-        }
         AnimationKind::Spectrum => {
             before.ambient.spectrum.input == after.ambient.spectrum.input
                 && before.ambient.spectrum.device_name == after.ambient.spectrum.device_name
@@ -215,10 +147,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
 fn narrow(settings: &AnimationSettings, row: &mut Control) {
     if let ControlKind::Slider { min, max, .. } = &mut row.kind {
         match (settings.kind, row.id) {
-            (AnimationKind::Stars, "look_azimuth") => {
-                // The setter wraps 360 to 0; recommendations use canonical bearings.
-                *max = (*max).min(359);
-            }
             (AnimationKind::Spectrum, "ceiling_db") => {
                 *min = (*min).max(settings.ambient.spectrum.floor_db.saturating_add(10));
             }
@@ -327,13 +255,6 @@ fn verify_resources(
     resources: ResourcePolicy,
 ) -> Result<(), String> {
     match settings.kind {
-        AnimationKind::VoxelLandscape => {
-            if selected(settings, "world_source") == Some(1)
-                && !has_text(settings, "saved_maps_folder")
-            {
-                return Err("Saved-world Voxel requires an existing authored maps folder".into());
-            }
-        }
         AnimationKind::Images => {
             if resources == ResourcePolicy::Catalog {
                 if selected(settings, "mode") != Some(0)
@@ -358,13 +279,6 @@ fn verify_resources(
                 return Err("Semantic Video cannot replace its authored source".into());
             }
         }
-        AnimationKind::Stars if selected(settings, "start_from") == Some(1) => {
-            if resources != ResourcePolicy::Authored
-                || settings.ambient.stars.fixed_start_unix().is_none()
-            {
-                return Err("Fixed Stars time requires a valid existing authored timestamp".into());
-            }
-        }
         AnimationKind::Spectrum
             if settings.scene_control("device_name").is_some()
                 && !has_text(settings, "device_name") =>
@@ -382,12 +296,9 @@ fn prepare(
     authored: &AnimationSettings,
 ) -> Result<AnimationSettings, String> {
     if resources == ResourcePolicy::Authored
-        && !matches!(
-            kind,
-            AnimationKind::Images | AnimationKind::Video | AnimationKind::Stars
-        )
+        && !matches!(kind, AnimationKind::Images | AnimationKind::Video)
     {
-        return Err("Authored resource policy applies only to Images, Video or Stars".into());
+        return Err("Authored resource policy applies only to Images or Video".into());
     }
     let mut settings = authored.clone();
     settings.kind = kind;
@@ -402,9 +313,6 @@ fn prepare(
             write(&mut settings, "mode", &ControlValue::Index(0))?;
             write(&mut settings, "source_kind", &ControlValue::Index(0))?;
             write(&mut settings, "builtin_image", &ControlValue::Index(0))?;
-        }
-        AnimationKind::Stars if resources == ResourcePolicy::Catalog => {
-            write(&mut settings, "start_from", &ControlValue::Index(0))?;
         }
         _ => {}
     }
@@ -467,13 +375,6 @@ fn checked(
             if !permitted {
                 return Err("Image resource selectors require the declared resource policy".into());
             }
-        }
-        if kind == AnimationKind::Stars
-            && proposal.resources == ResourcePolicy::Catalog
-            && parameter.id == "start_from"
-            && parameter.value != ControlValue::Index(0)
-        {
-            return Err("Catalog Stars starts from Now, not an invented timestamp".into());
         }
         write(&mut next, &parameter.id, &parameter.value)?;
     }
@@ -624,16 +525,11 @@ pub fn authored_capabilities(authored: &AnimationSettings) -> serde_json::Value 
     let images_usable = usable_image_source(&images);
     let mut video = authored.clone();
     video.kind = AnimationKind::Video;
-    let mut stars = authored.clone();
-    stars.kind = AnimationKind::Stars;
-    let fixed_star_time = write(&mut stars, "start_from", &ControlValue::Index(1)).is_ok()
-        && stars.ambient.stars.fixed_start_unix().is_some();
     serde_json::json!({
         "authored_images_mode": images_usable.then(|| selected(&images, "mode")).flatten(),
         "authored_image_source_kind":
             images_usable.then(|| selected(&images, "source_kind")).flatten(),
-        "authored_video": has_text(&video, "source"),
-        "authored_fixed_star_time": fixed_star_time
+        "authored_video": has_text(&video, "source")
     })
 }
 
@@ -760,9 +656,6 @@ fn inventory(kind: AnimationKind) -> Result<BTreeMap<&'static str, Control>, Str
 
 fn notes(kind: AnimationKind) -> &'static str {
     match kind {
-        AnimationKind::VoxelLandscape => {
-            "World source, saved-map folder, seed, pack profiles, custom overrides, mounts, edition, addon and duplicate policy remain authored. Only listed visual controls adapt. Saved-world mode hides generated detail, direction, vegetation, structures and terrain toggles; controls must be active for the authored source."
-        }
         AnimationKind::Clouds => {
             "Coverage precedes projection; rotation requires global globe projection. history_hours greater than zero exposes playback_fps and smoothing. land_underlay exposes underlay_brightness. refresh_minutes is authored provider cadence, not rendering FPS."
         }
@@ -772,20 +665,8 @@ fn notes(kind: AnimationKind) -> &'static str {
         AnimationKind::OpenStreetMap => {
             "Require source, place and tour. source=0 only. Paris uses place=0,tour=0. Local/custom map inputs are never selected."
         }
-        AnimationKind::Graph => {
-            "Apply source before mode. OHLC candles require that source's enabled candle choice; rising/falling hues apply only to candles. Poll settings remain authored."
-        }
         AnimationKind::Wikipedia => {
             "wiki_zoom applies only to Braille. This is today's English Main Page feed, not a selectable topic."
-        }
-        AnimationKind::Shoreline => {
-            "shoreline_* controls other than shoreline_style require Rich; the four scene_control_* sliders apply to both styles."
-        }
-        AnimationKind::TopographicMaps => {
-            "tide_seconds requires tide_range_m > 0. The listed envelope is not permission to use inactive controls."
-        }
-        AnimationKind::Stars => {
-            "Panorama hides lens; Patch exposes look_altitude. Realistic star_style exposes star_size/star_colors. Fixed start requires resources=authored and a usable saved timestamp; start_datetime is never writable."
         }
         AnimationKind::Images => {
             "resources=catalog selects Single/Built-in, default picture 0. resources=authored keeps the current authored mode and source. order/transition require slideshow; shuffle_seed also requires Shuffle. display_seconds requires slideshow or motion. motion_strength/easing require motion. transition_seconds <= display_seconds/2."
@@ -795,9 +676,6 @@ fn notes(kind: AnimationKind) -> &'static str {
         }
         AnimationKind::Spectrum => {
             "Input/device are unchanged. Waveform hides band/frequency/FFT/tilt/floor/ceiling controls. Radial/Pulse rings hide orientation. Bars expose bar_width/bar_gap. Spectrogram exposes spectrogram_speed. Peak markers apply to Bars/Mirrored bars/Line/Area/Radial; mirror excludes Waveform/Pulse rings. ceiling_db >= floor_db+10."
-        }
-        AnimationKind::Boats => {
-            "The supplied description is older than the boat_source control: that control offers broader OpenSeaFeed or Finnish-water Digitraffic. Selection and coverage follow the actual control, not the older description."
         }
         _ => "",
     }
@@ -813,7 +691,7 @@ fn build_catalog() -> Result<String, String> {
          controls apply. step is a keyboard increment, not universal divisibility. \
          Text, capture input/device, renderer backend, polling and recursive \
          discovery are not writable. resources is catalog or authored; authored \
-         is permitted only for Images, Video or Stars. Emit required project and \
+         is permitted only for Images or Video. Emit required project and \
          every-entry pointers even when animations are disabled.\n",
     );
     for kind in AnimationKind::ALL {
@@ -823,11 +701,7 @@ fn build_catalog() -> Result<String, String> {
         }
         text.push_str(&format!("{id:?} | {}\n", kind.description()));
         for (id, row) in inventory(kind)? {
-            if id.starts_with("scene_control_") {
-                text.push_str(&format!("{id}({})=", row.label));
-            } else {
-                text.push_str(&format!("{id}="));
-            }
+            text.push_str(&format!("{id}="));
             match &row.kind {
                 ControlKind::Slider {
                     min,

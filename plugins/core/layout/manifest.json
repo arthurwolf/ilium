@@ -98,6 +98,10 @@
       {
         "id": "new-split",
         "title": "New split view"
+      },
+      {
+        "id": "tree-layout",
+        "title": "Tree row layout"
       }
     ],
     "panels": [
@@ -206,6 +210,7 @@
   "activation": [
     "command:ilium.core.layout/preset",
     "command:ilium.core.layout/new-split",
+    "command:ilium.core.layout/tree-layout",
     "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"

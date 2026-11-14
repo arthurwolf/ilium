@@ -113,7 +113,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
         assert_eq!(kind_for(&id).unwrap(), kind);
     }
     assert_eq!(
-        count, 25,
+        count, 21,
         "Review the frozen inventory when concrete scenes change"
     );
     assert!(
@@ -133,17 +133,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
 #[test]
 fn conditional_inventory_is_not_default_only() {
     for (kind, ids) in [
-        (AnimationKind::Graph, vec!["rising_hue", "falling_hue"]),
         (AnimationKind::Wikipedia, vec!["wiki_zoom"]),
-        (
-            AnimationKind::Shoreline,
-            vec!["shoreline_lace", "shoreline_wet_memory"],
-        ),
-        (AnimationKind::TopographicMaps, vec!["tide_seconds"]),
-        (
-            AnimationKind::Stars,
-            vec!["lens", "look_altitude", "star_colors", "star_size"],
-        ),
         (
             AnimationKind::Images,
             vec!["order", "shuffle_seed", "transition_seconds", "easing"],
@@ -163,11 +153,6 @@ fn conditional_inventory_is_not_default_only() {
         }
         assert!(rows.values().all(exposable));
     }
-    let graph = inventory(AnimationKind::Graph).unwrap();
-    let ControlKind::Choice { options } = &graph["source"].kind else {
-        panic!("source")
-    };
-    assert_eq!(options.len(), 32);
 }
 
 #[test]
@@ -175,7 +160,7 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     let base = AnimationSettings::default();
     for bad in [
         proposal(AnimationKind::OpenStreetMap, vec![("place", Index(0))]),
-        proposal(AnimationKind::Graph, vec![("poll", Number(5))]),
+        proposal(AnimationKind::Clouds, vec![("refresh_minutes", Number(5))]),
         proposal(
             AnimationKind::Wikipedia,
             vec![("topic", Text("Paris".into()))],
@@ -184,7 +169,7 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
         assert!(validate_recommendation(&bad, &base).is_err(), "{bad:?}");
     }
     assert!(serde_json::from_str::<ProposedRecommendation>(
-        r#"{"kind":"shoreline","parameters":[]}"#
+        r#"{"kind":"night_lights","parameters":[]}"#
     )
     .is_err());
     assert!(serde_json::from_str::<ProposedRecommendations>(r#"{"definitions":[]}"#).is_err());
@@ -243,25 +228,18 @@ fn paris_is_offline_even_when_authored_osm_was_custom() {
 }
 
 #[test]
-fn graph_source_precedes_candles_and_saved_choices_cannot_silently_change() {
+fn saved_choices_cannot_silently_change() {
     let base = AnimationSettings::default();
-    let raw = proposal(
-        AnimationKind::Graph,
-        vec![
-            ("rising_hue", Number(100)),
-            ("mode", Index(2)),
-            ("source", Index(0)),
-        ],
-    );
+    let raw = proposal(AnimationKind::Clouds, vec![("projection", Index(0))]);
     let mut rec = validate_recommendation(&raw, &base).unwrap();
     assert!(resolve_recommendation(&rec, &base).is_ok());
     let mut bad = raw;
-    bad.parameters[2].value = Index(8);
+    bad.parameters[0].value = Index(99);
     assert!(validate_recommendation(&bad, &base).is_err());
     let choice = rec
         .parameters
         .iter_mut()
-        .find(|parameter| parameter.id == "source")
+        .find(|parameter| parameter.id == "projection")
         .unwrap();
     let AnimationValue::Choice { label, .. } = &mut choice.value else {
         panic!("choice")
@@ -320,19 +298,6 @@ fn video_and_fixed_time_require_existing_authored_resources() {
             .source,
         base.ambient.video.source
     );
-    let mut stars = proposal(AnimationKind::Stars, vec![("start_from", Index(1))]);
-    stars.resources = ResourcePolicy::Authored;
-    assert!(validate_recommendation(&stars, &base).is_err());
-    base.ambient.stars.start_datetime = "2026-12-21 22:00".into();
-    let rec = validate_recommendation(&stars, &base).unwrap();
-    assert!(resolve_recommendation(&rec, &base)
-        .unwrap()
-        .ambient
-        .stars
-        .fixed_start_unix()
-        .is_some());
-    stars.resources = ResourcePolicy::Catalog;
-    assert!(validate_recommendation(&stars, &base).is_err());
 }
 
 #[test]
@@ -353,18 +318,6 @@ fn capture_and_renderer_selection_are_not_semantic_parameters() {
     for raw in [
         proposal(AnimationKind::Spectrum, vec![("input", Index(0))]),
         proposal(AnimationKind::Images, vec![("recursive", Bool(true))]),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_profile", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_mount", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_duplicate_last_wins", Bool(true))],
-        ),
     ] {
         assert!(validate_recommendation(&raw, &base).is_err());
     }
@@ -403,16 +356,10 @@ fn pointer_table_is_required_total_and_round_trips_durable_values() {
 #[test]
 fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values() {
     let base = AnimationSettings::default();
-    let cases = [
-        proposal(
-            AnimationKind::TopographicMaps,
-            vec![("tide_seconds", Number(120)), ("tide_range_m", Number(50))],
-        ),
-        proposal(
-            AnimationKind::Spectrum,
-            vec![("ceiling_db", Number(-20)), ("floor_db", Number(-30))],
-        ),
-    ];
+    let cases = [proposal(
+        AnimationKind::Spectrum,
+        vec![("ceiling_db", Number(-20)), ("floor_db", Number(-30))],
+    )];
     for raw in cases {
         let forward = validate_recommendation(&raw, &base).unwrap();
         let mut reverse = raw;
@@ -420,16 +367,10 @@ fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values()
         assert_eq!(validate_recommendation(&reverse, &base).unwrap(), forward);
         assert!(!resolve_recommendation(&forward, &base).unwrap().enabled);
     }
-    for raw in [
-        proposal(
-            AnimationKind::TopographicMaps,
-            vec![("tide_seconds", Number(120)), ("tide_range_m", Number(0))],
-        ),
-        proposal(
-            AnimationKind::Spectrum,
-            vec![("ceiling_db", Number(-25)), ("floor_db", Number(-30))],
-        ),
-    ] {
+    for raw in [proposal(
+        AnimationKind::Spectrum,
+        vec![("ceiling_db", Number(-25)), ("floor_db", Number(-30))],
+    )] {
         assert!(validate_recommendation(&raw, &base).is_err());
     }
     let mut authored = base.clone();
@@ -515,111 +456,4 @@ fn provider_cadence_is_excluded_but_cloud_playback_and_conditional_controls_work
         assert!(lights.contains_key(id), "{id}");
     }
     assert!(!lights.contains_key("refresh_hours"));
-}
-#[test]
-fn voxel_visual_choices_preserve_available_authored_resource_inventory() {
-    // Exercise actual settings setters, never the resource loader.
-    let mut authored = AnimationSettings {
-        kind: AnimationKind::VoxelLandscape,
-        ..Default::default()
-    };
-    if authored.scene_control("world_source").is_some() {
-        authored
-            .set_scene_control("world_source", Index(1))
-            .unwrap();
-        authored
-            .set_scene_control(
-                "saved_maps_folder",
-                Text(
-                    std::env::temp_dir()
-                        .join("semantic-world-fixture-not-opened")
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
-            )
-            .unwrap();
-    }
-    // Exercise every resource interface present in this scene version without
-    // importing its loader or depending on unreleased private scene methods.
-    let mut resource_fixture = serde_json::to_value(&authored.ambient.voxel_landscape).unwrap();
-    let fields = resource_fixture.as_object_mut().unwrap();
-    for name in ["pack_path", "pack_addon_path"] {
-        if fields.contains_key(name) {
-            fields.insert(
-                name.into(),
-                serde_json::json!(format!("fixture-{name}-not-opened.zip")),
-            );
-        }
-    }
-    if fields.contains_key("pack_custom_sources") {
-        fields.insert(
-            "pack_custom_sources".into(),
-            serde_json::json!({
-                "fixture-profile": {
-                    "path": "fixture-hidden-not-opened.zip", "root": "", "mount": 0,
-                    "format_major": 999, "format_minor": 0, "edition": 0,
-                    "addon_path": "", "addon_mount": 0, "duplicate_last_wins": false
-                }
-            }),
-        );
-    }
-    authored.ambient.voxel_landscape = serde_json::from_value(resource_fixture).unwrap();
-    let before = authored.clone();
-    let raw = proposal(
-        AnimationKind::VoxelLandscape,
-        vec![
-            ("palette", Index(1)),
-            ("color_mode", Index(1)),
-            ("zoom", Number(150)),
-        ],
-    );
-    let recommendation = validate_recommendation(&raw, &authored).unwrap();
-    let effective = resolve_recommendation(&recommendation, &authored).unwrap();
-    assert!(same_protected_inputs(&authored, &effective));
-    assert_eq!(effective.ambient.voxel_landscape.palette, 1);
-    assert_eq!(effective.ambient.voxel_landscape.zoom_percent, 150);
-    assert_eq!(authored, before);
-    for raw in [
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("world_source", Index(0))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_profile", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_mount", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_edition", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_addon_mount", Index(1))],
-        ),
-        proposal(
-            AnimationKind::VoxelLandscape,
-            vec![("pack_duplicate_last_wins", Bool(true))],
-        ),
-    ] {
-        // Cover all identified indirect resource selectors.
-        assert!(validate_recommendation(&raw, &authored).is_err());
-    }
-    // Deserialize migrates/clamps saved resource selectors. Exercise an
-    // invalid live recommendation input directly, without normalizing it first.
-    authored.ambient.voxel_landscape.pack_profile = usize::MAX;
-    assert!(
-        validate_recommendation(&proposal(AnimationKind::VoxelLandscape, vec![]), &authored,)
-            .is_err()
-    );
-    let mut changed_identity = before.clone();
-    changed_identity.ambient.voxel_landscape.seed = changed_identity
-        .ambient
-        .voxel_landscape
-        .seed
-        .wrapping_add(1);
-    assert!(!same_protected_inputs(&before, &changed_identity));
 }

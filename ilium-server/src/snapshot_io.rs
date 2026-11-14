@@ -812,9 +812,6 @@ pub(crate) fn estimated_tree_bytes(tree: &ilium_core::Tree) -> usize {
             NodeKind::Folder { path, .. } => add(path_size(path)),
             NodeKind::Pane {
                 status,
-                board_storage,
-                scheduled_input,
-                prompt_queue,
                 last_prompt,
                 progress_monitors,
                 launch_cwd,
@@ -836,16 +833,6 @@ pub(crate) fn estimated_tree_bytes(tree: &ilium_core::Tree) -> usize {
                         add(optional(&recovery.previous_exact_prompt));
                     }
                     _ => {}
-                }
-                if let Some(storage) = board_storage {
-                    add(storage.path().as_os_str().len().saturating_mul(2));
-                }
-                if let Some(input) = scheduled_input {
-                    add(input.text.capacity());
-                }
-                add(prompt_queue.capacity() * std::mem::size_of::<ilium_core::QueuedPrompt>());
-                for prompt in prompt_queue {
-                    add(prompt.text.capacity());
                 }
                 add(optional(last_prompt));
                 for progress in progress_monitors {

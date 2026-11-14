@@ -2533,30 +2533,6 @@
     ]
   },
   {
-    "id": "KAN-01",
-    "title": "Card preview lines",
-    "explanation": "“Set how many wrapped text lines each board card shows.”",
-    "specimen": "one unchanged card with 1 visible body line versus 4.",
-    "states": "clipped preview height changes.",
-    "motion": "static.",
-    "caveat": "card content is unchanged; supported range is 1–10.",
-    "frames": [
-      "one unchanged card with 1 visible body line versus 4."
-    ]
-  },
-  {
-    "id": "KAN-02",
-    "title": "Minimum column width",
-    "explanation": "“Set the smallest board-column width before the board uses horizontal scrolling.”",
-    "specimen": "same two-column board at one terminal width, first fitting and then showing a horizontal-scroll cue after raising the minimum.",
-    "states": "layout changes.",
-    "motion": "static.",
-    "caveat": "use source-supported width and preserve actual cards.",
-    "frames": [
-      "same two-column board at one terminal width, first fitting and then showing a horizontal-scroll cue after raising the minimum."
-    ]
-  },
-  {
     "id": "KEY-01",
     "title": "General leader",
     "explanation": "“Choose the Ctrl-letter prefix for ordinary Ilium shortcuts.”",
@@ -3251,30 +3227,6 @@
     "caveat": "Change it in the Inference tab; this page follows it. Check it before turning compaction on, because the whole transcript is sent there.",
     "frames": [
       "Summarizer model  Kilo Gateway / <model>\n"
-    ]
-  },
-  {
-    "id": "SES-01",
-    "title": "Recovery policy",
-    "explanation": "“Choose what the detached server does with a prior project-session snapshot on its next start.”",
-    "specimen": "`Restore automatically`, `Ask before restoring`, `Start fresh` cards around one synthetic saved tree.",
-    "states": "startup decision changes.",
-    "motion": "static.",
-    "caveat": "do not restore or discard a real session in help.",
-    "frames": [
-      "`Restore automatically`, `Ask before restoring`, `Start fresh` cards around one synthetic saved tree."
-    ]
-  },
-  {
-    "id": "SES-02",
-    "title": "Automatic backups",
-    "explanation": "“Enable periodic copies of this project’s native session snapshot, with older copies thinned over time.”",
-    "specimen": "`On: snapshot → 30 min copies → daily → weekly → monthly → yearly` versus `Off: no new automatic copies`.",
-    "states": "backup scheduling changes.",
-    "motion": "static timeline.",
-    "caveat": "do not imply indefinite retention or delete existing backups.",
-    "frames": [
-      "`On: snapshot → 30 min copies → daily → weekly → monthly → yearly` versus `Off: no new automatic copies`."
     ]
   },
   {

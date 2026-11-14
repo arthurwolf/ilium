@@ -38,6 +38,7 @@ A grant names a scope, and the scope names a directory. The plugin sees each sco
 | `agent-sessions:claude`, `:codex`, `:antigravity` | `/agent-sessions/<agent>` | The agent's transcript directory | Grant, high risk | Refused | Grant |
 | `agent-config:claude`, `:codex` | `/agent-config/<agent>` | The agent's configuration directory | Grant, high risk | Refused; propose changes with [`agent-config.propose:<agent>`](/pages/capability-agent-config-propose/), high risk | Refused |
 | `minecraft-saves` | `/minecraft-saves` | The platform's saves directory | Grant | Grant | Grant |
+| `minecraft-java` | `/minecraft-java` | The platform's Minecraft Java directory (versions, resource packs), read only | Grant | Refused | Grant |
 | `worktrees` | `/worktrees` | The root set by `workspace.worktree_root` | Grant | High risk | Grant |
 | `path:<template>` | `/paths/<n>` | A template, see below | Grant | Grant | Grant |
 

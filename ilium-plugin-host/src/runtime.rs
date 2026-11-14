@@ -77,6 +77,7 @@ pub mod durable_timers;
 pub mod events_feed;
 mod hooks;
 mod jobs;
+pub(crate) use jobs::{declared_jobs, job_error_of};
 pub mod pending_events;
 #[cfg(test)]
 mod service_schema_tests;
@@ -1597,7 +1598,7 @@ impl HostRuntime {
 }
 
 /// Removes every import the granted capabilities do not unlock.
-fn restrict_to_grants(set: &mut ImportSet, granted: &[String]) {
+pub(crate) fn restrict_to_grants(set: &mut ImportSet, granted: &[String]) {
     for interface in IMPORT_INTERFACES {
         if !interface_unlocked(interface.instance, granted) {
             set.remove(interface.instance);

@@ -54,7 +54,10 @@ pub(super) fn live_sockets() -> Vec<LiveSocket> {
     let mut sockets: Vec<LiveSocket> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "sock"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "sock")
+        })
         .filter_map(|socket_path| {
             let socket_id = socket_path.file_stem()?.to_str()?.to_owned();
             let candidates = session_name_candidates(&socket_id);
@@ -271,7 +274,6 @@ fn pane_kind_name(status: &PaneStatus) -> &'static str {
         PaneStatus::Agent(_) => "agent",
         PaneStatus::PlainShell => "shell",
         PaneStatus::Editor { .. } => "editor",
-        PaneStatus::Board => "board",
         PaneStatus::AgentUnavailable(_) => "unavailable-agent",
         PaneStatus::Plugin { .. } => "plugin",
     }
@@ -302,7 +304,10 @@ async fn broadcast(attached: &mut Attached, arguments: &Value) -> Result<Value, 
         let Some(pane_id) = target.get("pane_id").and_then(Value::as_u64).map(NodeId) else {
             continue;
         };
-        let queue = target.get("queue").and_then(Value::as_bool).unwrap_or(false);
+        let queue = target
+            .get("queue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let outcome = deliver(attached, pane_id, text, queue, timeout).await;
         outcomes.push(match outcome {
             Ok(name) => json!({"pane_id": pane_id.0, "outcome": name}),

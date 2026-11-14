@@ -205,10 +205,6 @@ impl Scene for PaletteScene {
         self.inner.saved_world_source()
     }
 
-    fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
-        self.inner.saved_world_frame_evidence()
-    }
-
     fn readiness(&mut self) -> SceneReadiness {
         self.inner.readiness()
     }
@@ -354,34 +350,6 @@ pub enum SceneReadiness {
     Unavailable(String),
 }
 
-/// Source and required-material evidence tied to the most recently painted
-/// saved-world frame. This qualifies provenance and coverage only; it does not
-/// claim that the image is visually recognizable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-pub struct SavedWorldFrameEvidence {
-    pub bank_epoch: crate::voxel_landscape::assets::identity::Digest256,
-    /// Native base-asset profile; selected texture-pack identity is reported by
-    /// `selected_archive_sha256` and is intentionally independent of this ID.
-    pub source_profile: &'static str,
-    pub native_archive_sha256: crate::voxel_landscape::assets::identity::Digest256,
-    pub selected_archive_sha256: Option<crate::voxel_landscape::assets::identity::Digest256>,
-    pub required_materials: usize,
-    pub required_materials_satisfied: usize,
-    pub visible_pixels: usize,
-    /// Saved-tour corridor the frame was painted from, in quarter blocks
-    /// (`RouteKey` units). `None` when the frame is not from a route.
-    pub route_endpoints_quarter_blocks: Option<[[i64; 2]; 2]>,
-}
-
-impl SavedWorldFrameEvidence {
-    /// Require actual visible output and complete, non-empty material coverage.
-    pub fn is_qualified(&self) -> bool {
-        self.visible_pixels > 0
-            && self.required_materials > 0
-            && self.required_materials_satisfied == self.required_materials
-    }
-}
-
 /// Borrow the selected native source under its original lifetime. This is a
 /// Rust host boundary, never a script-supplied source or capability.
 #[derive(Clone, Copy)]
@@ -407,11 +375,6 @@ pub trait Scene: Send {
     /// Borrow an already selected saved source without opening paths or
     /// acquiring another source. Ordinary and generated scenes provide none.
     fn saved_world_source(&self) -> Option<SavedWorldSource<'_>> {
-        None
-    }
-
-    /// Evidence for the most recently painted frame from a pinned saved world.
-    fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
         None
     }
 
@@ -605,62 +568,6 @@ mod palette_scene_tests {
 
         let scene = PaletteScene::new(Box::new(PointerAware), ScenePalette::default());
         assert!(scene.wants_pointer());
-    }
-
-    #[test]
-    fn palette_wrapper_preserves_saved_frame_asset_and_coverage_receipt() {
-        struct EvidenceScene;
-        impl Scene for EvidenceScene {
-            fn render(&mut self, _frame: &mut Frame<'_>) {}
-
-            fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
-                Some(SavedWorldFrameEvidence {
-                    bank_epoch: crate::voxel_landscape::assets::identity::Digest256::of(b"bank"),
-                    source_profile: "test-profile",
-                    native_archive_sha256: crate::voxel_landscape::assets::identity::Digest256::of(
-                        b"native",
-                    ),
-                    selected_archive_sha256: None,
-                    required_materials: 2,
-                    required_materials_satisfied: 2,
-                    visible_pixels: 7,
-                    route_endpoints_quarter_blocks: None,
-                })
-            }
-        }
-
-        let scene = PaletteScene::new(Box::new(EvidenceScene), ScenePalette::default());
-        let evidence = scene
-            .saved_world_frame_evidence()
-            .expect("saved frame should retain its render evidence");
-        assert_eq!(evidence.source_profile, "test-profile");
-        assert!(evidence.is_qualified());
-
-        let untextured = SavedWorldFrameEvidence {
-            required_materials: 0,
-            required_materials_satisfied: 0,
-            ..evidence
-        };
-        assert!(!untextured.is_qualified(), "0/0 is not full coverage");
-
-        let partial = SavedWorldFrameEvidence {
-            required_materials: 3,
-            required_materials_satisfied: 2,
-            ..evidence
-        };
-        assert!(
-            !partial.is_qualified(),
-            "partial material coverage is not qualified"
-        );
-
-        let blank = SavedWorldFrameEvidence {
-            visible_pixels: 0,
-            ..evidence
-        };
-        assert!(
-            !blank.is_qualified(),
-            "a blank raster is not a rendered scene"
-        );
     }
 
     #[test]

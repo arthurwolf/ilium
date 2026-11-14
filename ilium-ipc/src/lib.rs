@@ -85,8 +85,8 @@ mod tests {
 
     use ilium_core::{
         status_rule_expression::{ScreenPattern, ScreenRegion},
-        AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
-        SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
+        AgentActivity, AgentClass, BuiltinAgentProvider, NodeId, PaneStatus, SplitOrientation,
+        Tree, TreeMoveDirection, ROOT_ID,
     };
     use ilium_sound::{SoundSettings, SoundSourceKind};
     use serde::{Deserialize, Serialize};
@@ -99,7 +99,6 @@ mod tests {
         Agent(AgentClass, AgentActivity),
         AgentWithGoal(AgentClass, AgentActivity, ilium_core::GoalState),
         Editor { dirty: bool },
-        Board,
     }
 
     #[test]
@@ -126,7 +125,6 @@ mod tests {
                 PaneStatus::Editor { dirty: true },
                 LegacyPaneStatus::Editor { dirty: true },
             ),
-            (PaneStatus::Board, LegacyPaneStatus::Board),
         ];
 
         for (current, legacy) in cases {
@@ -313,13 +311,6 @@ mod tests {
             ClientRequest::ChangeProjectFolder {
                 project_id: NodeId(1),
                 path: PathBuf::from("/tmp/relocated-project"),
-            },
-            ClientRequest::NewBoard {
-                parent_group: NodeId(1),
-                name: "Work".to_string(),
-                storage: BoardStorage::MarkdownFile {
-                    path: PathBuf::from("/tmp/work.md"),
-                },
             },
             ClientRequest::CreateSplitView {
                 parent_group: NodeId(1),

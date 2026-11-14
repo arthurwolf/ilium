@@ -83,7 +83,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "capabilities": {
     "client": [
       "panes.provide-kind", "fs.read:project", "fs.write:project",
-      "fs.watch", "fs.pick", "fs.read:picked", "editor.read"
+      "fs.watch", "fs.pick", "fs.read:picked", "editor.read", "ui.panels"
     ]
   }
 }
@@ -122,6 +122,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.pick",
       "fs.read:picked",
       "editor.read",
+      "ui.panels",
       "services.use:ilium.core.kanban/set-setting",
       "extensions.provide:ilium.core.kanban/card-actions",
       "extensions.provide:ilium.core.kanban/card-moved"

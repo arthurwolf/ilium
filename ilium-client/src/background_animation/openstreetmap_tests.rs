@@ -36,7 +36,7 @@ fn openstreetmap_attribution_reaches_client_glyphs_and_leaves_with_the_scene() {
         text.contains("(c) OpenStreetMap contributors / ODbL"),
         "{text}"
     );
-    settings.kind = AnimationKind::QuietPond;
+    settings.kind = AnimationKind::Semantic;
     frame.render(&settings, 20, 10, Duration::ZERO);
     assert_ne!(frame.glyph(0, 8), '(');
 }

@@ -109,8 +109,7 @@ impl AgentDebugRecorder {
         // timestamp -- this module's whole contract is that sequence and
         // timestamp order agree. A clock read failure (system time before the
         // Unix epoch) must not silently fabricate a `0` timestamp in the
-        // durable journal -- log it and drop this one entry, mirroring
-        // `scheduled_input.rs`'s handling of the same failure mode.
+        // durable journal -- log it and drop this one entry.
         let mut logs = self.logs.write().await;
         let occurred_at_unix_millis = match current_unix_millis() {
             Ok(millis) => millis,
