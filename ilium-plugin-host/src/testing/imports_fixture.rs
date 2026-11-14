@@ -540,7 +540,7 @@ fn blocked(hook: &str) -> ! {
 pub struct JobInstance {
     jobs_import: JobsImport,
     settings_import: SettingsImport,
-    clock_import: ClockImport::default(),
+    clock_import: ClockImport,
     log_import: LogImport,
 }
 
