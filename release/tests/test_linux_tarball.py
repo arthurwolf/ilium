@@ -132,7 +132,7 @@ class LinuxTarballTests(unittest.TestCase):
         self.assertEqual(inputs.embedding_binding['model_files'], self.model_files)
 
     def test_preview_tags_are_per_architecture(self):
-        self.assertEqual(gate.PREVIEW_TAGS, {'x86_64': 'v0.1.1-linux.1', 'aarch64': 'v0.1.1-linux.2'})
+        self.assertEqual(gate.PREVIEW_TAGS, {'x86_64': 'v0.1.1-linux.1', 'aarch64': 'v0.1.1-preview.7'})
         self.assertEqual(gate.TAG, gate.PREVIEW_TAGS['x86_64'])
 
     def test_arm64_inputs_require_arm64_receipts_and_archive(self):

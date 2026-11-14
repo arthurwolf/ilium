@@ -336,7 +336,7 @@ class WorkflowTests(unittest.TestCase):
         caller = self.workflow['jobs']['linux-preview']
         self.assertEqual(caller['uses'], './.github/workflows/linux-preview.yml')
         self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'")
-        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5' && inputs.release_tag != 'v0.1.1-preview.6')")
+        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5' && inputs.release_tag != 'v0.1.1-preview.6' && inputs.release_tag != 'v0.1.1-preview.7')")
         macos = self.workflow['jobs']['macos-preview']
         self.assertEqual(macos['uses'], './.github/workflows/macos-preview.yml')
         self.assertEqual(macos['if'], "github.event_name == 'workflow_dispatch' && (inputs.release_tag == 'v0.1.1-preview.4' || inputs.release_tag == 'v0.1.1-preview.5')")
@@ -356,6 +356,36 @@ class WorkflowTests(unittest.TestCase):
                      'native_sandbox_runner.py', 'vm_smoke.py', 'validate_animation_smoke.py'):
             with self.subTest(gate=gate):
                 self.assertIn(gate, package_commands)
+
+    def test_preview_7_lanes_build_and_install_natively_without_publishing(self):
+        lanes = {
+            'linux-arm64-preview': ('linux-arm64-preview.yml', 'linux-packages', 'ubuntu-22.04-arm', 'linux-arm64-preview', 'aarch64-unknown-linux-gnu',
+                                    ('build_linux_packages.py build', '--arch "aarch64"', 'smoke_linux_packages.py inspect',
+                                     'smoke_linux_packages.py containers', '--formats deb,rpm,appimage', 'smoke_linux_packages.py host',
+                                     '--formats snap,flatpak,deb,appimage', 'native_sandbox_runner.py', 'qualify_linux_tarball.py',
+                                     '--arch aarch64', 'validate_animation_smoke.py')),
+            'macos-intel-preview': ('macos-intel-preview.yml', 'macos-packages', 'macos-15-intel', 'macos-x86-preview', 'x86_64-apple-darwin',
+                                    ('build_macos_packages.py build', 'smoke_macos_packages.py', '--arch x86_64')),
+        }
+        for job_name, (filename, package_job, runner, profile, target, gates) in lanes.items():
+            with self.subTest(lane=job_name):
+                caller = self.workflow['jobs'][job_name]
+                self.assertEqual(caller['uses'], './.github/workflows/' + filename)
+                self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7'")
+                self.assertEqual(caller['permissions']['contents'], 'read')
+                workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(), Loader=yaml.BaseLoader)
+                self.assertEqual(set(workflow['on']), {'workflow_call'})
+                jobs = workflow['jobs']
+                self.assertIn('native', jobs[package_job]['needs'])
+                for job in jobs.values():
+                    self.assertEqual(job['runs-on'], runner)
+                    self.assertNotEqual(job.get('permissions', {}).get('contents'), 'write')
+                native = '\n'.join(step.get('run', '') for step in jobs['native']['steps'])
+                self.assertIn('--qualification-profile ' + profile, native)
+                self.assertIn('--target "%s"' % target, native)
+                packages = ' '.join(' '.join(step.get('run', '').split()) for step in jobs[package_job]['steps'])
+                for gate in gates:
+                    self.assertIn(gate, packages)
 
     def test_workspace_cargo_config_does_not_install_host_specific_rustc_wrapper(self):
         config = tomllib.loads((ROOT / '.cargo/config.toml').read_text(encoding='utf-8'))
@@ -750,8 +780,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_every_workflow_pipeline_invocation_matches_actual_parser(self):
         commands = set()
-        preview = yaml.load((ROOT / '.github/workflows/linux-preview.yml').read_text(), Loader=yaml.BaseLoader)
-        for job_name, job in [*self.workflow['jobs'].items(), *preview['jobs'].items()]:
+        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader)
+                    for name in ('linux-preview.yml', 'linux-arm64-preview.yml', 'macos-preview.yml', 'macos-intel-preview.yml', 'windows-preview.yml')]
+        for job_name, job in [*self.workflow['jobs'].items(), *[item for preview in previews for item in preview['jobs'].items()]]:
             for step in job.get('steps', []):
                 for line in step.get('run', '').splitlines():
                     if line.startswith('python release/scripts/release_pipeline.py '):
@@ -761,10 +792,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(commands, {'source', 'native', 'aggregate', 'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'baseline', 'recovery-ready', 'readback', 'recover'})
 
     def test_all_actions_are_sha_pinned_and_checkout_cannot_push(self):
-        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'macos-preview.yml', 'windows-preview.yml')]
+        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'linux-arm64-preview.yml', 'macos-preview.yml', 'macos-intel-preview.yml', 'windows-preview.yml')]
         for job in [*self.workflow['jobs'].values(), *[job for preview in previews for job in preview['jobs'].values()]]:
             if 'uses' in job:
-                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/macos-preview.yml', './.github/workflows/windows-preview.yml'))
+                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/linux-arm64-preview.yml', './.github/workflows/macos-preview.yml', './.github/workflows/macos-intel-preview.yml', './.github/workflows/windows-preview.yml'))
                 self.assertTrue((ROOT / job['uses']).is_file())
             for step in job.get('steps', []):
                 if 'uses' in step:

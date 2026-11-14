@@ -28,7 +28,7 @@ import native_install as install_gate
 import smoke_installed_animation as animation_gate
 
 TAG = 'v0.1.1-linux.1'  # x86_64 preview release
-PREVIEW_TAGS = {'x86_64': TAG, 'aarch64': 'v0.1.1-linux.2'}  # ARM64 is published separately
+PREVIEW_TAGS = {'x86_64': TAG, 'aarch64': 'v0.1.1-preview.7'}  # ARM64 rpm and Snap ship in preview.7, built on a native ARM64 runner
 TARGET = 'x86_64-unknown-linux-gnu'
 PROFILE = 'linux-x86-preview'
 PREVIEW_ARCHITECTURES = {
