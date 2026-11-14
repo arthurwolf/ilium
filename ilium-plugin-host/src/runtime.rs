@@ -1257,9 +1257,9 @@ impl HostRuntime {
             };
             if started.elapsed() < budget {
                 record.saved = instance.deactivate(DeactivationReason::Shutdown);
-                report.deactivated.push(id);
+                report.deactivated.push(id.clone());
             } else {
-                report.abandoned.push(id);
+                report.abandoned.push(id.clone());
             }
             record.state = PluginState::Stopped;
             self.abandon_cli(&id);
