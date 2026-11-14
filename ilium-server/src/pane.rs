@@ -1689,6 +1689,35 @@ fn shell_command() -> (String, &'static str) {
     }
 }
 
+/// Carries a pane command line to `cmd.exe /C` without a second quoting layer.
+const CMD_COMMAND_LINE_ENV: &str = "ILIUM_PANE_COMMAND_LINE";
+
+/// The shell arguments (and any environment entry) that run `command_line`.
+///
+/// The PTY layer quotes each argument for the Microsoft C runtime, escaping
+/// inner `"` as `\"`. `cmd.exe` does not understand that escape, so a command
+/// line holding any quoted word (every argument with a space, as `ilium
+/// new-pane` renders them) reached `cmd.exe /C` mangled and failed. `cmd.exe`
+/// expands `%VAR%` before it parses quotes and redirections, so passing the
+/// line through the environment runs it exactly as written. The line is not
+/// expanded a second time, so a literal `%` in it stays literal.
+fn shell_invocation(
+    command_flag: &'static str,
+    command_line: String,
+) -> (Vec<String>, Option<(&'static str, String)>) {
+    if command_flag == "/C" {
+        (
+            vec![
+                command_flag.to_string(),
+                format!("%{CMD_COMMAND_LINE_ENV}%"),
+            ],
+            Some((CMD_COMMAND_LINE_ENV, command_line)),
+        )
+    } else {
+        (vec![command_flag.to_string(), command_line], None)
+    }
+}
+
 /// This session's identity, injected as environment variables into every
 /// spawned terminal pane so a process running inside it -- e.g. the `ilium
 /// progress set` CLI subcommand -- can address this exact pane on this exact
@@ -1727,9 +1756,17 @@ pub(crate) fn spawn_terminal_session_with_environment(
     let environment = custom_launch.map_or(&[][..], |launch| launch.environment.as_slice());
     let command = match command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
-        Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
-            .arg(command_flag)
-            .arg(command_line),
+        Some(command_line) => {
+            let (args, carried) = shell_invocation(command_flag, command_line);
+            let command = args.into_iter().fold(
+                PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
+                |command, arg| command.arg(arg),
+            );
+            match carried {
+                Some((key, value)) => command.env(key, value),
+                None => command,
+            }
+        }
     };
     let command = environment.iter().fold(command, |command, entry| {
         command.env(&entry.key, &entry.value)
@@ -1756,6 +1793,19 @@ pub(crate) fn spawn_terminal_session_with_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cmd_command_lines_travel_through_the_environment_verbatim() {
+        let line = r#"C:\Windows\system32\cmd.exe /d /q /k "echo 1>pane-marker.txt""#.to_string();
+        let (args, carried) = shell_invocation("/C", line.clone());
+        assert_eq!(args, ["/C", "%ILIUM_PANE_COMMAND_LINE%"]);
+        // The argument has no space or quote, so no C-runtime quoting touches it.
+        assert!(!args[1].contains([' ', '"']));
+        assert_eq!(carried, Some((CMD_COMMAND_LINE_ENV, line.clone())));
+        let (args, carried) = shell_invocation("-c", line.clone());
+        assert_eq!(args, ["-c".to_string(), line]);
+        assert_eq!(carried, None);
+    }
 
     #[cfg(unix)]
     #[test]
