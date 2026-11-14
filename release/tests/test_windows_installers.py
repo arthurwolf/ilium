@@ -97,12 +97,39 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(package.get('Version'), '0.1.0')
         self.assertEqual(package.get('UpgradeCode'), installers.MSI_UPGRADE_CODE)
         self.assertIsNotNone(package.find(WIX_NAMESPACE + 'MajorUpgrade'))
-        environment = next(package.iter(WIX_NAMESPACE + 'Environment'))
-        self.assertEqual((environment.get('Name'), environment.get('System'), environment.get('Action'), environment.get('Part')), ('PATH', 'no', 'set', 'last'))
+        # PATH is owned by receipt-backed custom actions, not the Environment table,
+        # which cannot restore a trailing ';' exactly on removal.
+        self.assertEqual(list(package.iter(WIX_NAMESPACE + 'Environment')), [])
+        actions = {item.get('Id'): item for item in package.iter(WIX_NAMESPACE + 'CustomAction')}
+        self.assertEqual({name: (item.get('Execute'), item.get('Impersonate'), item.get('DllEntry')) for name, item in actions.items()},
+                         {'IliumPathAdd': ('deferred', 'yes', 'WixQuietExec'),
+                          'IliumPathAddRollback': ('rollback', 'yes', 'WixQuietExec'),
+                          'IliumPathRemove': ('deferred', 'yes', 'WixQuietExec')})
+        commands = {item.get('Id'): item.get('Value') for item in package.iter(WIX_NAMESPACE + 'SetProperty')}
+        self.assertEqual(commands['IliumPathAdd'], installers.msi_path_command('add'))
+        self.assertEqual(commands['IliumPathRemove'], installers.msi_path_command('remove'))
+        self.assertEqual(commands['IliumPathAddRollback'], installers.msi_path_command('remove'))
+        sequence = {item.get('Action'): item.get('Condition') for item in package.iter(WIX_NAMESPACE + 'Custom')}
+        self.assertEqual(sequence['IliumPathRemove'], 'REMOVE~="ALL"')
+        self.assertEqual(sequence['IliumPathAdd'], 'NOT Installed AND NOT REMOVE')
         registry = next(package.iter(WIX_NAMESPACE + 'RegistryValue'))
         self.assertEqual((registry.get('Root'), registry.get('KeyPath')), ('HKCU', 'yes'))
         self.assertEqual(len(list(package.iter(WIX_NAMESPACE + 'File'))), 6)
         self.assertEqual({item.get('Directory') for item in package.iter(WIX_NAMESPACE + 'RemoveFolder')}, {'INSTALLFOLDER', 'IliumPrograms'})
+
+    def test_msi_path_command_is_bracket_free_and_mode_bound(self):
+        import base64
+        for mode in ('add', 'remove'):
+            command = installers.msi_path_command(mode)
+            prefix = '"[System64Folder]WindowsPowerShell\\v1.0\\powershell.exe" '
+            self.assertTrue(command.startswith(prefix))
+            # Any other square bracket would be rewritten by MSI property formatting.
+            self.assertNotIn('[', command[len(prefix):])
+            self.assertLess(len(command), 32767)
+            script = base64.b64decode(command.rsplit(' ', 1)[1]).decode('utf-16-le')
+            self.assertTrue(script.startswith("$Mode = '%s'\n" % mode))
+        with self.assertRaises(installers.release_tool.ReleaseError):
+            installers.msi_path_command('other')
 
     def test_wix_escapes_source_paths(self):
         source = installers.render_wix(Path('C:/a&b'), {'ilium.exe': 'a'}, '0.1.0')

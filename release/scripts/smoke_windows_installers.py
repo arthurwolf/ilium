@@ -131,6 +131,14 @@ def isolated_environment(root: Path, directory: Path, system: Path) -> dict[str,
         destination = root / name.lower()  # Names are fixed and cannot escape the owned root.
         destination.mkdir()  # Refuse stale state instead of reusing it.
         environment[name] = str(destination)  # Apply overrides only to child processes.
+    # Known folders (SHGetKnownFolderPath, used by the product's ProjectDirs) expand
+    # %USERPROFILE%\AppData\{Roaming,Local} and fail when those folders do not exist,
+    # so give the isolated profile the standard layout and point the variables at it.
+    profile = Path(environment['USERPROFILE'])
+    for name, relative in (('APPDATA', ('AppData', 'Roaming')), ('LOCALAPPDATA', ('AppData', 'Local'))):
+        folder = profile.joinpath(*relative)
+        folder.mkdir(parents=True)  # A fresh profile; never reuse prior state.
+        environment[name] = str(folder)
     environment.update(PATH=str(directory) + ';' + str(system), COMSPEC=str(system / 'cmd.exe'), SHELL=str(system / 'cmd.exe'), HF_HUB_OFFLINE='1', TERM='xterm-256color', COLORTERM='truecolor')  # Exclude checkout/build tools from executable resolution.
     return environment  # No persistent environment variable is changed.
 #

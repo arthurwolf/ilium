@@ -10,6 +10,7 @@ Stdout is JSONL. `render` runs anywhere; `build` needs `wix` and `iscc`;
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -117,6 +118,107 @@ def extract_package(archive, version, destination):
     return {name: sha(destination / name) for name in sorted(seen)}
 
 
+# MSI user-PATH ownership, mirroring the setup EXE's receipt contract. The
+# Environment table cannot restore the original text exactly (removing an
+# appended entry also drops a pre-existing trailing ';'), so the MSI records
+# the original typed value and restores it byte for byte on removal.
+MSI_PATH_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+trap { [Console]::Error.WriteLine('Ilium PATH ownership: ' + $_); exit 1 }
+$Owner = 'Software\Ilium'
+function Normalize([string]$Value) {
+  $Value = $Value.Trim()
+  if ($Value.Length -ge 2 -and $Value.StartsWith('"') -and $Value.EndsWith('"')) { $Value = $Value.Substring(1, $Value.Length - 2) }
+  $Value = [Environment]::ExpandEnvironmentVariables($Value).Replace('/', '\')
+  while ($Value.Length -gt 3 -and $Value.EndsWith('\')) { $Value = $Value.Substring(0, $Value.Length - 1) }
+  return $Value.ToLowerInvariant()
+}
+function EntryCount([string]$List, [string]$Entry) {
+  $Wanted = Normalize $Entry
+  return @($List.Split(';') | Where-Object { $_.Trim() -ne '' -and (Normalize $_) -eq $Wanted }).Count
+}
+function ReadPath {
+  $Key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+  if ($null -eq $Key -or -not ($Key.GetValueNames() -contains 'Path')) { return @{ Exists = $false; Value = ''; Kind = 'ExpandString' } }
+  $Kind = $Key.GetValueKind('Path').ToString()
+  if ($Kind -ne 'String' -and $Kind -ne 'ExpandString') { throw 'PATH has an unsupported registry type' }
+  return @{ Exists = $true; Value = [string]$Key.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); Kind = $Kind }
+}
+function WritePath([string]$Value, [string]$Kind) {
+  $Key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+  $Key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind)
+}
+function Broadcast {
+  try {
+    Add-Type -Namespace IliumInstaller -Name Native -MemberDefinition '[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);'
+    $Result = [UIntPtr]::Zero
+    [void][IliumInstaller.Native]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$Result)
+  } catch { [Console]::Error.WriteLine('Ilium PATH ownership: environment broadcast failed: ' + $_) }
+}
+$Receipt = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($Owner)
+$Names = 'IliumPathReceipt', 'IliumPathExisted', 'IliumPathOwned', 'IliumPathKind', 'IliumPathBefore', 'IliumPathAfter', 'IliumPathEntry'
+if ($Mode -eq 'add') {
+  if ($Receipt.GetValueNames() -contains 'IliumPathReceipt') { exit 0 }
+  $Entry = [string]$Receipt.GetValue('InstallDirectory', '')
+  if ($Entry -eq '') { throw 'InstallDirectory registration is absent' }
+  $Current = ReadPath
+  $After = $Current.Value
+  $Owned = 0
+  if ((EntryCount $Current.Value $Entry) -eq 0) {
+    $Owned = 1
+    if ($After -ne '' -and -not $After.EndsWith(';')) { $After += ';' }
+    $After += $Entry
+  }
+  $Receipt.SetValue('IliumPathBefore', $Current.Value, 'String')
+  $Receipt.SetValue('IliumPathAfter', $After, 'String')
+  $Receipt.SetValue('IliumPathEntry', $Entry, 'String')
+  $Receipt.SetValue('IliumPathKind', $Current.Kind, 'String')
+  $Receipt.SetValue('IliumPathExisted', [int]$Current.Exists, 'DWord')
+  $Receipt.SetValue('IliumPathOwned', $Owned, 'DWord')
+  $Receipt.SetValue('IliumPathReceipt', 1, 'DWord')
+  if ($Owned -eq 1) {
+    WritePath $After $Current.Kind
+    if ((ReadPath).Value -ne $After) { throw 'PATH append readback differs' }
+    Broadcast
+  }
+  exit 0
+}
+if (-not ($Receipt.GetValueNames() -contains 'IliumPathReceipt')) { exit 0 }
+if ([int]$Receipt.GetValue('IliumPathOwned') -eq 1) {
+  $Before = [string]$Receipt.GetValue('IliumPathBefore')
+  $After = [string]$Receipt.GetValue('IliumPathAfter')
+  $Entry = [string]$Receipt.GetValue('IliumPathEntry')
+  $Current = ReadPath
+  $Suffix = $null
+  if ($Current.Exists -and $Current.Value.StartsWith($After, [StringComparison]::Ordinal)) { $Suffix = $Current.Value.Substring($After.Length) }
+  if ($null -ne $Suffix -and ($Suffix -eq '' -or $Suffix.StartsWith(';')) -and (EntryCount $Current.Value $Entry) -eq 1) {
+    if ([int]$Receipt.GetValue('IliumPathExisted') -eq 0 -and $Suffix -eq '') {
+      [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).DeleteValue('Path')
+    } else {
+      $Restored = $Before + $Suffix
+      if ($Before -eq '' -and $Suffix -ne '') { $Restored = $Suffix.Substring(1) }
+      WritePath $Restored ([string]$Receipt.GetValue('IliumPathKind'))
+    }
+    Broadcast
+  } else {
+    # The user changed PATH around the entry since installation: preserve it.
+    [Console]::Error.WriteLine('Ilium PATH ownership: PATH changed since installation; leaving it unchanged')
+  }
+}
+foreach ($Name in $Names) { $Receipt.DeleteValue($Name, $false) }
+exit 0
+"""
+
+
+def msi_path_command(mode):
+    """The quiet custom-action command line for one PATH ownership mode."""
+    require(mode in ('add', 'remove'), 'unknown MSI PATH mode')
+    encoded = base64.b64encode(("$Mode = '%s'\n" % mode + MSI_PATH_SCRIPT).encode('utf-16-le')).decode('ascii')
+    # Base64 contains no MSI formatting brackets; only [System64Folder] is formatted.
+    return ('"[System64Folder]WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive '
+            '-ExecutionPolicy Bypass -EncodedCommand ' + encoded)
+
+
 def render_wix(package_directory, files, version):
     rows = ''.join(
         '        <File Id="file_%d" Source="%s" />\n' % (index, xml_attribute(Path(package_directory) / name))
@@ -133,13 +235,23 @@ def render_wix(package_directory, files, version):
         <Directory Id="INSTALLFOLDER" Name="ilium" />
       </Directory>
     </StandardDirectory>
+    <SetProperty Id="IliumPathRemove" Value="{xml_attribute(msi_path_command('remove'))}" Before="IliumPathRemove" Sequence="execute" />
+    <SetProperty Id="IliumPathAddRollback" Value="{xml_attribute(msi_path_command('remove'))}" Before="IliumPathAddRollback" Sequence="execute" />
+    <SetProperty Id="IliumPathAdd" Value="{xml_attribute(msi_path_command('add'))}" Before="IliumPathAdd" Sequence="execute" />
+    <CustomAction Id="IliumPathRemove" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="check" />
+    <CustomAction Id="IliumPathAddRollback" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="IliumPathAdd" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="IliumPathRemove" After="InstallInitialize" Condition='REMOVE~="ALL"' />
+      <Custom Action="IliumPathAddRollback" After="WriteRegistryValues" Condition="NOT Installed AND NOT REMOVE" />
+      <Custom Action="IliumPathAdd" After="IliumPathAddRollback" Condition="NOT Installed AND NOT REMOVE" />
+    </InstallExecuteSequence>
     <Feature Id="Main" Title="Ilium" Level="1">
       <ComponentGroupRef Id="IliumFiles" />
     </Feature>
     <ComponentGroup Id="IliumFiles" Directory="INSTALLFOLDER">
       <Component Id="IliumPackage" Guid="{MSI_COMPONENT_CODE}">
 {rows}        <RegistryValue Root="HKCU" Key="Software\\Ilium" Name="InstallDirectory" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
-        <Environment Id="IliumPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="no" />
         <RemoveFolder Id="RemoveIliumFolder" Directory="INSTALLFOLDER" On="uninstall" />
         <RemoveFolder Id="RemoveIliumPrograms" Directory="IliumPrograms" On="uninstall" />
       </Component>
@@ -483,7 +595,7 @@ def build(arguments):
     wix_source.write_text(render_wix(package_directory, files, version), encoding='utf-8')
     output.mkdir(parents=True)
     wix = find_tool('wix')
-    run([wix, 'build', '-arch', 'x64', '-pdbtype', 'none', '-o', str(output / MSI_NAME), str(wix_source)])
+    run([wix, 'build', '-arch', 'x64', '-ext', 'WixToolset.Util.wixext', '-pdbtype', 'none', '-o', str(output / MSI_NAME), str(wix_source)])
     inno_source = work / 'ilium.iss'
     inno_source.write_text(render_inno(package_directory, output, version), encoding='utf-8')
     iscc = find_tool('iscc', [os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Inno Setup 6', 'ISCC.exe'),
