@@ -306,7 +306,7 @@ pub(crate) struct PreparedLink {
     pub link: Option<crate::open_target::TerminalLink>,
     pub storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
-pub(crate) struct LinkRequest<'a> {
+pub(crate) struct LinkRequest {
     pub id: u64,
     pub pane_id: NodeId,
     pub row: usize,
@@ -430,7 +430,7 @@ impl TerminalContextPreparation {
     pub(crate) fn request_link(
         &mut self,
         source: &PaintedTerminal,
-        request: LinkRequest<'_>,
+        request: LinkRequest,
     ) -> Result<usize, String> {
         let LinkRequest {
             id,

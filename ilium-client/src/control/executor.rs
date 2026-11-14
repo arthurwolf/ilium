@@ -8,6 +8,8 @@ use ilium_core::{
 };
 use ilium_ipc::{ClientRequest, PromptSubmissionSource, WorkspaceCreateSpec};
 use serde::Serialize;
+
+use crate::text_prompt::TextPromptState;
 use serde_json::{json, Value};
 
 use crate::app::{

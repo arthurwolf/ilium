@@ -45,17 +45,7 @@ pub fn set_setting(host: &mut FakeHost, key: &str, value: Value) {
         Some((&"sound", rest)) => rest,
         _ => &path[..],
     };
-    let mut cursor = &mut tab;
-    for (index, segment) in path.iter().enumerate() {
-        let Value::Object(map) = cursor else { break };
-        if index + 1 == path.len() {
-            map.insert((*segment).to_string(), value.clone());
-        } else {
-            cursor = map
-                .entry((*segment).to_string())
-                .or_insert_with(|| Value::Object(serde_json::Map::new()));
-        }
-    }
+    set_json_path(&mut tab, path, &value);
     host.kernel_settings().set_tab("sound", tab);
     host.deliver_one(Event::KernelSettingsChanged(KernelSettingsEvent {
         tab: "sound".to_string(),
@@ -228,4 +218,20 @@ pub fn transition_with_goal(
     _goal: Option<&str>,
 ) -> Vec<Submission> {
     transition(host, node, previous, current, revision)
+}
+
+fn set_json_path(value: &mut Value, path: &[&str], new: &Value) {
+    let Value::Object(map) = value else { return };
+    match path.split_first() {
+        Some((head, [])) => {
+            map.insert((*head).to_string(), new.clone());
+        }
+        Some((head, rest)) => {
+            let child = map
+                .entry((*head).to_string())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+            set_json_path(child, rest, new);
+        }
+        None => {}
+    }
 }
