@@ -183,6 +183,16 @@ mod tests {
         let first = "83915b3c-d052-4897-a1fa-97371407727f";
         let second = "e520e9d1-47ca-4ce2-9764-c97dcadda308";
         write_record(first, start);
+        if process.pidfs_inode().is_none() {
+            // Without pidfs (kernels before 6.9, such as the Ubuntu 22.04 hosted
+            // runners) the process identity cannot be proven, so even a matching
+            // record must be refused rather than trusted.
+            assert_eq!(
+                session_for_process(process_id, &process, config.path(), &project),
+                None
+            );
+            return;
+        }
         assert_eq!(
             session_for_process(process_id, &process, config.path(), &project).as_deref(),
             Some(first)

@@ -221,6 +221,8 @@ async fn monitoring_records_a_committed_resource_snapshot_once() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn independent_project_services_share_one_catalog_binding() {
     let first = fixture(None).await;

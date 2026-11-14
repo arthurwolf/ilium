@@ -524,7 +524,8 @@ mod tests {
             }
         }
     }
-    #[cfg(not(windows))]
+    // Linux-only: the resource queue ledger refuses other platforms (see unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn directory_sync_failure_reports_uncertainty_and_next_holder_reconciles() {
         let directory = durable_test_directory();
@@ -552,7 +553,8 @@ mod tests {
             b"reconciled-successor"
         );
     }
-    #[cfg(unix)]
+    // Linux-only: the resource queue ledger refuses other platforms (see unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn write_failures_preserve_acknowledged_catalog_and_cleanup_own_temp() {
         let directory = durable_test_directory();
@@ -589,7 +591,8 @@ mod tests {
             io::ErrorKind::Unsupported
         );
     }
-    #[cfg(unix)]
+    // Linux-only: the resource queue ledger refuses other platforms (see unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn stable_lock_symlink_cannot_redirect_mutation() {
         use std::os::unix::fs::symlink;
@@ -602,7 +605,8 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"preserved");
         assert!(!path.exists());
     }
-    #[cfg(unix)]
+    // Linux-only: the resource queue ledger refuses other platforms (see unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn committed_ledger_and_stable_lock_are_owner_only() {
         use std::os::unix::fs::PermissionsExt;
@@ -622,7 +626,8 @@ mod tests {
     fn relative_catalog_is_refused() {
         assert!(ResourceLedgerFile::try_lock(Path::new("relative/catalog.json")).is_err());
     }
-    #[cfg(unix)]
+    // Linux-only: the resource queue ledger refuses other platforms (see unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn final_symlink_is_refused() {
         use std::os::unix::fs::symlink;
