@@ -73,6 +73,7 @@ impl ToolProbe for FakeProbe {
 }
 
 /// The smallest valid-looking component bytes (core wasm header).
+#[allow(dead_code)]
 pub const WASM_HEADER: &[u8] = b"\0asm\x0d\0\x01\0";
 
 /// A genuine component that installs: the required exports and the API version section.

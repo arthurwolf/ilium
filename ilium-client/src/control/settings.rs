@@ -12,12 +12,10 @@ use crate::app::{AppearanceRow, EditorRow, SoundRow, TerminalRow};
 use crate::config::{
     AgentIdentifierMode, GitBranchLine, GitClosePolicy, GitDefaultBase, GitDefaultWhere,
     LeftPanelSizingMode, MotionLevel, NewPaneDirectory, PluginTreeOrderingChoice, SidebarDensity,
-    MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES, MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
 use crate::trigger_settings::{TriggerAction, TriggerEvent};
-use crate::value_settings::SettingsNumber;
 use crate::value_settings_choice::SettingsChoice;
 use crate::App;
 

@@ -1107,7 +1107,7 @@ impl AnimationFrame {
             elapsed: request.elapsed,
             requested_at: request.requested_at,
             #[cfg(test)]
-            geometry_render_count: self.geometry_render_count,
+            geometry_render_count: 0,
             completed_at: Instant::now(),
             resident_bytes: bytes,
             status,

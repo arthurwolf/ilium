@@ -633,7 +633,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 24] = [
+    pub const ALL: [SettingsTab; 23] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,

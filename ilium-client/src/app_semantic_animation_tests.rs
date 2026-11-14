@@ -524,7 +524,7 @@ fn animation_settings_are_global_and_selecting_projects_never_rebinds_them() {
     let second = tempfile::tempdir().unwrap();
     let settings = AnimationSettings {
         enabled: true,
-        kind: AnimationKind::MoonlitWater,
+        kind: AnimationKind::PluginScene,
         hue_degrees: 17,
         ..Default::default()
     };
@@ -533,7 +533,7 @@ fn animation_settings_are_global_and_selecting_projects_never_rebinds_them() {
     crate::project_config::set_animation(
         second.path(),
         AnimationSettings {
-            kind: AnimationKind::MoonlitWater,
+            kind: AnimationKind::PluginScene,
             hue_degrees: 219,
             ..Default::default()
         },
