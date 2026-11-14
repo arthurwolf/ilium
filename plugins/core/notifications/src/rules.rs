@@ -70,8 +70,25 @@ impl AlertSettings {
     /// (`{"sound": {"events": {"x": true}}}`); a missing or mistyped value keeps its default.
     pub fn from_json(text: &str) -> Self {
         let root: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        Self::from_root(&root)
+    }
+
+    /// Reads the object a kernel read of the `sound` tab returns: the sound keys (`source`,
+    /// `events`) at the top and the desktop switches under `notifications`. A failed read or a
+    /// mistyped value keeps the defaults.
+    pub fn from_kernel_tab(text: &str) -> Self {
+        let tab: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        let mut root = serde_json::Map::new();
+        if let Some(notifications) = tab.get("notifications") {
+            root.insert("notifications".to_owned(), notifications.clone());
+        }
+        root.insert("sound".to_owned(), tab);
+        Self::from_root(&Value::Object(root))
+    }
+
+    fn from_root(root: &Value) -> Self {
         let flag = |key: &str, default: bool| {
-            lookup(&root, key)
+            lookup(root, key)
                 .and_then(Value::as_bool)
                 .unwrap_or(default)
         };
@@ -89,7 +106,7 @@ impl AlertSettings {
                 "notifications.suppress_redundant_task_outcomes",
                 defaults.suppress_redundant_task_outcomes,
             ),
-            task_coalesce_seconds: lookup(&root, "notifications.task_coalesce_seconds")
+            task_coalesce_seconds: lookup(root, "notifications.task_coalesce_seconds")
                 .and_then(Value::as_i64)
                 .map_or(defaults.task_coalesce_seconds, |seconds| {
                     u32::try_from(seconds.clamp(0, i64::from(u32::MAX)))
@@ -112,7 +129,7 @@ impl AlertSettings {
             task_succeeded: flag("sound.events.task_succeeded", event_defaults.task_succeeded),
             task_failed: flag("sound.events.task_failed", event_defaults.task_failed),
         };
-        let source_muted = lookup(&root, "sound.source").and_then(Value::as_str) == Some("muted");
+        let source_muted = lookup(root, "sound.source").and_then(Value::as_str) == Some("muted");
         Self {
             notifications,
             sound_events,
@@ -439,6 +456,29 @@ mod spec_tests {
         assert!(!nested.notifications.enabled);
         assert_eq!(nested.notifications.task_coalesce_seconds, 0);
         assert_eq!(AlertSettings::from_json("not json"), defaults);
+    }
+
+    /// The kernel read of the `sound` tab carries the desktop switches under `notifications`.
+    #[test]
+    fn the_kernel_sound_tab_carries_sound_and_desktop_switches() {
+        let tab = AlertSettings::from_kernel_tab(
+            r#"{"source": "muted", "events": {"approval_required": true, "agent_finished": false},
+                "notifications": {"enabled": false, "task_failed": false, "task_coalesce_seconds": 45}}"#,
+        );
+        assert!(tab.source_muted);
+        assert!(tab.sound_events.approval_required);
+        assert!(!tab.sound_events.agent_finished);
+        assert!(!tab.notifications.enabled);
+        assert!(!tab.notifications.task_failed);
+        assert_eq!(tab.notifications.task_coalesce_seconds, 45);
+        assert_eq!(
+            AlertSettings::from_kernel_tab("{}"),
+            AlertSettings::from_json("{}")
+        );
+        assert_eq!(
+            AlertSettings::from_kernel_tab("not json"),
+            AlertSettings::from_json("{}")
+        );
     }
 
     /// REQ: F-047

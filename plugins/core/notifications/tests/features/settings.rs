@@ -246,3 +246,45 @@ fn settings_047_a_change_of_another_tab_does_not_reload_the_sound_settings() {
         "the unannounced change is not applied"
     );
 }
+
+/// REQ: F-047
+#[test]
+fn settings_047_the_kernel_sound_tab_is_read_when_the_plugin_activates() {
+    let mut host = ilium_plugin_sdk::testing::FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
+    host.kernel_settings().set_tab(
+        "sound",
+        json!({
+            "source": "muted",
+            "events": {"agent_finished": true},
+            "notifications": {"agent_finished": false},
+        }),
+    );
+    host.activate::<ilium_plugin_core_notifications::NotificationsServer>();
+    let node = add_pane(
+        &mut host,
+        "claude-api",
+        Some(ilium_plugin_sdk::types::AgentActivity::Working),
+    );
+    let submissions = finish_turn(&mut host, node, 1);
+    assert!(sounds(&submissions).is_empty(), "the muted source is read");
+    assert!(
+        crate::feature_only::notices(&submissions).is_empty(),
+        "the desktop switch of the agent-finished notice is read from the sound tab"
+    );
+}
+
+/// REQ: F-047
+#[test]
+fn settings_047_a_desktop_switch_change_reaches_the_plugin_through_the_sound_tab() {
+    let mut host = server_host();
+    let node = add_pane(
+        &mut host,
+        "claude-api",
+        Some(ilium_plugin_sdk::types::AgentActivity::Working),
+    );
+    set_setting(&mut host, "notifications.enabled", json!(false));
+    assert!(crate::feature_only::notices(&finish_turn(&mut host, node, 1)).is_empty());
+}

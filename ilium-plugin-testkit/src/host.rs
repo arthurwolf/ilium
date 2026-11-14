@@ -5,19 +5,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use ilium_plugin_sdk_core::exports::{HookCall, HookReply, MenuContext, MenuEntry, ServiceCall, ServiceReply};
+use ilium_plugin_sdk_core::exports::{
+    HookCall, HookReply, MenuContext, MenuEntry, ServiceCall, ServiceReply,
+};
 use ilium_plugin_sdk_core::generated::host::{Bucket, InstanceState};
 use ilium_plugin_sdk_core::host::inference::{Completion, CompletionRequest};
 use ilium_plugin_sdk_core::host::keymap::Binding;
 use ilium_plugin_sdk_core::host::workspace::WorkspaceSpec;
 use ilium_plugin_sdk_core::primitives::terminal::{OutputFilter, Selection};
 use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTurn};
+use ilium_plugin_sdk_core::types::Area;
 use ilium_plugin_sdk_core::types::{
     ActionKind, ActionValue, Activation, AgentModel, Color, ColorRole, DeactivationReason,
     ErrorCode, Event, Intent, Outcome, PluginError, PluginId, PluginSide, PointerModifiers,
     RequestId, RequestRef, RequestResult, Submission, UiAction, UiTree, ViewTarget,
 };
-use ilium_plugin_sdk_core::types::Area;
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
 
@@ -100,7 +102,6 @@ pub struct Screen {
     pub cells: Vec<ScreenCell>,
 }
 
-
 impl Screen {
     /// A blank screen of the given size.
     pub(crate) fn blank(columns: u16, rows: u16) -> Screen {
@@ -148,7 +149,10 @@ impl Screen {
         let index = usize::from(row) * usize::from(self.columns) + usize::from(column);
         match self.cells.get(index) {
             Some(cell) => cell.clone(),
-            None => fail(codes::CELL_OUT_OF_RANGE, "the cell list is shorter than the size"),
+            None => fail(
+                codes::CELL_OUT_OF_RANGE,
+                "the cell list is shorter than the size",
+            ),
         }
     }
 
@@ -331,10 +335,41 @@ const GRANT_CATALOGUE: &[&str] = &[
 
 /// Host import families `inject_failure` accepts (DEV-494).
 const IMPORT_FAMILIES: &[&str] = &[
-    "storage", "fs", "process", "http", "settings", "tree", "jobs", "cli", "inference", "notify",
-    "sound", "clipboard", "journal", "keymap", "plugins", "help", "panes", "terminal", "agent",
-    "editor", "audio", "keys", "workspace", "sessions", "messages", "topics", "extensions",
-    "services", "vector", "location", "media", "gpu", "commands", "ui", "open",
+    "storage",
+    "fs",
+    "process",
+    "http",
+    "settings",
+    "tree",
+    "jobs",
+    "cli",
+    "inference",
+    "notify",
+    "sound",
+    "clipboard",
+    "journal",
+    "keymap",
+    "plugins",
+    "help",
+    "panes",
+    "terminal",
+    "agent",
+    "editor",
+    "audio",
+    "keys",
+    "workspace",
+    "sessions",
+    "messages",
+    "topics",
+    "extensions",
+    "services",
+    "vector",
+    "location",
+    "media",
+    "gpu",
+    "commands",
+    "ui",
+    "open",
 ];
 
 /// The name of a grant without its scope: `process.run:git` is `process.run`.
@@ -682,7 +717,10 @@ impl FakeHost {
     /// Fails with `harness.not-active` unless the plugin has been activated at least once.
     fn require_started(&self, what: &str) {
         if self.instance == 0 && !self.stub_started {
-            fail(codes::NOT_ACTIVE, &format!("{what} was called before activate"));
+            fail(
+                codes::NOT_ACTIVE,
+                &format!("{what} was called before activate"),
+            );
         }
     }
 
@@ -957,7 +995,10 @@ impl FakeHost {
         &mut self,
     ) -> Result<PluginHandle, PluginError> {
         if self.plugin.0.is_some() || self.state == InstanceState::RestartScheduled {
-            fail(codes::ALREADY_ACTIVE, "the plugin is already active on this host");
+            fail(
+                codes::ALREADY_ACTIVE,
+                "the plugin is already active on this host",
+            );
         }
         self.exports = P::EXPORTS;
         let side = self
@@ -1019,7 +1060,9 @@ impl FakeHost {
             return;
         }
         self.outbox.borrow_mut().push(Event::TreeChanged(
-            ids.into_iter().map(ilium_plugin_sdk_core::types::NodeId).collect(),
+            ids.into_iter()
+                .map(ilium_plugin_sdk_core::types::NodeId)
+                .collect(),
         ));
     }
 
@@ -1032,7 +1075,10 @@ impl FakeHost {
             );
         }
         let Some(mut plugin) = self.plugin.0.take() else {
-            fail(codes::NOT_ACTIVE, "deactivate was called on a host with no active plugin");
+            fail(
+                codes::NOT_ACTIVE,
+                "deactivate was called on a host with no active plugin",
+            );
         };
         self.state = InstanceState::Deactivating;
         let bytes = {
@@ -1048,7 +1094,10 @@ impl FakeHost {
         if events.len() > MAX_BATCH_EVENTS {
             fail(
                 codes::BATCH_TOO_LARGE,
-                &format!("{} events in one batch, the limit is {MAX_BATCH_EVENTS}", events.len()),
+                &format!(
+                    "{} events in one batch, the limit is {MAX_BATCH_EVENTS}",
+                    events.len()
+                ),
             );
         }
         self.require_started("deliver");
@@ -1521,7 +1570,10 @@ impl FakeHost {
     pub fn cancel_pending(&mut self) {
         let pending = std::mem::take(&mut self.pending);
         for request in pending {
-            self.complete(RequestRef::Submission(request.correlation), Outcome::Cancelled);
+            self.complete(
+                RequestRef::Submission(request.correlation),
+                Outcome::Cancelled,
+            );
         }
     }
 
@@ -1706,7 +1758,10 @@ impl FakeHost {
     pub fn inject_failure(&mut self, import: &str, error: PluginError) {
         let family = import.split(['.', '/', ':']).next().unwrap_or(import);
         if !IMPORT_FAMILIES.contains(&family) {
-            fail(codes::ERROR_UNKNOWN, &format!("{import} is not a host import"));
+            fail(
+                codes::ERROR_UNKNOWN,
+                &format!("{import} is not a host import"),
+            );
         }
         self.injected_failures.push((import.to_string(), error));
     }
@@ -1810,7 +1865,12 @@ impl FakeHost {
     }
 
     /// Writes one starting storage value; false for an unknown bucket name.
-    pub(crate) fn seed_storage_value(&mut self, bucket_name: &str, key: &str, bytes: &[u8]) -> bool {
+    pub(crate) fn seed_storage_value(
+        &mut self,
+        bucket_name: &str,
+        key: &str,
+        bytes: &[u8],
+    ) -> bool {
         match bucket_of(bucket_name) {
             Some(bucket) => {
                 self.storage.put(bucket, key, bytes);
@@ -1861,7 +1921,10 @@ impl FakeHost {
             match result {
                 Ok(reply) => (reply, false),
                 Err(error) => {
-                    self.record_failure("trap.panic", &format!("the hook handler failed: {}", error.message));
+                    self.record_failure(
+                        "trap.panic",
+                        &format!("the hook handler failed: {}", error.message),
+                    );
                     (HookReply::Pass, false)
                 }
             }
@@ -1961,7 +2024,9 @@ impl FakeHost {
             .calls
             .push(format!("service:{service}.{method}"));
         if !self.extensions.has_service_stub(service, method) {
-            if let Some(ServiceReply::Done(reply)) = self.dispatch_service(service, method, payload_json) {
+            if let Some(ServiceReply::Done(reply)) =
+                self.dispatch_service(service, method, payload_json)
+            {
                 return Ok(reply);
             }
         }
@@ -1983,7 +2048,8 @@ impl FakeHost {
             payload_json: payload_json.to_string(),
             caller: ilium_plugin_sdk_core::types::PluginId(self.plugin_id.clone()),
         };
-        self.call_plugin(|plugin| plugin.handle_service(call)).flatten()
+        self.call_plugin(|plugin| plugin.handle_service(call))
+            .flatten()
     }
 
     /// Calls the plugin's own single-method service.
@@ -2027,11 +2093,7 @@ impl FakeHost {
     }
 
     /// Runs one of the plugin's job kinds; the native entry has no job method, so it is unsupported.
-    pub fn run_job(
-        &mut self,
-        kind: &str,
-        input: impl AsRef<[u8]>,
-    ) -> Result<Vec<u8>, PluginError> {
+    pub fn run_job(&mut self, kind: &str, input: impl AsRef<[u8]>) -> Result<Vec<u8>, PluginError> {
         let request = self.jobs_next_request();
         self.jobs.record(request, kind, input.as_ref());
         if let Some(Some(result)) =
@@ -2181,7 +2243,10 @@ impl FakeHost {
         };
         match plugin.as_any_mut().downcast_mut::<T>() {
             Some(instance) => instance,
-            None => fail("harness.instance-type", "the plugin is not of the requested type"),
+            None => fail(
+                "harness.instance-type",
+                "the plugin is not of the requested type",
+            ),
         }
     }
 
@@ -2507,7 +2572,8 @@ impl FakeInference {
         if let Some(message) = self.failure.take() {
             return Err(PluginError::new(ErrorCode::Internal, message));
         }
-        if let Some((_, completion)) = self.completions.iter().find(|(known, _)| *known == request) {
+        if let Some((_, completion)) = self.completions.iter().find(|(known, _)| *known == request)
+        {
             return Ok(completion.clone());
         }
         let text = if self.scripted.is_empty() {
@@ -3016,7 +3082,8 @@ impl FakeJournal {
 
     /// Appends an entry that may have no pane.
     pub(crate) fn push(&mut self, pane: Option<u64>, at_ms: u64, kind: &str, text: &str) {
-        self.entries.push((pane, kind.to_string(), text.to_string()));
+        self.entries
+            .push((pane, kind.to_string(), text.to_string()));
         self.times.push(at_ms);
     }
 
@@ -3118,13 +3185,20 @@ impl FakeClipboard {
     }
 }
 
-/// Fake vector index.
+/// Fake vector index: deterministic embeddings, indexes in memory, recorded batch sizes.
 #[derive(Debug, Default)]
 pub struct FakeVector {
     batch_sizes: Vec<usize>,
     top_k: Vec<usize>,
     hits: Vec<(String, f64)>,
+    /// Dimension of the vectors `embed` returns.
+    dimensions: usize,
+    next_index: u32,
+    indexes: BTreeMap<u32, (u16, BTreeMap<String, Vec<f32>>)>,
 }
+
+/// Dimension of the fake embeddings unless a test sets another.
+const FAKE_EMBEDDING_DIMENSIONS: usize = 4;
 
 impl FakeVector {
     /// Sizes of the embed batches.
@@ -3140,6 +3214,90 @@ impl FakeVector {
     /// Sets the hits every top-k request returns.
     pub fn set_top_k(&mut self, hits: Vec<(String, f64)>) {
         self.hits = hits;
+    }
+
+    /// Ids stored in an index, in order; empty for an unknown index.
+    pub fn index_entries(&self, index: u32) -> Vec<String> {
+        self.indexes
+            .get(&index)
+            .map(|(_, entries)| entries.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// One deterministic vector per text: a hash of the text spread over the dimensions.
+    pub(crate) fn embed(&mut self, texts: &[String]) -> Vec<Vec<f32>> {
+        self.batch_sizes.push(texts.len());
+        let dimensions = if self.dimensions == 0 {
+            FAKE_EMBEDDING_DIMENSIONS
+        } else {
+            self.dimensions
+        };
+        texts
+            .iter()
+            .map(|text| {
+                let mut state = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                    (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+                });
+                (0..dimensions)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1);
+                        ((state >> 40) as f32) / 16_777_216.0 + 0.001
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    pub(crate) fn create_index(&mut self, dimensions: u16) -> u32 {
+        self.next_index += 1;
+        self.indexes
+            .insert(self.next_index, (dimensions, BTreeMap::new()));
+        self.next_index
+    }
+
+    pub(crate) fn upsert(&mut self, index: u32, entries: Vec<(String, Vec<f32>)>) -> bool {
+        let Some((dimensions, stored)) = self.indexes.get_mut(&index) else {
+            return false;
+        };
+        if entries
+            .iter()
+            .any(|(_, vector)| vector.len() != usize::from(*dimensions))
+        {
+            return false;
+        }
+        stored.extend(entries);
+        true
+    }
+
+    pub(crate) fn remove_entries(&mut self, index: u32, ids: &[String]) -> bool {
+        let Some((_, stored)) = self.indexes.get_mut(&index) else {
+            return false;
+        };
+        for id in ids {
+            stored.remove(id);
+        }
+        true
+    }
+
+    /// The hits `set_top_k` configured, at most `k`; an index that exists is required.
+    pub(crate) fn top_k(&mut self, index: u32, k: u16) -> Option<Vec<(String, f32)>> {
+        self.top_k.push(usize::from(k));
+        if !self.indexes.contains_key(&index) {
+            return None;
+        }
+        Some(
+            self.hits
+                .iter()
+                .take(usize::from(k))
+                .map(|(id, score)| (id.clone(), *score as f32))
+                .collect(),
+        )
+    }
+
+    pub(crate) fn drop_index(&mut self, index: u32) {
+        self.indexes.remove(&index);
     }
 }
 
@@ -3219,7 +3377,12 @@ pub struct FakeKeys {
 
 impl FakeKeys {
     /// Records a grab the plugin took and returns its id.
-    pub(crate) fn take(&mut self, chords: Vec<String>, pane: Option<u64>, until_release: bool) -> u64 {
+    pub(crate) fn take(
+        &mut self,
+        chords: Vec<String>,
+        pane: Option<u64>,
+        until_release: bool,
+    ) -> u64 {
         let id = self.grabs.len() as u64 + 1;
         self.grabs.push(KeyGrab {
             id,

@@ -502,10 +502,7 @@ mod tests {
 
         app.select_node(pane_id);
         app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
-        assert_eq!(
-            observe(&app),
-            Some((Observation::True, Observation::True))
-        );
+        assert_eq!(observe(&app), Some((Observation::True, Observation::True)));
     }
 
     #[test]
@@ -533,7 +530,10 @@ mod tests {
                 )
             })
         };
-        assert_eq!(observe(&app), Some((Observation::False, Observation::False)));
+        assert_eq!(
+            observe(&app),
+            Some((Observation::False, Observation::False))
+        );
         // A session-level error is a session fact, never this pane's error.
         app.replace_blocking_errors(vec![ilium_ipc::BlockingError {
             node_id: None,

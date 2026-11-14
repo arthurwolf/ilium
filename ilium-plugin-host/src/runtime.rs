@@ -841,6 +841,18 @@ impl HostRuntime {
             .collect()
     }
 
+    /// Queues one topic message that the kernel publishes under a plugin's topic name, for a
+    /// feature whose source of truth the kernel still hosts (the Progress monitors). Only the
+    /// plugins that hold `topics.subscribe:<topic>` receive it, on the next `pump`.
+    pub fn publish_kernel_topic(&mut self, topic: &str, from: &str, payload_json: &str) {
+        let mut outbox = lock(&self.topic_outbox);
+        outbox.push_back(topics::Published {
+            from: from.to_owned(),
+            topic: topic.to_owned(),
+            payload_json: payload_json.to_owned(),
+        });
+    }
+
     fn apply_submissions(&mut self, plugin: &str, submissions: Vec<Submission>) {
         let origin = Origin::Plugin {
             plugin: PluginId(plugin.to_owned()),

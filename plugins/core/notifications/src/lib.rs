@@ -11,11 +11,13 @@ pub mod synthesis;
 
 use std::collections::HashSet;
 
+use ilium_plugin_sdk::generated::host::kernel_settings::HostKernelSettings;
 use ilium_plugin_sdk::generated::host::log::Level;
+use ilium_plugin_sdk::generated::host::sessions::HostSessions;
 use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::host::{Bucket, HostClock, HostSettings, HostStorage};
+use ilium_plugin_sdk::host::{Bucket, HostClock, HostStorage};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
@@ -38,14 +40,16 @@ const MUTE_TOGGLE_KEY: &str = "sound-mute";
 const MAX_SETTLED_TASKS: usize = 1024;
 /// Longest merge window the host accepts on a notice, in milliseconds.
 const MAX_NOTICE_WINDOW_MS: u64 = 60_000;
-/// The name shown for a session the plugin API does not name (API_GAPS.md).
-const SESSION_LABEL: &str = "default";
+/// The name shown while the host names no live session of this server.
+const DEFAULT_SESSION_NAME: &str = "default";
 
 /// The server side of `ilium.core.notifications` (core-plugin-notifications.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
 #[derive(Default)]
 pub struct NotificationsServer {
     settings: AlertSettings,
+    /// The name of the session this server runs, shown in the text of every notice.
+    session: String,
     /// The mute flag of the toggle; sounds are skipped while it is set, notices and marks are not.
     muted: bool,
     coalescer: TaskOutcomeCoalescer,
@@ -60,7 +64,8 @@ pub struct NotificationsServer {
 impl Lifecycle for NotificationsServer {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
         validate_settings(&context.settings_json)?;
-        self.settings = AlertSettings::from_json(&context.settings_json);
+        self.reload_settings();
+        self.session = session_name();
         let mut api = host();
         self.muted = HostStorage::get(&mut *api, Bucket::Global, MUTED_KEY.to_string())
             .is_some_and(|bytes| bytes == b"1");
@@ -76,7 +81,6 @@ impl Handler for NotificationsServer {
                 Event::KernelSettingsChanged(change) if change.tab == SOUND_TAB => {
                     self.reload_settings();
                 }
-                Event::SettingsChanged(_) => self.reload_settings(),
                 Event::PaneFocused(node) => {
                     self.focused = node;
                     if let Some(node) = node {
@@ -111,10 +115,18 @@ impl Handler for NotificationsServer {
 }
 
 impl NotificationsServer {
-    /// Reads the settings again; a change of any other tab never gets here.
+    /// Reads the Sound tab of the kernel settings again (sound switches, the muted source and the
+    /// desktop-notification switches); a change of any other tab never gets here. A failed read
+    /// keeps the settings in force.
     fn reload_settings(&mut self) {
         let mut api = host();
-        self.settings = AlertSettings::from_json(&HostSettings::get_json(&mut *api));
+        match HostKernelSettings::read(&mut *api, SOUND_TAB.to_string()) {
+            Ok(tab) => self.settings = AlertSettings::from_kernel_tab(&tab),
+            Err(error) => ilium_plugin_sdk::log::log(
+                Level::Warn,
+                &format!("the sound settings could not be read: {}", error.message),
+            ),
+        }
     }
 
     fn sounds_allowed(&self) -> bool {
@@ -155,7 +167,7 @@ impl NotificationsServer {
         let suffix = format!("{}:{}", node.0, change.revision);
         let (name, objective) = pane_label(node);
         let label = PaneLabel {
-            session: SESSION_LABEL,
+            session: &self.session,
             name: &name,
             objective: objective.as_deref(),
         };
@@ -260,7 +272,7 @@ impl NotificationsServer {
 
         let mid_turn = rules::is_agent_mid_turn(agent);
         let label = PaneLabel {
-            session: SESSION_LABEL,
+            session: &self.session,
             name: &name,
             objective: objective.as_deref(),
         };
@@ -342,13 +354,27 @@ fn to_activity(activity: AgentActivity) -> Option<Activity> {
     }
 }
 
-/// The title of a node and the objective of its agent, read from the tree.
+/// How a notice names a pane and what explains it further, read from the tree. A pane with a
+/// short title is named by it and the full title follows as the description; a pane without one
+/// is named by its title (the host carries the short title as the agent's objective).
 fn pane_label(node: NodeId) -> (String, Option<String>) {
     let mut api = host();
     match HostTree::get(&mut *api, node) {
-        Some(view) => (view.title, view.agent.and_then(|agent| agent.objective)),
+        Some(view) => match view.agent.and_then(|agent| agent.objective) {
+            Some(short) => (short, Some(view.title)),
+            None => (view.title, None),
+        },
         None => (format!("pane {}", node.0), None),
     }
+}
+
+/// The name of the session this server runs.
+fn session_name() -> String {
+    let mut api = host();
+    HostSessions::list_live(&mut *api)
+        .into_iter()
+        .find(|session| session.is_self)
+        .map_or_else(|| DEFAULT_SESSION_NAME.to_owned(), |session| session.name)
 }
 
 /// How the agent of `node` stands now, read when the outcome arrives.

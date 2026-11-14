@@ -9,9 +9,7 @@
 
 use std::sync::OnceLock;
 
-use ilium_core::status_rule_expression::{
-    DemoSituation, Observation, ScreenPattern, ScreenRegion,
-};
+use ilium_core::status_rule_expression::{DemoSituation, Observation, ScreenPattern, ScreenRegion};
 use ratatui::text::Span;
 
 use crate::agent_monitoring::AgentMonitoringMode;

@@ -67,15 +67,19 @@ fn cor_050_server_capabilities_are_exactly_the_seven_of_the_page() {
 
 /// REQ: COR-050
 #[test]
-fn cor_050_client_capabilities_are_exactly_the_five_of_the_page() {
+fn cor_050_client_capabilities_are_exactly_the_ones_of_the_page() {
     assert_eq!(
         strings(&manifest_json()["capabilities"]["client"]),
         [
             "terminal.read-screen",
+            "tree.read",
             "editor.edit",
             "commands.invoke:ilium.core.editor/*",
             "ui.panels",
-            "settings.write-kernel:terminal"
+            "settings.write-kernel:terminal",
+            "open-external",
+            "extensions.provide:ilium.core.terminal/open-link",
+            "extensions.provide:ilium.core.terminal/link-actions"
         ]
     );
 }
@@ -166,8 +170,9 @@ fn cor_050_contributes_the_link_detectors_and_the_link_open_command() {
     assert_eq!(
         manifest["contributes"]["link_detectors"],
         json!([
-            { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" },
-            { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+            { "id": "url", "regex": "https?://[^\\s]*[^\\s)\\]},.;\"'`]", "command": "link-open" },
+            { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" },
+            { "id": "path", "regex": "[^\\s()\\[\\]{},;\"'`]*[^\\s()\\[\\]{},;\"'`.]", "command": "link-open" }
         ])
     );
     // EXT-050: a detector's command names a declared command.

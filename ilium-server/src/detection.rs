@@ -31,14 +31,11 @@ use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
 
 use crate::foreground_observation::{self, ProbeRequest};
-use crate::notifications::{self, PendingNotification};
 use crate::pane::{
     agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
 };
-use crate::sounds;
 use crate::state::ServerState;
 use ilium_pty::PtyExitCause;
-use ilium_sound::NotificationEvent;
 
 /// Minimum time between two "force an immediate recheck" requests actually
 /// taking effect for the same pane. A focus transition (entering/exiting a
@@ -586,12 +583,6 @@ fn partition_session_claims(
 /// issue, not a per-pane one; the structure is still one pane at a time so
 /// a future fallible step here stays isolated per pane).
 ///
-/// A `Working -> Done` transition (see
-/// `notifications::is_finished_transition`) queues a desktop notification,
-/// but the notification itself is only sent after the `tree`/`panes` locks
-/// below are dropped -- a slow or unavailable notification daemon must
-/// never hold up an attached client's tree access.
-///
 /// Structured in three phases so the expensive part -- classification --
 /// never runs while `tree`/`panes` are write-locked. Every attached
 /// client's keystrokes (`ipc::handlers::handle_key_input`) need that same
@@ -818,12 +809,6 @@ async fn run_due_panes_with_hook(
         .get()
         .ok_or_else(|| execution_error("server bank not started"))?
         .detection
-        .clone();
-    let notification_execution = state
-        .execution
-        .get()
-        .ok_or_else(|| execution_error("server bank not started"))?
-        .client
         .clone();
     // Reserve before cloning classification inputs or formatting screens.
     let reservation = execution
@@ -2251,10 +2236,6 @@ async fn run_due_panes_with_hook(
     if current_detection_settings.revision != detection_settings_revision {
         return Ok(());
     }
-    let sound_settings = state.sound_settings.read().await.clone();
-    let notification_settings = *state.notifications_config.read().await;
-    let mut pending_notifications = Vec::new();
-    let mut pending_sounds = Vec::new();
     let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
     let mut pending_empty_title_checks = Vec::new();
@@ -2482,23 +2463,10 @@ async fn run_due_panes_with_hook(
             runtime.detection_schedule.cached_screen_classification =
                 Some(classified_pane.screen_classification_cache.clone());
 
-            let (previous_status, previous_progress, has_scheduled_input) =
-                tree.get(pane_id)
-                    .map(|node| match &node.kind {
-                        ilium_core::NodeKind::Pane {
-                            status,
-                            progress_monitors,
-                            scheduled_input,
-                            ..
-                        } => (
-                            Some(status.clone()),
-                            progress_monitors.clone(),
-                            scheduled_input.is_some(),
-                        ),
-                        ilium_core::NodeKind::Container(_)
-                        | ilium_core::NodeKind::Folder { .. } => (None, Vec::new(), false),
-                    })
-                    .unwrap_or((None, Vec::new(), false));
+            let previous_status = tree.get(pane_id).and_then(|node| match &node.kind {
+                ilium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
+                ilium_core::NodeKind::Container(_) | ilium_core::NodeKind::Folder { .. } => None,
+            });
 
             // The detector reports a raw turn. Completion memory and the
             // one-sample Idle hold belong to this server reducer.
@@ -2553,28 +2521,6 @@ async fn run_due_panes_with_hook(
                         .and_then(|exit| exit.signal_name.as_deref()),
                 )
             };
-            let previous_signals = previous_status.as_ref().map(|status| {
-                let effect_baseline = if same_process {
-                    status
-                        .agent_recovery()
-                        .map(|recovery| PaneStatus::Agent(recovery.last_known_state.clone()))
-                } else {
-                    None
-                };
-                ilium_core::project_pane_signals(
-                    effect_baseline.as_ref().unwrap_or(status),
-                    &previous_progress,
-                    has_scheduled_input,
-                    None,
-                )
-            });
-            let new_signals = ilium_core::project_pane_signals(
-                &new_status,
-                &previous_progress,
-                has_scheduled_input,
-                None,
-            );
-
             let polled_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
@@ -3117,11 +3063,6 @@ async fn run_due_panes_with_hook(
                 }
             }
 
-            let (pane_name_before_update, short_pane_name_before_update) = tree
-                .get(pane_id)
-                .map(|node| (Some(node.name.clone()), node.short_name.clone()))
-                .unwrap_or_default();
-
             if let Err(error) = tree.set_pane_status(pane_id, new_status.clone()) {
                 // A pane present in the registry but missing from the tree
                 // would be an invariant violation elsewhere (both are
@@ -3147,33 +3088,6 @@ async fn run_due_panes_with_hook(
                 ),
             }
 
-            // Queued only once the status update actually took -- a
-            // rejected `set_pane_status` above (a stale/inconsistent
-            // registry entry) must never fire a notification for a
-            // transition that didn't actually happen.
-            if notification_settings.is_enabled(NotificationEvent::AgentFinished)
-                && notifications::is_finished_signal_transition(
-                    previous_signals.as_ref(),
-                    &new_signals,
-                )
-            {
-                pending_notifications.push(PendingNotification::from_pane_titles(
-                    state.session_name.clone(),
-                    pane_name_before_update.clone().unwrap_or_default(),
-                    short_pane_name_before_update.clone(),
-                ));
-            }
-            if notification_settings.is_enabled(NotificationEvent::ApprovalRequired)
-                && ilium_sound::event_for_signals(previous_signals.as_ref(), &new_signals)
-                    == Some(ilium_sound::SoundEvent::ApprovalRequired)
-            {
-                pending_notifications.push(PendingNotification::approval_from_pane_titles(
-                    state.session_name.clone(),
-                    pane_name_before_update.clone().unwrap_or_default(),
-                    short_pane_name_before_update,
-                ));
-            }
-
             if is_agent_finished_transition(previous_status.as_ref(), &new_status) {
                 completed_pane_ids.push(pane_id);
             }
@@ -3186,24 +3100,6 @@ async fn run_due_panes_with_hook(
             ) && tree.pane_workspace(pane_id).is_some()
             {
                 let _ = state.queue_full_git_status(pane_id);
-            }
-
-            if let Some(event) =
-                ilium_sound::event_for_signals(previous_signals.as_ref(), &new_signals)
-            {
-                if sound_settings.events.is_enabled(event) {
-                    match state.sound_requests.prepare(
-                        &sound_settings,
-                        Some(event),
-                        pane_name_before_update.as_deref(),
-                    ) {
-                        Ok(request) => pending_sounds.push(request),
-                        Err(reason) => tracing::warn!(
-                            ?reason,
-                            "agent sound preparation refused before allocation"
-                        ),
-                    }
-                }
             }
 
             state.broadcast(ServerEvent::PaneDetectedStateChanged {
@@ -3272,13 +3168,6 @@ async fn run_due_panes_with_hook(
                 );
             }
         }
-    }
-
-    for pending in pending_notifications {
-        notifications::send(&notification_execution, pending);
-    }
-    for pending in pending_sounds {
-        sounds::enqueue_prepared(state, pending);
     }
 
     Ok(())

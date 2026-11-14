@@ -1407,18 +1407,31 @@ mod status_screen_request_tests {
 
     #[test]
     fn screen_watch_request_charges_pattern_and_vector_capacity() {
-        let empty = ClientRequest::SetStatusScreenWatches { revision: 1, watches: Vec::new() };
+        let empty = ClientRequest::SetStatusScreenWatches {
+            revision: 1,
+            watches: Vec::new(),
+        };
         let mut pattern = String::with_capacity(512);
         pattern.push_str("error");
         let pattern_capacity = pattern.capacity();
         let mut watches = Vec::with_capacity(4);
         watches.push(StatusScreenWatch {
             id: 1,
-            pattern: ScreenPattern { pattern, ignore_case: false, region: ScreenRegion::All },
+            pattern: ScreenPattern {
+                pattern,
+                ignore_case: false,
+                region: ScreenRegion::All,
+            },
         });
         let vector_capacity = watches.capacity() * std::mem::size_of::<StatusScreenWatch>();
-        let populated = ClientRequest::SetStatusScreenWatches { revision: 1, watches };
-        assert_eq!(request_retained_bytes(&populated) - request_retained_bytes(&empty), vector_capacity + pattern_capacity);
+        let populated = ClientRequest::SetStatusScreenWatches {
+            revision: 1,
+            watches,
+        };
+        assert_eq!(
+            request_retained_bytes(&populated) - request_retained_bytes(&empty),
+            vector_capacity + pattern_capacity
+        );
     }
 }
 

@@ -70,7 +70,8 @@ fn manifest_050_the_server_side_uses_the_base_server_world() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_server_grants_are_the_five_alert_grants_then_the_two_feed_grants_in_order() {
+fn manifest_050_server_grants_are_the_alert_grants_the_extension_grants_the_tab_grants_and_the_feed_grants(
+) {
     assert_eq!(
         server_grants(),
         [
@@ -79,6 +80,10 @@ fn manifest_050_server_grants_are_the_five_alert_grants_then_the_two_feed_grants
             "agent.read",
             "tree.read",
             "tree.attention",
+            "extensions.provide:ilium.core.notifications/before-notify",
+            "extensions.provide:ilium.core.notifications/channels",
+            "settings.write-kernel:sound",
+            "settings.read-kernel:sound",
             "topics.subscribe:ilium.core.progress/changed",
             "panes.read"
         ]
@@ -87,10 +92,10 @@ fn manifest_050_server_grants_are_the_five_alert_grants_then_the_two_feed_grants
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_grants_are_the_toast_grant_and_the_kernel_tab_grant() {
+fn manifest_050_the_client_grant_is_the_toast_grant() {
     assert_eq!(
         manifest()["capabilities"]["client"],
-        json!(["notify.toast", "settings.write-kernel:sound"])
+        json!(["notify.toast"])
     );
 }
 
@@ -167,7 +172,7 @@ fn manifest_050_a_host_takes_the_server_grants_from_the_manifest() {
 #[test]
 fn manifest_033_holds_the_write_grant_of_its_one_kernel_tab() {
     let manifest = manifest();
-    let kernel: Vec<String> = manifest["capabilities"]["client"]
+    let kernel: Vec<String> = manifest["capabilities"]["server"]
         .as_array()
         .expect("client grants")
         .iter()
@@ -175,6 +180,16 @@ fn manifest_033_holds_the_write_grant_of_its_one_kernel_tab() {
         .filter(|grant| grant.starts_with("settings.write-kernel:"))
         .collect();
     assert_eq!(kernel, ["settings.write-kernel:sound"]);
+}
+
+/// REQ: COR-030
+#[test]
+fn manifest_030_reads_the_one_kernel_tab_it_alerts_from() {
+    let reads: Vec<String> = server_grants()
+        .into_iter()
+        .filter(|grant| grant.starts_with("settings.read-kernel:"))
+        .collect();
+    assert_eq!(reads, ["settings.read-kernel:sound"]);
 }
 
 /// REQ: COR-030

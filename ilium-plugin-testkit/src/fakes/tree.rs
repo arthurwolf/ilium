@@ -224,6 +224,16 @@ impl FakeTree {
         extras.screen_unavailable = false;
     }
 
+    /// The rows `terminal.read-screen` returns for a pane: `None` when none were set or the pane
+    /// was marked unavailable.
+    pub(crate) fn screen_rows(&self, id: u64) -> Option<Vec<String>> {
+        let extras = self.extras.get(&id)?;
+        if extras.screen_unavailable {
+            return None;
+        }
+        extras.screen.clone()
+    }
+
     /// `terminal.read-screen` answers `None` for the pane (lane hook, see manual_gaps_fakes.md; DEV-470).
     pub fn set_screen_unavailable(&mut self, id: u64) {
         let extras = self.extras.entry(id).or_default();

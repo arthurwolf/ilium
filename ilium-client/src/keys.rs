@@ -3,8 +3,6 @@
 //! but translating every structural mutation into a queued `ClientRequest`
 //! (see `app.rs`'s module docs) instead of a direct tree edit.
 
-use std::time::Instant;
-
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ilium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
 #[cfg(test)]
@@ -47,7 +45,6 @@ pub(crate) fn editor_loan_event_target(app: &App, event: &Event) -> Option<Optio
         _ => None,
     }
 }
-use crate::search_ui::SearchState;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
 use crate::worktree_dialog::{
     WorktreeClosePolicy, WorktreeDialogFocus, WorktreeDialogMode, WorktreeDialogState,
@@ -319,7 +316,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         }
         Mode::Settings(state) => handle_settings_event(app, *state, &event),
         Mode::SettingsHelp(state) => handle_settings_help_event(app, state, &event),
-        Mode::Search(state) => handle_search_event(app, state, &event),
         Mode::Move => {
             app.mode = Mode::Move;
             if let Event::Key(key) = &event {
@@ -979,68 +975,6 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
     }
 }
 
-/// Full-screen search treats typing as an immediate query edit rather than a
-/// submitted form. Navigation keys never mutate the query, and Enter uses the
-/// selected hit's durable location to open the right pane/buffer position.
-fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::Search(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::Search(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Enter => {
-            if let Some(result) = state.selected_result().cloned() {
-                app.activate_search_result(result);
-            } else {
-                app.mode = Mode::Search(state);
-            }
-        }
-        KeyCode::Up => {
-            state.move_selection(
-                -1,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(state);
-        }
-        KeyCode::Down => {
-            state.move_selection(
-                1,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(state);
-        }
-        KeyCode::PageUp => {
-            let rows = crate::search_ui::visible_result_rows(app.layout.screen_area) as i32;
-            state.move_selection(
-                -rows,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(state);
-        }
-        KeyCode::PageDown => {
-            let rows = crate::search_ui::visible_result_rows(app.layout.screen_area) as i32;
-            state.move_selection(
-                rows,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(state);
-        }
-        _ => {
-            let query_len_before = state.query.buf.len();
-            let _ = text_prompt::handle_key(&mut state.query, key.code);
-            if state.query.buf.len() != query_len_before {
-                state.note_query_changed(Instant::now());
-            }
-            app.mode = Mode::Search(state);
-        }
-    }
-}
-
 /// Runs one leader-key action.
 fn execute_action(app: &mut App, action: Action) {
     match action {
@@ -1093,7 +1027,9 @@ fn execute_action(app: &mut App, action: Action) {
         Action::ScrollbackDown => app.scroll_focused_terminal(1),
         Action::Save => app.action_save_focused_editor(),
         Action::RunCommand => app.mode = Mode::CommandPrompt(TextPromptState::new("")),
-        Action::Search => app.action_open_search(),
+        Action::Search => {
+            app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
+        }
         // Only reachable when Help *wasn't* already open (see
         // `handle_help_event`, which intercepts everything while it is),
         // so this always means "open it".
@@ -4506,24 +4442,6 @@ mod indent_outdent_tests {
             !app.agent_debug_log_filter
                 .is_tree_panel_animation_resize_hidden
         );
-    }
-
-    #[test]
-    fn search_typing_updates_the_visible_prompt_without_running_a_scan() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.action_open_search();
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
-        );
-
-        let Mode::Search(state) = &app.mode else {
-            panic!("typing should remain in workspace search");
-        };
-        assert_eq!(state.query.buf, "n");
-        assert!(state.results.is_empty());
-        assert!(state.is_waiting_for_debounce());
     }
 
     #[test]

@@ -366,13 +366,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_last_prompt_dialog_mouse(app, mouse, position);
         return;
     }
-    if matches!(app.mode, Mode::Search(_)) {
-        let Mode::Search(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::Search above");
-        };
-        handle_search_mouse(app, &mut state, mouse);
-        return;
-    }
     if matches!(app.mode, Mode::SchedulePaneInput(_)) {
         let Mode::SchedulePaneInput(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::SchedulePaneInput above");
@@ -1019,46 +1012,6 @@ fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Posi
     }
 }
 
-/// Mouse parity for the keyboard-first full-screen search screen: wheel
-/// scrolls results, while clicking a result opens it immediately at its
-/// recorded terminal/editor location.
-fn handle_search_mouse(
-    app: &mut App,
-    state: &mut crate::search_ui::SearchState,
-    mouse: MouseEvent,
-) {
-    match mouse.kind {
-        MouseEventKind::ScrollUp => {
-            state.move_selection(
-                -3,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(Box::new(std::mem::take(state)));
-        }
-        MouseEventKind::ScrollDown => {
-            state.move_selection(
-                3,
-                crate::search_ui::visible_result_rows(app.layout.screen_area),
-            );
-            app.mode = Mode::Search(Box::new(std::mem::take(state)));
-        }
-        MouseEventKind::Down(MouseButton::Left) => {
-            let position = Position::new(mouse.column, mouse.row);
-            if let Some(index) =
-                crate::search_ui::result_at(app.layout.screen_area, state, position)
-            {
-                state.selected_index = index;
-                if let Some(result) = state.selected_result().cloned() {
-                    app.activate_search_result(result);
-                    return;
-                }
-            }
-            app.mode = Mode::Search(Box::new(std::mem::take(state)));
-        }
-        _ => app.mode = Mode::Search(Box::new(std::mem::take(state))),
-    }
-}
-
 /// Selects tree rows, opens the right-click menu, scrolls, and handles the
 /// toolbar/row hover controls.
 fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
@@ -1533,7 +1486,7 @@ fn compute_drop_target(
 fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
     match action {
         TreeToolbarAction::Search => {
-            app.action_open_search();
+            app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::TreeToolbar);
             return;
         }
         // Custom agents launch from the click handler, which owns the profile lookup.
@@ -5568,10 +5521,13 @@ mod row_action_click_tests {
     }
 
     #[test]
-    fn search_toolbar_action_opens_the_full_screen_workspace_finder() {
+    fn search_toolbar_action_runs_the_search_plugin_command() {
         let mut app = test_app();
         execute_tree_toolbar_action(&mut app, TreeToolbarAction::Search);
-        assert!(matches!(app.mode, Mode::Search(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.search is not running, so this action is unavailable")
+        );
     }
 
     #[test]

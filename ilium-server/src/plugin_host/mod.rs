@@ -492,6 +492,18 @@ impl PluginHostHandle {
         self.publisher.snapshot()
     }
 
+    /// Publishes a topic message for a feature the kernel still hosts (a monitored task's
+    /// terminal outcome), under the topic name the owning plugin declares. Only plugins that
+    /// subscribe to the topic receive it. False when the host stopped.
+    pub(crate) fn publish_topic(&self, topic: &str, from: &str, payload_json: String) -> bool {
+        let topic = topic.to_owned();
+        let from = from.to_owned();
+        self.post(move |runtime| {
+            runtime.publish_kernel_topic(&topic, &from, &payload_json);
+            log_errors("pump", runtime.pump());
+        })
+    }
+
     /// Hands kernel events to the plugins. Coalesced: one queued job drains everything that
     /// arrived meanwhile, and an overfull backlog becomes one unspecific tree change.
     fn feed(&self, batch: Vec<Event>) {

@@ -12,6 +12,7 @@ pub mod transfer;
 
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::host::log::Level;
+use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::host::{HostClock, HostIntentsHost, HostTimers, HostTopics};
 use ilium_plugin_sdk::primitives::{HostTerminal, ScreenPart};
@@ -262,15 +263,6 @@ impl ServiceProvider for TerminalServer {
     }
 }
 
-/// Splits `path:line` text of the `path-line` detector; the line must be a `u32`.
-fn parse_path_line(text: &str) -> Option<(&str, u32)> {
-    let (path, line) = text.rsplit_once(':')?;
-    if path.is_empty() || line.is_empty() || !line.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    Some((path, line.parse().ok()?))
-}
-
 /// The text of a `url` link when it is an `http` or `https` URL with something after the
 /// scheme; anything else the `url` detector could be handed is not opened.
 fn web_url(text: &str) -> Option<&str> {
@@ -296,6 +288,26 @@ impl Lifecycle for TerminalClient {
     }
 }
 
+impl TerminalClient {
+    /// The working directory of the pane a link was clicked in, when the tree knows it.
+    fn pane_cwd(pane: NodeId) -> Option<String> {
+        let mut api = host();
+        HostTree::get(&mut *api, pane).and_then(|view| view.cwd)
+    }
+
+    /// The editor submission of a file target.
+    fn open_file(target: links::FileTarget) -> Submission {
+        Submission::new(Intent::EditorOpen(EditorOpenSpec {
+            path: FsPath {
+                scope: target.scope.to_string(),
+                path: target.path,
+            },
+            line: target.line,
+            placement: EditorPlacement::Split,
+        }))
+    }
+}
+
 impl Handler for TerminalClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut submissions = Vec::new();
@@ -303,31 +315,36 @@ impl Handler for TerminalClient {
             let Event::LinkActivated(link) = event else {
                 continue;
             };
-            let intent = match link.detector_id.as_str() {
+            let submission = match link.detector_id.as_str() {
                 "path-line" => {
-                    let Some((path, line)) = parse_path_line(&link.text) else {
+                    let Some((path, line)) = links::parse_path_line(&link.text) else {
                         continue;
                     };
-                    Intent::EditorOpen(EditorOpenSpec {
-                        path: FsPath {
-                            scope: "project".to_string(),
-                            path: path.to_string(),
-                        },
-                        line: Some(line.saturating_sub(1)),
-                        placement: EditorPlacement::Split,
-                    })
+                    let cwd = Self::pane_cwd(link.node);
+                    let Some(target) = links::file_target(path, Some(line), cwd.as_deref()) else {
+                        continue;
+                    };
+                    Self::open_file(target)
+                }
+                "path" => {
+                    let cwd = Self::pane_cwd(link.node);
+                    let Some(target) = links::file_target_of_text(&link.text, cwd.as_deref())
+                    else {
+                        continue;
+                    };
+                    Self::open_file(target)
                 }
                 "url" => {
                     let Some(url) = web_url(&link.text) else {
                         continue;
                     };
-                    Intent::OpenExternal(OpenExternalSpec {
+                    Submission::new(Intent::OpenExternal(OpenExternalSpec {
                         target: ExternalTarget::Url(url.to_string()),
-                    })
+                    }))
                 }
                 _ => continue,
             };
-            submissions.push(Submission::new(intent));
+            submissions.push(submission);
         }
         submissions
     }

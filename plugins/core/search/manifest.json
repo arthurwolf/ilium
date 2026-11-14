@@ -26,7 +26,9 @@
       "tree.read",
       "terminal.read-screen",
       "fs.read:project",
-      "jobs.run"
+      "jobs.run",
+      "extensions.provide:ilium.core.search/sources",
+      "extensions.provide:ilium.core.search/rank"
     ],
     "client": [
       "ui.panels"
@@ -37,6 +39,114 @@
     "view:ilium.core.search/search"
   ],
   "contributes": {
+    "extension_points": [
+      {
+        "id": "sources",
+        "kind": "collect",
+        "title": "Search sources",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "kind",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "rank",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Rank results",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "query",
+            "hits"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "score"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "required": [
+            "hits"
+          ],
+          "properties": {
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "score"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "commands": [
       {
         "id": "open",
@@ -61,7 +171,7 @@
     "jobs": [
       {
         "kind": "scan-files",
-        "deadline_ms": 120000,
+        "deadline_ms": 60000,
         "memory_mib": 128
       }
     ]

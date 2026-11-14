@@ -26,7 +26,7 @@ use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
-    editor_chrome, editor_toolbar, explorer_overlay, help, markdown, minimap, modal, search_ui,
+    editor_chrome, editor_toolbar, explorer_overlay, help, markdown, minimap, modal,
     terminal_selection, terminal_view, theme, tree_ui,
 };
 
@@ -218,7 +218,6 @@ fn late_layers_are_source_transparent(app: &App) -> bool {
                 | Mode::NavigationLeaderPending
                 | Mode::Move
                 | Mode::Settings(_)
-                | Mode::Search(_)
         )
 }
 
@@ -829,17 +828,14 @@ fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::
     );
 }
 
-/// Draws the one full-screen root behind every stacked overlay. Settings and
-/// Search replace the ordinary workspace only when they are the oldest layer.
+/// Draws the one full-screen root behind every stacked overlay. Settings
+/// replaces the ordinary workspace only when it is the oldest layer.
 fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Position> {
     if app.onboarding.is_some() {
         crate::onboarding::integration::render(frame, area, app);
         return None;
     }
     let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
-    if let Mode::Search(state) = root_mode {
-        return search_ui::render_cursor(frame, area, state, &app.ui_settings.icons);
-    }
     if let Mode::Settings(state) = root_mode {
         crate::settings_ui::render(frame, area, app, state);
         return None;
@@ -1498,8 +1494,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         | Mode::LeaderPending
         | Mode::NavigationLeaderPending
         | Mode::Move
-        | Mode::Settings(_)
-        | Mode::Search(_) => {}
+        | Mode::Settings(_) => {}
     }
     cursor
 }
@@ -3615,7 +3610,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
-        Mode::Search(_) => "SEARCH",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
         // whole screen, status bar included). Kept as a real arm rather

@@ -16,7 +16,7 @@
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
 
-use crate::terminal_links::cell_column_to_byte_offset;
+use crate::terminal_view::cell_column_to_byte_offset;
 
 /// Most detectors one plugin may contribute.
 pub(crate) const DETECTORS_PER_PLUGIN: usize = 32;

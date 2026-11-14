@@ -1,13 +1,14 @@
-//! Detects a URL or filesystem path at a clicked position and decides
-//! whether the OS's own "open externally" action should be offered for it.
+//! Decides whether the OS's own "open externally" action should be offered for a URL or
+//! filesystem path under a click.
 //!
-//! Detection itself is not reinvented here: [`crate::terminal_links::link_at`]
-//! already expands a clicked cell into a URL or file-reference token (cell
-//! widths, multi-byte glyph prefixes, wrapping punctuation, `path:line:col`
-//! suffixes, `~/` and relative resolution all handled there). This module
-//! only adds the policy layer needed to decide whether the OS opener should
-//! be offered: an allowed URL scheme, or a path that actually exists on disk
-//! (which also picks "Open file" vs "Open folder").
+//! Finding the link is not done here: the link detectors an enabled plugin contributes
+//! (`contributes.link_detectors`, the Terminal plugin's `url`, `path-line` and `path`) cover the
+//! clicked cell, and [`crate::plugin_host::links::plugin_link_at`] returns the match. With no
+//! such plugin enabled nothing is detected and nothing is offered. This module only adds the
+//! policy layer needed to decide whether the OS opener should be offered for the matched text:
+//! an allowed URL scheme, or a path that actually exists on disk (which also picks "Open file"
+//! vs "Open folder"). A `path[:line[:column]]` reference resolves like a shell would: `~/`
+//! against the home directory, a relative path against the working directory.
 //!
 //! The path side never calls `stat` on an arbitrary token: terminal and
 //! editor text can be attacker- or agent-influenced, and a path pointing at
@@ -17,7 +18,29 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::terminal_links::{link_at, TerminalLink};
+/// What a click on terminal text resolved to, before the user confirms it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalLink {
+    /// An OSC 8 hyperlink of the foreground program.
+    Url(String),
+    /// Text a plugin's link detector matched (contract G5). Opening it sends `link-activated`
+    /// to `plugin` and runs `command` with the detector id and the text as arguments.
+    Plugin {
+        plugin: String,
+        detector_id: String,
+        command: String,
+        text: String,
+    },
+}
+
+impl TerminalLink {
+    pub fn display(&self) -> String {
+        match self {
+            Self::Url(url) => url.clone(),
+            Self::Plugin { text, .. } => text.clone(),
+        }
+    }
+}
 
 /// A right-click target the OS's own "open externally" handler can act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,30 +69,24 @@ impl OpenTarget {
     }
 }
 
-/// Finds a clickable target at `column` in `line` and resolves it against the
-/// filesystem. Returns `None` when the token is neither an allowed-scheme URL
-/// nor a path that exists on disk -- callers must not offer an OS-open action
-/// for text that merely looks like one.
-pub fn resolve_at(
+/// Finds a clickable target at `column` in `line` through the plugin link `detectors` and
+/// resolves it against the filesystem. Returns `None` when no detector covers the cell, or when
+/// the matched text is neither an allowed-scheme URL nor a path that exists on disk -- callers
+/// must not offer an OS-open action for text that merely looks like one.
+pub(crate) fn resolve_at(
     line: &str,
     column: usize,
     cwd: &Path,
     home_dir: Option<&Path>,
+    detectors: &[crate::plugin_host::links::LinkDetector],
 ) -> Option<OpenTarget> {
-    match link_at(line, column, cwd, home_dir)? {
-        TerminalLink::Url(url) => resolve_url(&url),
-        TerminalLink::File { path, .. } => resolve_path(&path, cwd, home_dir),
-        // `link_at` is the kernel's own detection; plugin matches never come from it.
-        TerminalLink::Plugin { .. } => None,
-    }
+    resolve_at_with_plugins(line, column, cwd, home_dir, detectors).0
 }
 
 /// What a right-click on a terminal cell can open, asking the link detectors of the enabled
-/// plugins first (contract G5), like a Ctrl+click does. Returns the target the menu's "Open"
+/// plugins (contract G5), like a Ctrl+click does. Returns the target the menu's "Open"
 /// entries use and the plugin match that covers the cell, if any. The text of a plugin match
-/// is resolved like a kernel link (a URL, or a path that exists), so it still gets the
-/// kernel's open entries; when it resolves to nothing, the kernel's own detection on the
-/// whole line decides.
+/// is resolved as a URL, or as a path that exists.
 pub(crate) fn resolve_at_with_plugins(
     line: &str,
     column: usize,
@@ -81,14 +98,58 @@ pub(crate) fn resolve_at_with_plugins(
     Option<crate::plugin_host::links::LinkMatch>,
 ) {
     let found = crate::plugin_host::links::plugin_link_at(detectors, line, column);
-    let from_plugin = found.as_ref().and_then(|found| {
-        resolve_url(&found.text).or_else(|| resolve_at(&found.text, 0, cwd, home_dir))
-    });
-    let target = from_plugin.or_else(|| resolve_at(line, column, cwd, home_dir));
+    let target = found
+        .as_ref()
+        .and_then(|found| resolve_text(&found.text, cwd, home_dir));
     (target, found)
 }
 
-/// Validates a URL obtained independently of `link_at` (an OSC-8 hyperlink
+/// Resolves the text a link detector matched: an allowed URL, or a `path`, `path:line` or
+/// `path:line:column` reference (optionally a `file://` URL) that exists on disk.
+fn resolve_text(text: &str, cwd: &Path, home_dir: Option<&Path>) -> Option<OpenTarget> {
+    if let Some(target) = resolve_url(text) {
+        return Some(target);
+    }
+    let value = text.strip_prefix("file://").unwrap_or(text);
+    let path = parse_file_reference(value)?;
+    resolve_path(&resolve_reference_path(path, cwd, home_dir), cwd, home_dir)
+}
+
+/// Resolves a detected file reference against the click context: a leading
+/// `~/` expands against the caller's home directory, an already-absolute
+/// path is used as-is, and everything else is resolved relative to the
+/// pane's working directory. When the home directory could not be
+/// determined, a `~/`-prefixed reference is left relative to `cwd` instead
+/// of being silently dropped.
+fn resolve_reference_path(path: PathBuf, cwd: &Path, home_dir: Option<&Path>) -> PathBuf {
+    if let (Ok(home_relative), Some(home_dir)) = (path.strip_prefix("~"), home_dir) {
+        return home_dir.join(home_relative);
+    }
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
+}
+
+/// The path of a `path`, `path:line` or `path:line:column` reference. The trailing numeric
+/// segments are peeled off strictly from the right so that a colon embedded earlier in the
+/// path (e.g. `a/b:c.txt:42`) keeps its non-numeric segment attached to the path.
+fn parse_file_reference(value: &str) -> Option<PathBuf> {
+    let path = match value.rsplit_once(':') {
+        Some((rest, last)) if last.parse::<u32>().is_ok() => match rest.rsplit_once(':') {
+            Some((before, middle)) if middle.parse::<u32>().is_ok() => before,
+            _ => rest,
+        },
+        _ => value,
+    };
+    // A bare token can still name a project-local file. Resolution and the final existence and
+    // confinement check decide whether it is actionable, so this admits `STYLE.md` without
+    // opening arbitrary paths.
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// Validates a URL obtained independently of the link detectors (an OSC-8 hyperlink
 /// label can be any string the foreground program chose to emit).
 pub fn resolve_url(url: &str) -> Option<OpenTarget> {
     (url.starts_with("https://") || url.starts_with("http://"))
@@ -105,7 +166,7 @@ pub fn resolve_url(url: &str) -> Option<OpenTarget> {
 fn resolve_path(path: &Path, cwd: &Path, home_dir: Option<&Path>) -> Option<OpenTarget> {
     // `Path::starts_with` compares components verbatim and never resolves
     // `..` itself, so a raw `/cwd/../etc/passwd`-shaped candidate (exactly
-    // what `terminal_links::resolve_reference_path` produces for a `../`
+    // what `resolve_reference_path` produces for a `../`
     // reference) would satisfy `starts_with(cwd)` while actually pointing
     // outside it. Normalize lexically first so confinement is checked
     // against where the path really points, still without touching disk.
@@ -156,6 +217,15 @@ fn normalize_lexically(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    /// The link detectors of the shipped Terminal plugin, the way an enabled plugin set offers
+    /// them to a click.
+    fn terminal_detectors() -> Vec<crate::plugin_host::links::LinkDetector> {
+        crate::plugin_host::links::active_detectors(&[(
+            "ilium.core.terminal".to_owned(),
+            include_str!("../../plugins/core/terminal/manifest.json").to_owned(),
+        )])
+    }
+
     #[test]
     fn resolves_an_allowed_url() {
         let target = resolve_at(
@@ -163,6 +233,7 @@ mod tests {
             10,
             Path::new("/tmp"),
             None,
+            &terminal_detectors(),
         );
         assert_eq!(
             target,
@@ -191,7 +262,7 @@ mod tests {
         assert_eq!(found.command, "example.plugin/open");
         assert_eq!(found.text, "#42");
         assert_eq!(target, None);
-        // A click outside every plugin match leaves the kernel alone.
+        // A click outside every plugin match offers nothing: the kernel detects no links itself.
         let (target, found) = resolve_at_with_plugins(
             "see https://example.test/x",
             6,
@@ -200,9 +271,11 @@ mod tests {
             &detectors,
         );
         assert_eq!(found, None);
+        assert_eq!(target, None);
+        // Without an enabled detector nothing is offered at all.
         assert_eq!(
-            target,
-            Some(OpenTarget::Url("https://example.test/x".to_string()))
+            resolve_at("see https://example.test/x", 6, project.path(), None, &[]),
+            None
         );
     }
 
@@ -255,11 +328,17 @@ mod tests {
         std::fs::write(&file_path, "fn main() {}").unwrap();
 
         let line = "see src/main.rs:42:7 for details";
-        let target = resolve_at(line, 4, project.path(), None);
+        let target = resolve_at(line, 4, project.path(), None, &terminal_detectors());
         assert_eq!(target, Some(OpenTarget::File(file_path)));
 
         assert_eq!(
-            resolve_at("see src/missing.rs", 4, project.path(), None),
+            resolve_at(
+                "see src/missing.rs",
+                4,
+                project.path(),
+                None,
+                &terminal_detectors()
+            ),
             None
         );
     }
@@ -276,7 +355,8 @@ mod tests {
                 "Read data/STYLE.md, before continuing",
                 7,
                 project.path(),
-                None
+                None,
+                &terminal_detectors()
             ),
             Some(OpenTarget::File(file_path))
         );
@@ -288,7 +368,13 @@ mod tests {
         let dir_path = project.path().join("docs").join("guides");
         std::fs::create_dir_all(&dir_path).unwrap();
 
-        let target = resolve_at("open docs/guides for reference", 5, project.path(), None);
+        let target = resolve_at(
+            "open docs/guides for reference",
+            5,
+            project.path(),
+            None,
+            &terminal_detectors(),
+        );
         assert_eq!(target, Some(OpenTarget::Directory(dir_path)));
     }
 
@@ -308,12 +394,15 @@ mod tests {
         );
         let cwd = tempfile::tempdir().unwrap();
 
-        assert_eq!(resolve_at(&line, 4, cwd.path(), None), None);
+        assert_eq!(
+            resolve_at(&line, 4, cwd.path(), None, &terminal_detectors()),
+            None
+        );
     }
 
     #[test]
     fn refuses_to_stat_a_dot_dot_path_that_escapes_cwd_via_component_prefix_matching() {
-        // `terminal_links::link_at` builds `../`-relative references as
+        // `resolve_reference_path` builds `../`-relative references as
         // `cwd.join("../...")`, which literally starts with `cwd` as a raw
         // component prefix even though it resolves outside it. The
         // confinement check must normalize `..` away before comparing,
@@ -324,7 +413,7 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
 
         let line = "see ../real.txt for details";
-        assert_eq!(resolve_at(line, 4, &cwd, None), None);
+        assert_eq!(resolve_at(line, 4, &cwd, None, &terminal_detectors()), None);
     }
 
     #[test]
@@ -339,7 +428,13 @@ mod tests {
         std::fs::write(&file_path, "fn main() {}").unwrap();
 
         let unnormalized_cwd = project.path().join("src").join("..");
-        let target = resolve_at("see src/main.rs for details", 4, &unnormalized_cwd, None);
+        let target = resolve_at(
+            "see src/main.rs for details",
+            4,
+            &unnormalized_cwd,
+            None,
+            &terminal_detectors(),
+        );
         assert_eq!(target, Some(OpenTarget::File(file_path)));
     }
 
@@ -351,8 +446,14 @@ mod tests {
         std::fs::write(&file_path, "fn main() {}").unwrap();
 
         // "⏺ " is 4 bytes but only 2 cells wide, mirroring the agent-pane
-        // status-glyph prefixes `terminal_links::link_at` already handles.
-        let target = resolve_at("⏺ src/main.rs", 2, project.path(), None);
+        // status-glyph prefixes the terminal plugin's link detectors cover.
+        let target = resolve_at(
+            "⏺ src/main.rs",
+            2,
+            project.path(),
+            None,
+            &terminal_detectors(),
+        );
         assert_eq!(target, Some(OpenTarget::File(file_path)));
     }
 }

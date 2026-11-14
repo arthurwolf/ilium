@@ -1405,10 +1405,19 @@ mod detection_freshness_tests {
             goal: None,
         };
         assert!(detection_freshness_warning(&status, Some(&evidence), 1_029_999).is_none());
-        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_029_999), Some(false));
-        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_030_000), Some(true));
+        assert_eq!(
+            detection_activity_stale(&status, Some(&evidence), 1_029_999),
+            Some(false)
+        );
+        assert_eq!(
+            detection_activity_stale(&status, Some(&evidence), 1_030_000),
+            Some(true)
+        );
         assert_eq!(detection_activity_stale(&status, None, 1_000_000), None);
-        assert_eq!(detection_activity_stale(&status, Some(&evidence), 999_999), None);
+        assert_eq!(
+            detection_activity_stale(&status, Some(&evidence), 999_999),
+            None
+        );
         let stale = detection_freshness_warning(&status, Some(&evidence), 1_030_000).unwrap();
         assert!(stale.contains("30 seconds ago") && stale.contains("limit 30 seconds"));
         assert!(detection_freshness_warning(&status, None, 1_000_000)
@@ -1420,7 +1429,10 @@ mod detection_freshness_tests {
                 .contains("future timestamp")
         );
         evidence.applied_status = PaneStatus::PlainShell;
-        assert_eq!(detection_activity_stale(&status, Some(&evidence), 1_000_000), None);
+        assert_eq!(
+            detection_activity_stale(&status, Some(&evidence), 1_000_000),
+            None
+        );
         assert!(
             detection_freshness_warning(&status, Some(&evidence), 1_000_000)
                 .unwrap()

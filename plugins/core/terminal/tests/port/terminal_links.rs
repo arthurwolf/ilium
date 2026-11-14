@@ -200,3 +200,145 @@ mod detectors {
         assert_eq!(link_at("", 0, Path::new("/"), None), None);
     }
 }
+
+mod file_targets {
+    use ilium_plugin_core_terminal::links::{
+        detector_at, file_target, file_target_of_text, FileTarget,
+    };
+    use regex::Regex;
+
+    fn project(path: &str, line: Option<u32>) -> FileTarget {
+        FileTarget {
+            scope: "project",
+            path: path.to_string(),
+            line,
+        }
+    }
+
+    /// The kernel-parity cases of the old `link_at`: the catch-all detector covers each token.
+    #[test]
+    fn the_path_detector_covers_bare_relative_home_and_file_url_tokens() {
+        for (line, column, text) in [
+            ("Read STYLE.md, before continuing", 6, "STYLE.md"),
+            ("see ../src/main.rs for details", 4, "../src/main.rs"),
+            ("~/.bashrc", 0, "~/.bashrc"),
+            ("open file:///tmp/a.log now", 8, "file:///tmp/a.log"),
+            ("\u{2192} src/main.rs:42", 4, "src/main.rs:42"),
+            ("a/b:c.txt:42", 0, "a/b:c.txt:42"),
+        ] {
+            let found = detector_at(line, column).unwrap_or_else(|| panic!("{line:?} at {column}"));
+            assert_eq!(found.text, text, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_url_loses_wrapping_and_sentence_punctuation() {
+        for (line, text) in [
+            (
+                "see https://example.test/docs.",
+                "https://example.test/docs",
+            ),
+            ("(https://example.test/docs)", "https://example.test/docs"),
+            ("\"https://example.test\"", "https://example.test"),
+            ("https://example.test/a?b=1;", "https://example.test/a?b=1"),
+        ] {
+            let offset = line.find("https").expect("has a url");
+            let found = detector_at(line, offset).expect("url");
+            assert_eq!(found.detector_id, "url");
+            assert_eq!(found.text, text);
+        }
+    }
+
+    #[test]
+    fn the_second_column_of_a_path_line_is_still_one_link() {
+        let found = detector_at("src/main.rs:42:7", 14).expect("path");
+        assert_eq!(found.detector_id, "path");
+        assert_eq!(found.text, "src/main.rs:42:7");
+    }
+
+    #[test]
+    fn the_path_pattern_is_the_manifest_regex() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../manifest.json")).expect("manifest");
+        let detectors = manifest["contributes"]["link_detectors"]
+            .as_array()
+            .expect("detectors");
+        let pattern = |id: &str| {
+            detectors
+                .iter()
+                .find(|detector| detector["id"] == id)
+                .and_then(|detector| detector["regex"].as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert_eq!(
+            pattern("url"),
+            ilium_plugin_core_terminal::links::URL_PATTERN
+        );
+        assert_eq!(
+            pattern("path-line"),
+            ilium_plugin_core_terminal::links::PATH_LINE_PATTERN
+        );
+        assert_eq!(
+            pattern("path"),
+            ilium_plugin_core_terminal::links::PATH_PATTERN
+        );
+        assert!(Regex::new(&pattern("path")).is_ok());
+    }
+
+    #[test]
+    fn a_relative_path_joins_the_pane_working_directory() {
+        assert_eq!(
+            file_target_of_text("src/main.rs:42:7", Some("/repo/crate")),
+            Some(project("/repo/crate/src/main.rs", Some(41)))
+        );
+        assert_eq!(
+            file_target_of_text("../src/main.rs", Some("/repo/crate")),
+            Some(project("/repo/src/main.rs", None))
+        );
+        assert_eq!(
+            file_target_of_text("./STYLE.md", Some("/repo")),
+            Some(project("/repo/STYLE.md", None))
+        );
+    }
+
+    #[test]
+    fn without_a_working_directory_the_path_stays_relative_to_the_project() {
+        assert_eq!(
+            file_target_of_text("src/main.rs:3", None),
+            Some(project("src/main.rs", Some(2)))
+        );
+    }
+
+    #[test]
+    fn an_absolute_path_and_a_file_url_stay_absolute() {
+        assert_eq!(
+            file_target_of_text("/repo/a.rs:9", Some("/elsewhere")),
+            Some(project("/repo/a.rs", Some(8)))
+        );
+        assert_eq!(
+            file_target_of_text("file:///repo/a.log", Some("/elsewhere")),
+            Some(project("/repo/a.log", None))
+        );
+    }
+
+    #[test]
+    fn a_home_reference_uses_the_home_scope() {
+        assert_eq!(
+            file_target_of_text("~/.bashrc", Some("/repo")),
+            Some(FileTarget {
+                scope: "home",
+                path: ".bashrc".to_string(),
+                line: None,
+            })
+        );
+        assert_eq!(file_target("~", None, Some("/repo")), None);
+        assert_eq!(file_target("~/", None, Some("/repo")), None);
+    }
+
+    #[test]
+    fn an_empty_path_is_refused() {
+        assert_eq!(file_target("", Some(3), None), None);
+        assert_eq!(file_target_of_text(":3", None), None);
+    }
+}

@@ -143,7 +143,15 @@ pub fn config_events(before: &toml::Table, after: &toml::Table) -> Vec<Event> {
         let Some(table) = crate::config_settings::table_of_tab(tab) else {
             continue;
         };
-        let keys = changed_keys(before.get(table), after.get(table));
+        let mut keys = changed_keys(before.get(table), after.get(table));
+        if tab == "sound" {
+            // The desktop-notification switches belong to the Sound tab (see `ConfigFileSettings`).
+            keys.extend(
+                changed_keys(before.get("notifications"), after.get("notifications"))
+                    .into_iter()
+                    .map(|key| format!("notifications.{key}")),
+            );
+        }
         if !keys.is_empty() {
             events.push(Event::KernelSettingsChanged(KernelSettingsEvent {
                 tab: tab.to_owned(),
@@ -290,6 +298,16 @@ mod tests {
             .iter()
             .any(|event| matches!(event, Event::KeymapChanged)));
         assert!(config_events(&after, &after).is_empty());
+    }
+
+    #[test]
+    fn a_desktop_notification_switch_is_a_change_of_the_sound_tab() {
+        let before: toml::Table = toml::from_str("[notifications]\nenabled = true").unwrap();
+        let after: toml::Table = toml::from_str("[notifications]\nenabled = false").unwrap();
+        let events = config_events(&before, &after);
+        assert!(events.iter().any(|event| matches!(event,
+            Event::KernelSettingsChanged(change)
+                if change.tab == "sound" && change.keys == vec!["notifications.enabled".to_owned()])));
     }
 
     #[test]

@@ -472,7 +472,10 @@ fn context_actions_resolve_resource_and_reference_to_project_and_local_row_to_re
                     assert!(fixture.app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ClosePane { pane_id } if *pane_id == expected)));
                 }
                 ContextMenuAction::Search => {
-                    assert!(matches!(fixture.app.mode, Mode::Search(_)));
+                    assert_eq!(
+                        fixture.app.status_message.as_deref(),
+                        Some("ilium.core.search is not running, so this action is unavailable")
+                    );
                     assert!(fixture.app.take_outbound_requests().is_empty());
                 }
                 _ => unreachable!(),

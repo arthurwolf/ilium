@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 
 use ilium_plugin_sdk_core::generated::host::*;
-use ilium_plugin_sdk_core::generated::primitives::{AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn, TurnRole};
+use ilium_plugin_sdk_core::generated::primitives::{
+    AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn, TurnRole,
+};
 use ilium_plugin_sdk_core::generated::types::*;
 use ilium_plugin_sdk_core::{clear_host, set_host, HostApi};
 
@@ -18,6 +20,8 @@ use super::{FakeHost, FakeTranscript};
 #[derive(Debug, Default)]
 pub(super) struct BridgeState {
     bytes: BTreeMap<u64, Vec<u8>>,
+    entries: BTreeMap<u64, Vec<ScannedEntry>>,
+    pub(super) vectors: BTreeMap<u64, Vec<Vec<f32>>>,
     http: BTreeMap<u64, HttpResponse>,
     completions: BTreeMap<u64, Completion>,
     exits: BTreeMap<u64, ProcessExit>,
@@ -43,7 +47,9 @@ impl Drop for BridgeGuard {
 /// Installs the bridge for `host`. The caller must not use `host` until the guard is dropped and must
 /// have moved the plugin out of it: the bridge reaches the fakes through a raw pointer for that span.
 pub(super) fn enter(host: &mut FakeHost) -> BridgeGuard {
-    let bridge = NativeBridge { host: host as *mut FakeHost };
+    let bridge = NativeBridge {
+        host: host as *mut FakeHost,
+    };
     set_host(Box::new(Box::new(bridge) as Box<dyn HostApi>));
     BridgeGuard
 }
@@ -60,11 +66,11 @@ impl NativeBridge {
         unsafe { &mut *self.host }
     }
 
-    fn next_id(&mut self) -> u64 {
+    pub(super) fn next_id(&mut self) -> u64 {
         self.host().jobs_next_request()
     }
 
-    fn complete(&mut self, id: u64, outcome: Outcome) {
+    pub(super) fn complete(&mut self, id: u64, outcome: Outcome) {
         let event = Event::RequestCompleted(RequestResult {
             request: RequestRef::Call(RequestId(id)),
             outcome,
@@ -76,7 +82,10 @@ impl NativeBridge {
         if self.host().granted.contains(grant) {
             return Ok(());
         }
-        Err(PluginError::new(ErrorCode::NotPermitted, format!("the {grant} grant is missing")))
+        Err(PluginError::new(
+            ErrorCode::NotPermitted,
+            format!("the {grant} grant is missing"),
+        ))
     }
 
     fn fs_permit(&mut self, base: &str, scope: &str) -> Result<(), PluginError> {
@@ -84,7 +93,10 @@ impl NativeBridge {
         if granted.contains(base) || granted.contains(&format!("{base}:{scope}")) {
             return Ok(());
         }
-        Err(PluginError::new(ErrorCode::NotPermitted, format!("{base}:{scope} is not granted")))
+        Err(PluginError::new(
+            ErrorCode::NotPermitted,
+            format!("{base}:{scope} is not granted"),
+        ))
     }
 
     /// An `http` grant covers everything; `http:<host>` one host; `http:*.<domain>` its subdomains only.
@@ -92,7 +104,10 @@ impl NativeBridge {
         let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
         let host = authority.rsplit('@').next().unwrap_or("");
-        let host = host.rsplit_once(':').map_or(host, |(name, _)| name).to_ascii_lowercase();
+        let host = host
+            .rsplit_once(':')
+            .map_or(host, |(name, _)| name)
+            .to_ascii_lowercase();
         self.host().granted.iter().any(|grant| {
             if grant == "http" {
                 return true;
@@ -102,7 +117,9 @@ impl NativeBridge {
             };
             let pattern = pattern.to_ascii_lowercase();
             match pattern.strip_prefix("*.") {
-                Some(domain) => host.len() > domain.len() + 1 && host.ends_with(&format!(".{domain}")),
+                Some(domain) => {
+                    host.len() > domain.len() + 1 && host.ends_with(&format!(".{domain}"))
+                }
                 None => pattern == host,
             }
         })
@@ -112,7 +129,10 @@ impl NativeBridge {
         if self.host().cli.append(invocation, stderr, text) {
             return Ok(());
         }
-        Err(PluginError::new(ErrorCode::NotFound, format!("no command invocation {invocation} is running")))
+        Err(PluginError::new(
+            ErrorCode::NotFound,
+            format!("no command invocation {invocation} is running"),
+        ))
     }
 }
 
@@ -132,7 +152,11 @@ impl HostClock for NativeBridge {
 }
 
 impl HostTimers for NativeBridge {
-    fn set(&mut self, after_millis: u32, repeat_millis: Option<u32>) -> Result<TimerId, PluginError> {
+    fn set(
+        &mut self,
+        after_millis: u32,
+        repeat_millis: Option<u32>,
+    ) -> Result<TimerId, PluginError> {
         let _ = after_millis;
         let id = self.next_id();
         self.host().bridge.timers.insert(id, repeat_millis);
@@ -143,7 +167,10 @@ impl HostTimers for NativeBridge {
     }
     fn at(&mut self, epoch: EpochMs, name: String) -> Result<TimerId, PluginError> {
         if name.is_empty() {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "a durable timer needs a name"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "a durable timer needs a name",
+            ));
         }
         self.host().bridge.durable.insert(name, epoch.0);
         Ok(TimerId(self.next_id()))
@@ -176,7 +203,10 @@ impl HostStorage for NativeBridge {
     fn write_batch(&mut self, bucket: Bucket, entries: Vec<Entry>) -> Result<(), PluginError> {
         let _ = bucket;
         let _ = entries;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
         let _ = key;
@@ -193,7 +223,10 @@ impl HostSettings for NativeBridge {
         let parsed: serde_json::Value = serde_json::from_str(&patch)
             .map_err(|error| PluginError::new(ErrorCode::InvalidArgument, error.to_string()))?;
         let Some(map) = parsed.as_object() else {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "a settings patch is a JSON object"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "a settings patch is a JSON object",
+            ));
         };
         for (key, value) in map {
             self.host().settings.set(key, value.clone())?;
@@ -203,58 +236,95 @@ impl HostSettings for NativeBridge {
     fn set_info(&mut self, key: String, text: String) -> Result<(), PluginError> {
         let _ = key;
         let _ = text;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_choices(&mut self, key: String, options: Vec<ChoiceOption>) -> Result<(), PluginError> {
         let _ = key;
         let _ = options;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_row_note(&mut self, key: String, note: Option<String>) -> Result<(), PluginError> {
         let _ = key;
         let _ = note;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_row_state(&mut self, key: String, state: RowState) -> Result<(), PluginError> {
         let _ = key;
         let _ = state;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_item_states(&mut self, key: String, items: Vec<ItemState>) -> Result<(), PluginError> {
         let _ = key;
         let _ = items;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
-    fn set_choice_items(&mut self, key: String, items: Vec<CatalogItem>) -> Result<(), PluginError> {
+    fn set_choice_items(
+        &mut self,
+        key: String,
+        items: Vec<CatalogItem>,
+    ) -> Result<(), PluginError> {
         let _ = key;
         let _ = items;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_info_rich(&mut self, key: String, text: RichText) -> Result<(), PluginError> {
         let _ = key;
         let _ = text;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_meter(&mut self, id: String, segments: Vec<MeterSegment>) -> Result<(), PluginError> {
         let _ = id;
         let _ = segments;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn open(&mut self, target: String) -> Result<(), PluginError> {
         let _ = target;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn list_settings(&mut self) -> Vec<SettingsRef> {
         Default::default()
     }
     fn get_plugin_json(&mut self, plugin: PluginId) -> Result<String, PluginError> {
         let _ = plugin;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn set_plugin_json(&mut self, plugin: PluginId, patch: String) -> Result<(), PluginError> {
         let _ = plugin;
         let _ = patch;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
 }
 
@@ -263,10 +333,15 @@ impl HostFs for NativeBridge {
         let granted = self.host().granted.clone();
         let mut roots = Vec::new();
         for scope in ["project", "session", "global", "shared"] {
-            let readable = granted.contains("fs.read") || granted.contains(&format!("fs.read:{scope}"));
-            let writable = granted.contains("fs.write") || granted.contains(&format!("fs.write:{scope}"));
+            let readable =
+                granted.contains("fs.read") || granted.contains(&format!("fs.read:{scope}"));
+            let writable =
+                granted.contains("fs.write") || granted.contains(&format!("fs.write:{scope}"));
             if readable || writable {
-                roots.push(ScopeRoot { scope: scope.to_string(), writable });
+                roots.push(ScopeRoot {
+                    scope: scope.to_string(),
+                    writable,
+                });
             }
         }
         roots
@@ -274,19 +349,33 @@ impl HostFs for NativeBridge {
     fn metadata(&mut self, path: FsPath) -> Result<FsMetadata, PluginError> {
         self.fs_permit("fs.read", &path.scope)?;
         match self.host().fs.size(path.clone()) {
-            Some(length) => Ok(FsMetadata { kind: EntryKind::File, length, modified_unix_millis: None, read_only: false }),
-            None => Err(PluginError::new(ErrorCode::NotFound, format!("{}:{} does not exist", path.scope, path.path))),
+            Some(length) => Ok(FsMetadata {
+                kind: EntryKind::File,
+                length,
+                modified_unix_millis: None,
+                read_only: false,
+            }),
+            None => Err(PluginError::new(
+                ErrorCode::NotFound,
+                format!("{}:{} does not exist", path.scope, path.path),
+            )),
         }
     }
     fn list_dir(&mut self, path: FsPath, max_entries: u32) -> Result<Vec<DirEntry>, PluginError> {
         let _ = path;
         let _ = max_entries;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn read(&mut self, path: FsPath, offset: u64, max_bytes: u32) -> Result<Vec<u8>, PluginError> {
         self.fs_permit("fs.read", &path.scope)?;
         let Some(bytes) = self.host().fs.read(path.clone()) else {
-            return Err(PluginError::new(ErrorCode::NotFound, format!("{}:{} does not exist", path.scope, path.path)));
+            return Err(PluginError::new(
+                ErrorCode::NotFound,
+                format!("{}:{} does not exist", path.scope, path.path),
+            ));
         };
         let start = (offset as usize).min(bytes.len());
         let end = start.saturating_add(max_bytes as usize).min(bytes.len());
@@ -302,25 +391,86 @@ impl HostFs for NativeBridge {
             }
             None => self.complete(
                 id,
-                Outcome::Failed(PluginError::new(ErrorCode::NotFound, format!("{}:{} does not exist", path.scope, path.path))),
+                Outcome::Failed(PluginError::new(
+                    ErrorCode::NotFound,
+                    format!("{}:{} does not exist", path.scope, path.path),
+                )),
             ),
         }
         Ok(RequestId(id))
     }
-    fn scan(&mut self, path: FsPath, glob: String, max_entries: u32) -> Result<RequestId, PluginError> {
-        let _ = path;
-        let _ = glob;
-        let _ = max_entries;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+    /// Lists the files of the scope under `path`, relative to it. The glob is modelled for the two
+    /// shapes plugins use: `**/*` (every file) and `**/*.ext` or `*.ext` (a suffix); anything else
+    /// matches every file.
+    fn scan(
+        &mut self,
+        path: FsPath,
+        glob: String,
+        max_entries: u32,
+    ) -> Result<RequestId, PluginError> {
+        self.fs_permit("fs.read", &path.scope)?;
+        let prefix = path.path.trim_matches('/').to_string();
+        let suffix = glob
+            .rsplit_once("*.")
+            .map(|(_, extension)| format!(".{extension}"));
+        let mut entries = Vec::new();
+        for shorthand in self.host().fs.paths(&path.scope) {
+            let Some((_, file)) = shorthand.split_once(':') else {
+                continue;
+            };
+            let relative = if prefix.is_empty() {
+                file.to_string()
+            } else {
+                match file.strip_prefix(&format!("{prefix}/")) {
+                    Some(rest) => rest.to_string(),
+                    None => continue,
+                }
+            };
+            if suffix
+                .as_ref()
+                .is_some_and(|suffix| !relative.ends_with(suffix.as_str()))
+            {
+                continue;
+            }
+            let length = self.host().fs.size(shorthand.as_str()).unwrap_or_default();
+            let name = relative.rsplit('/').next().unwrap_or(&relative).to_string();
+            entries.push(ScannedEntry {
+                relative_path: relative,
+                entry: DirEntry {
+                    name,
+                    metadata: FsMetadata {
+                        kind: EntryKind::File,
+                        length,
+                        modified_unix_millis: None,
+                        read_only: false,
+                    },
+                },
+            });
+            if entries.len() >= max_entries as usize {
+                break;
+            }
+        }
+        let id = self.next_id();
+        self.host().bridge.entries.insert(id, entries);
+        self.complete(id, Outcome::Ok);
+        Ok(RequestId(id))
     }
-    fn write(&mut self, path: FsPath, data: Vec<u8>, mode: WriteMode) -> Result<RequestId, PluginError> {
+    fn write(
+        &mut self,
+        path: FsPath,
+        data: Vec<u8>,
+        mode: WriteMode,
+    ) -> Result<RequestId, PluginError> {
         self.fs_permit("fs.write", &path.scope)?;
         let existing = self.host().fs.read(path.clone());
         let id = self.next_id();
         match (mode, existing) {
             (WriteMode::CreateNew, Some(_)) => self.complete(
                 id,
-                Outcome::Failed(PluginError::new(ErrorCode::Conflict, format!("{}:{} exists", path.scope, path.path))),
+                Outcome::Failed(PluginError::new(
+                    ErrorCode::Conflict,
+                    format!("{}:{} exists", path.scope, path.path),
+                )),
             ),
             (WriteMode::Append, Some(mut bytes)) => {
                 bytes.extend_from_slice(&data);
@@ -336,59 +486,109 @@ impl HostFs for NativeBridge {
     }
     fn create_dir(&mut self, path: FsPath) -> Result<(), PluginError> {
         let _ = path;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn remove(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
         let _ = path;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn rename(&mut self, source: FsPath, target: FsPath) -> Result<RequestId, PluginError> {
         let _ = source;
         let _ = target;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn watch(&mut self, path: FsPath, recursive: bool) -> Result<WatchId, PluginError> {
         let _ = path;
         let _ = recursive;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn unwatch(&mut self, watch: WatchId) {
         let _ = watch;
     }
-    fn lock(&mut self, path: FsPath, exclusive: bool, timeout_millis: u32) -> Result<RequestId, PluginError> {
+    fn lock(
+        &mut self,
+        path: FsPath,
+        exclusive: bool,
+        timeout_millis: u32,
+    ) -> Result<RequestId, PluginError> {
         let _ = path;
         let _ = exclusive;
         let _ = timeout_millis;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn unlock(&mut self, lock: LockId) {
         let _ = lock;
     }
     fn pick(&mut self, spec: PickSpec) -> Result<RequestId, PluginError> {
         let _ = spec;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
         let _ = path;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
-    fn write_atomic(&mut self, path: FsPath, data: Vec<u8>, expected: Option<RevisionToken>) -> Result<RequestId, PluginError> {
+    fn write_atomic(
+        &mut self,
+        path: FsPath,
+        data: Vec<u8>,
+        expected: Option<RevisionToken>,
+    ) -> Result<RequestId, PluginError> {
         let _ = path;
         let _ = data;
         let _ = expected;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
-    fn tail(&mut self, path: FsPath, cursor: u64, max_bytes: u32) -> Result<TailChunk, PluginError> {
+    fn tail(
+        &mut self,
+        path: FsPath,
+        cursor: u64,
+        max_bytes: u32,
+    ) -> Result<TailChunk, PluginError> {
         let _ = path;
         let _ = cursor;
         let _ = max_bytes;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
-    fn propose_agent_config(&mut self, agent: String, title: String, changes: Vec<ConfigChange>) -> Result<RequestId, PluginError> {
+    fn propose_agent_config(
+        &mut self,
+        agent: String,
+        title: String,
+        changes: Vec<ConfigChange>,
+    ) -> Result<RequestId, PluginError> {
         let _ = agent;
         let _ = title;
         let _ = changes;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn take_proposal(&mut self, request: RequestId) -> Option<ProposalResult> {
         let _ = request;
@@ -398,8 +598,7 @@ impl HostFs for NativeBridge {
         self.host().bridge.bytes.remove(&request.0)
     }
     fn take_entries(&mut self, request: RequestId) -> Option<Vec<ScannedEntry>> {
-        let _ = request;
-        Default::default()
+        self.host().bridge.entries.remove(&request.0)
     }
     fn take_lock(&mut self, request: RequestId) -> Option<LockId> {
         let _ = request;
@@ -422,7 +621,10 @@ impl HostFs for NativeBridge {
 impl HostHttp for NativeBridge {
     fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {
         if !self.http_permitted(&request.url) {
-            return Err(PluginError::new(ErrorCode::NotPermitted, format!("{} is not covered by an http grant", request.url)));
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("{} is not covered by an http grant", request.url),
+            ));
         }
         let id = self.next_id();
         match self.host().http.respond(&request) {
@@ -432,7 +634,13 @@ impl HostHttp for NativeBridge {
             }
             None => self.complete(
                 id,
-                Outcome::Failed(PluginError::new(ErrorCode::Network, format!("no response is registered for {} {}", request.method, request.url))),
+                Outcome::Failed(PluginError::new(
+                    ErrorCode::Network,
+                    format!(
+                        "no response is registered for {} {}",
+                        request.method, request.url
+                    ),
+                )),
             ),
         }
         Ok(RequestId(id))
@@ -442,20 +650,33 @@ impl HostHttp for NativeBridge {
     }
     fn open_stream(&mut self, request: StreamRequest) -> Result<StreamId, PluginError> {
         let _ = request;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn close_stream(&mut self, stream: StreamId) {
         let _ = stream;
     }
-    fn open_websocket(&mut self, url: String, protocols: Vec<String>) -> Result<StreamId, PluginError> {
+    fn open_websocket(
+        &mut self,
+        url: String,
+        protocols: Vec<String>,
+    ) -> Result<StreamId, PluginError> {
         let _ = url;
         let _ = protocols;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn send_websocket(&mut self, stream: StreamId, text: String) -> Result<(), PluginError> {
         let _ = stream;
         let _ = text;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
 }
 
@@ -469,8 +690,7 @@ impl HostJobs for NativeBridge {
         self.host().jobs.record_cancel(job.0);
     }
     fn take_output(&mut self, job: RequestId) -> Option<Vec<u8>> {
-        let _ = job;
-        Default::default()
+        self.host().jobs.take_output(job.0)
     }
     fn report_progress(&mut self, percent: f32) {
         self.host().jobs.record_progress(percent);
@@ -481,7 +701,10 @@ impl HostJobs for NativeBridge {
     fn wait_request(&mut self, request: RequestId, timeout_millis: u32) -> Result<(), PluginError> {
         let _ = request;
         let _ = timeout_millis;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
 }
 
@@ -503,16 +726,26 @@ impl HostProcess for NativeBridge {
     }
     fn spawn(&mut self, spec: SpawnSpec) -> Result<ChildHandle, PluginError> {
         let _ = spec;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn child_pid_hint(&mut self, handle: ChildHandle) -> u32 {
         let _ = handle;
         Default::default()
     }
-    fn child_write_stdin(&mut self, handle: ChildHandle, bytes: Vec<u8>) -> Result<(), PluginError> {
+    fn child_write_stdin(
+        &mut self,
+        handle: ChildHandle,
+        bytes: Vec<u8>,
+    ) -> Result<(), PluginError> {
         let _ = handle;
         let _ = bytes;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn child_close_stdin(&mut self, handle: ChildHandle) {
         let _ = handle;
@@ -520,7 +753,10 @@ impl HostProcess for NativeBridge {
     fn child_signal(&mut self, handle: ChildHandle, signal: String) -> Result<(), PluginError> {
         let _ = handle;
         let _ = signal;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn child_id(&mut self, handle: ChildHandle) -> ChildId {
         let _ = handle;
@@ -545,16 +781,26 @@ impl HostInference for NativeBridge {
         self.host().bridge.completions.remove(&request.0)
     }
     fn models(&mut self) -> Result<RequestId, PluginError> {
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn take_models(&mut self, request: RequestId) -> Option<Vec<String>> {
         let _ = request;
         Default::default()
     }
-    fn provider_reply(&mut self, call: u64, outcome: Result<Completion, PluginError>) -> Result<(), PluginError> {
+    fn provider_reply(
+        &mut self,
+        call: u64,
+        outcome: Result<Completion, PluginError>,
+    ) -> Result<(), PluginError> {
         let _ = call;
         let _ = outcome;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
 }
 
@@ -577,7 +823,10 @@ impl HostCli for NativeBridge {
     fn read_stdin(&mut self, invocation: u64, max_bytes: u32) -> Result<u64, PluginError> {
         let _ = invocation;
         let _ = max_bytes;
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn take_stdin(&mut self, request: u64) -> Option<Vec<u8>> {
         let _ = request;
@@ -601,7 +850,11 @@ impl HostKeys for NativeBridge {
     fn grab(&mut self, spec: GrabSpec) -> Result<GrabId, PluginError> {
         self.permit("keys.intercept")?;
         let pane = spec.pane.map(|node| node.0);
-        Ok(GrabId(self.host().keys.take(spec.chords, pane, spec.until_release)))
+        Ok(GrabId(self.host().keys.take(
+            spec.chords,
+            pane,
+            spec.until_release,
+        )))
     }
     fn release(&mut self, grab: GrabId) {
         self.host().keys.release(grab.0);
@@ -614,6 +867,28 @@ const TOPIC_PAYLOAD_LIMIT: usize = 64 * 1024;
 
 impl NativeBridge {
     /// Checks a scoped grant `<prefix>:<name>` against the granted names; a granted `*` suffix covers a prefix.
+    /// A plugin that consumes a collect point it holds `extensions.provide` for may call the services
+    /// the entries of that point name: the entry is the contributor's offer of the service.
+    fn lists_service(&mut self, service: &str) -> bool {
+        let points: Vec<String> = self
+            .host()
+            .granted
+            .iter()
+            .filter_map(|grant| {
+                grant
+                    .strip_prefix("extensions.provide:")
+                    .map(str::to_string)
+            })
+            .collect();
+        points.iter().any(|point| {
+            self.host()
+                .extensions
+                .entries(point)
+                .into_iter()
+                .any(|entry| entry.entry["service"] == service)
+        })
+    }
+
     fn permit_scoped(&mut self, prefix: &str, name: &str) -> bool {
         let exact = format!("{prefix}:{name}");
         self.host().granted.iter().any(|grant| {
@@ -621,7 +896,12 @@ impl NativeBridge {
                 || grant
                     .strip_prefix(prefix)
                     .and_then(|rest| rest.strip_prefix(':'))
-                    .is_some_and(|pattern| pattern == "*" || pattern.strip_suffix('*').is_some_and(|head| name.starts_with(head)))
+                    .is_some_and(|pattern| {
+                        pattern == "*"
+                            || pattern
+                                .strip_suffix('*')
+                                .is_some_and(|head| name.starts_with(head))
+                    })
         })
     }
 }
@@ -630,7 +910,10 @@ impl HostTopics for NativeBridge {
     fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
         let own_prefix = format!("{}/", self.host().plugin_id);
         if topic.len() > TOPIC_NAME_LIMIT {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic name is longer than 128 characters"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "the topic name is longer than 128 characters",
+            ));
         }
         if !topic.starts_with(&own_prefix) || topic.len() == own_prefix.len() {
             return Err(PluginError::new(
@@ -639,10 +922,16 @@ impl HostTopics for NativeBridge {
             ));
         }
         if payload_json.len() > TOPIC_PAYLOAD_LIMIT {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic payload is larger than 64 KiB"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "the topic payload is larger than 64 KiB",
+            ));
         }
         if serde_json::from_str::<serde_json::Value>(&payload_json).is_err() {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "the topic payload is not valid JSON"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "the topic payload is not valid JSON",
+            ));
         }
         self.host().bridge.published.push((topic, payload_json));
         Ok(())
@@ -650,16 +939,26 @@ impl HostTopics for NativeBridge {
 }
 
 impl HostServices for NativeBridge {
-    fn call(&mut self, service: String, method: String, payload_json: String) -> Result<RequestId, PluginError> {
-        if !self.permit_scoped("services.use", &service) {
-            return Err(PluginError::new(ErrorCode::NotPermitted, format!("the services.use:{service} grant is missing")));
+    fn call(
+        &mut self,
+        service: String,
+        method: String,
+        payload_json: String,
+    ) -> Result<RequestId, PluginError> {
+        if !self.permit_scoped("services.use", &service) && !self.lists_service(&service) {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("the services.use:{service} grant is missing"),
+            ));
         }
         let id = self.next_id();
         let host = self.host();
         host.extensions
             .service_log
             .push((service.clone(), method.clone(), payload_json));
-        host.call_order.calls.push(format!("service:{service}.{method}"));
+        host.call_order
+            .calls
+            .push(format!("service:{service}.{method}"));
         match host.extensions.answer_service(&service, &method) {
             Ok(reply) => {
                 host.bridge.replies.insert(id, reply);
@@ -672,9 +971,16 @@ impl HostServices for NativeBridge {
     fn take_reply(&mut self, request: RequestId) -> Option<String> {
         self.host().bridge.replies.remove(&request.0)
     }
-    fn reply(&mut self, call: u64, outcome: Result<String, PluginError>) -> Result<(), PluginError> {
+    fn reply(
+        &mut self,
+        call: u64,
+        outcome: Result<String, PluginError>,
+    ) -> Result<(), PluginError> {
         let _ = (call, outcome);
-        Err(PluginError::new(ErrorCode::NotFound, "no deferred service call is waiting for this reply"))
+        Err(PluginError::new(
+            ErrorCode::NotFound,
+            "no deferred service call is waiting for this reply",
+        ))
     }
 }
 
@@ -683,7 +989,12 @@ impl HostExtensions for NativeBridge {
         if !self.permit_scoped("extensions.provide", &point) {
             return Err(ExtensionError::NotGranted);
         }
-        *self.host().extensions.list_calls.entry(point.clone()).or_default() += 1;
+        *self
+            .host()
+            .extensions
+            .list_calls
+            .entry(point.clone())
+            .or_default() += 1;
         let plugin = PluginId(self.host().plugin_id.clone());
         let entries = self
             .host()
@@ -699,7 +1010,11 @@ impl HostExtensions for NativeBridge {
             .collect();
         Ok(entries)
     }
-    fn run_hook(&mut self, point: String, payload_json: String) -> Result<RequestId, ExtensionError> {
+    fn run_hook(
+        &mut self,
+        point: String,
+        payload_json: String,
+    ) -> Result<RequestId, ExtensionError> {
         if !self.permit_scoped("extensions.provide", &point) {
             return Err(ExtensionError::NotGranted);
         }
@@ -708,7 +1023,12 @@ impl HostExtensions for NativeBridge {
         }
         let id = self.next_id();
         let host = self.host();
-        let call = HookCall { call: id, point, extension: String::new(), payload_json };
+        let call = HookCall {
+            call: id,
+            point,
+            extension: String::new(),
+            payload_json,
+        };
         let (reply, trapped) = if host.extensions.has_hook_stub(&call.point) {
             host.extensions.answer_hook(&call)
         } else {
@@ -722,7 +1042,10 @@ impl HostExtensions for NativeBridge {
             }
             HookReply::Refuse(message) if !trapped => self.complete(
                 id,
-                Outcome::Refused(PluginError::new(ErrorCode::Conflict, format!("extension.vetoed: {message}"))),
+                Outcome::Refused(PluginError::new(
+                    ErrorCode::Conflict,
+                    format!("extension.vetoed: {message}"),
+                )),
             ),
             _ => self.complete(id, Outcome::Ok),
         }
@@ -731,21 +1054,35 @@ impl HostExtensions for NativeBridge {
     fn take_reply(&mut self, request: RequestId) -> Option<String> {
         self.host().bridge.replies.remove(&request.0)
     }
-    fn register(&mut self, point: String, extension: String, priority: u8, entry_json: String) -> Result<(), ExtensionError> {
+    fn register(
+        &mut self,
+        point: String,
+        extension: String,
+        priority: u8,
+        entry_json: String,
+    ) -> Result<(), ExtensionError> {
         if !self.permit_scoped("extensions.contribute", &point) {
             return Err(ExtensionError::NotGranted);
         }
         if serde_json::from_str::<serde_json::Value>(&entry_json).is_err() {
             return Err(ExtensionError::SchemaMismatch);
         }
-        self.host().extensions.contribute(&point, &extension, i64::from(priority), entry_json);
+        self.host()
+            .extensions
+            .contribute(&point, &extension, i64::from(priority), entry_json);
         Ok(())
     }
     fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
         if !self.permit_scoped("extensions.contribute", &point) {
             return Err(ExtensionError::NotGranted);
         }
-        if !self.host().extensions.points.get(&point).is_some_and(|collect| collect.entries.iter().any(|entry| entry.id == extension)) {
+        if !self
+            .host()
+            .extensions
+            .points
+            .get(&point)
+            .is_some_and(|collect| collect.entries.iter().any(|entry| entry.id == extension))
+        {
             return Err(ExtensionError::NotFound);
         }
         self.host().extensions.withdraw(&point, &extension);
@@ -762,7 +1099,12 @@ impl HostAgent for NativeBridge {
         tree.preorder_ids()
             .into_iter()
             .filter_map(|id| tree.get(id))
-            .filter_map(|node| node.agent.map(|view| AgentPane { pane: NodeId(node.id), view }))
+            .filter_map(|node| {
+                node.agent.map(|view| AgentPane {
+                    pane: NodeId(node.id),
+                    view,
+                })
+            })
             .collect()
     }
     fn view(&mut self, pane: NodeId) -> Option<AgentView> {
@@ -775,7 +1117,14 @@ impl HostAgent for NativeBridge {
             return explicit.clone();
         }
         // A pane whose transcript was verified has a resolved agent session.
-        if self.host().agents.verified.get(&pane.0).copied().unwrap_or(false) {
+        if self
+            .host()
+            .agents
+            .verified
+            .get(&pane.0)
+            .copied()
+            .unwrap_or(false)
+        {
             return Some(SessionRef {
                 scope: "transcript".to_string(),
                 path: String::new(),
@@ -793,9 +1142,18 @@ impl HostAgent for NativeBridge {
         self.host().agents.signatures.push(spec);
         Ok(())
     }
-    fn set_toolbar_state(&mut self, button: String, pane: Option<NodeId>, enabled: bool, label: Option<String>) -> Result<(), PluginError> {
+    fn set_toolbar_state(
+        &mut self,
+        button: String,
+        pane: Option<NodeId>,
+        enabled: bool,
+        label: Option<String>,
+    ) -> Result<(), PluginError> {
         let _ = (button, pane, enabled, label);
-        Err(PluginError::new(ErrorCode::Unsupported, "the fake host does not model this call"))
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "the fake host does not model this call",
+        ))
     }
     fn model(&mut self, pane: NodeId) -> Option<AgentModel> {
         self.permit("agent.read").ok()?;
@@ -808,14 +1166,18 @@ impl HostAgent for NativeBridge {
     fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
         self.permit("agent.transcript")?;
         if query.last_turns > 512 || query.max_bytes > 4 * 1024 * 1024 {
-            return Err(PluginError::new(ErrorCode::InvalidArgument, "last-turns is at most 512 and max-bytes at most 4 MiB"));
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "last-turns is at most 512 and max-bytes at most 4 MiB",
+            ));
         }
         let id = self.next_id();
         let known_tokens = self.host().agents.tokens.get(&query.pane.0).copied();
         let outcome = match self.host().agents.transcripts.get(&query.pane.0) {
             Some(FakeTranscript::Turns(turns)) => {
                 let wanted = usize::try_from(query.last_turns).unwrap_or(usize::MAX);
-                let mut kept: Vec<TranscriptTurn> = turns.iter().rev().take(wanted).cloned().collect();
+                let mut kept: Vec<TranscriptTurn> =
+                    turns.iter().rev().take(wanted).cloned().collect();
                 let mut bytes = 0usize;
                 let limit = usize::try_from(query.max_bytes).unwrap_or(usize::MAX);
                 kept.retain(|turn| {
@@ -843,7 +1205,10 @@ impl HostAgent for NativeBridge {
                 ErrorCode::Unsupported,
                 "the transcript format of this agent is not known",
             )),
-            None => Outcome::Failed(PluginError::new(ErrorCode::NotFound, "the pane has no agent transcript")),
+            None => Outcome::Failed(PluginError::new(
+                ErrorCode::NotFound,
+                "the pane has no agent transcript",
+            )),
         };
         self.complete(id, outcome);
         Ok(RequestId(id))
@@ -854,9 +1219,16 @@ impl HostAgent for NativeBridge {
 }
 
 impl HostJournal for NativeBridge {
-    fn log_event(&mut self, pane: Option<NodeId>, kind: String, payload_json: String) -> Result<(), PluginError> {
+    fn log_event(
+        &mut self,
+        pane: Option<NodeId>,
+        kind: String,
+        payload_json: String,
+    ) -> Result<(), PluginError> {
         let now = self.host().now_ms;
-        self.host().journal.push(pane.map(|id| id.0), now, &kind, &payload_json);
+        self.host()
+            .journal
+            .push(pane.map(|id| id.0), now, &kind, &payload_json);
         Ok(())
     }
     fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
@@ -869,7 +1241,9 @@ impl HostJournal for NativeBridge {
             .journal
             .rows()
             .into_iter()
-            .filter(|(entry_pane, at, _, _)| (wanted.is_none() || *entry_pane == wanted) && *at >= since.0)
+            .filter(|(entry_pane, at, _, _)| {
+                (wanted.is_none() || *entry_pane == wanted) && *at >= since.0
+            })
             .map(|(entry_pane, at, kind, text)| JournalEntry {
                 at: EpochMs(at),
                 pane: entry_pane.map(NodeId),

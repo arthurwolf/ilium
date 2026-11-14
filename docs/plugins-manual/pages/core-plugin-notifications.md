@@ -96,6 +96,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "extensions.provide:ilium.core.notifications/before-notify",
       "extensions.provide:ilium.core.notifications/channels",
       "settings.write-kernel:sound",
+      "settings.read-kernel:sound",
       "topics.subscribe:ilium.core.progress/changed",
       "panes.read"
     ],
@@ -624,6 +625,17 @@ The table gives the values that [EXT-052] requires for each point this plugin ow
 | `ilium.core.notifications/channels` | server | 0.1.0 (default) | none (default) | 64 entries (default) | no (default) |
 
 Side basis: `ilium.core.notifications/channels` is server because the `notify` service that raises a notice is server-side, and the manifest declares the point under `contributes.extension_points` with a server grant.
+
+### What the kernel no longer does
+
+The server no longer plays the agent sounds or shows the agent desktop notices itself. The detection loop only classifies and reports; this plugin turns the report into alerts. The kernel keeps the sound player and the desktop notifier as the services behind `play-sound` and `notify`.
+
+- **Where the settings come from.** The plugin reads the Sound tab through `settings.read-kernel:sound`. A read of that tab also carries the `[notifications]` table under the key `notifications`, and a change to either table is one `kernel-settings-changed` for `sound`. The values stay in `config.toml`, so no user setting moves.
+- **Where task outcomes come from.** The kernel still hosts the monitored tasks of the Progress plugin. When a task reaches `done` or `error`, or its observation is lost, the kernel publishes one message on `ilium.core.progress/changed` with `monitor`, `pane`, `job_id` and `status` (`done`, `error` or `lost`), and the plugin decides whether to alert.
+- **Sound ids.** The plugin plays `finished`, `ask`, `started`, `waiting`, `task-done` and `task-failed`. The server maps each id to the sound event of the same name and plays the file the user chose for it. `chirping` stays the bundled file id.
+- **Rate.** The six notices per minute limit is for third-party plugins. A core plugin composes its own text, names the session and the pane in it, and merges bursts with its own window, so the server shows its body as given and applies no rate.
+- **Pane names.** A pane with a short title is named by it and its full title follows as the description. A pane without a short title is named by its title. The host carries the short title as the agent's `objective`.
+- **When the plugin is off.** No agent sound, no desktop notice for an agent or a finished task, and no attention mark from an approval prompt. The Sound tab keeps its stored values. The sidebar signals and the attention the kernel itself shows do not change.
 
 ### ABI used
 

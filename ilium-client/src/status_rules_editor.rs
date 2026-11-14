@@ -2004,7 +2004,10 @@ mod tests {
             Condition::ContextAbovePercent(100)
         );
         for invalid in ["101", "-1", "", "ninety"] {
-            assert!(editor.set_parameter(&mut rules, invalid).is_err(), "{invalid:?}");
+            assert!(
+                editor.set_parameter(&mut rules, invalid).is_err(),
+                "{invalid:?}"
+            );
         }
         assert_eq!(editor.parameter(&rules).as_deref(), Some("100"));
     }

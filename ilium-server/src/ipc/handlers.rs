@@ -4145,92 +4145,43 @@ async fn repair_rejected_staged_progress_monitor(
     rejection
 }
 
-/// Raises the sound and desktop notification for a monitored task's first
-/// terminal outcome. Both outputs obey the same policy: the per-event
-/// toggles, suppression when the pane's agent is idle or parked (its own
-/// "agent finished" alert follows), and per-pane coalescing of bursts. The
-/// sidebar signal is unaffected by any of this.
-pub(crate) async fn alert_task_outcome(
+/// Reports a monitored task's first terminal outcome to the plugins as a message on the topic
+/// `ilium.core.progress/changed`; the Notifications plugin owns the alert (desktop notice and
+/// sound) and applies the per-event toggles, the suppression for an idle agent and the
+/// coalescing of bursts. The sidebar signal is unaffected. Nothing is sent while the monitor
+/// is live, and nothing when the server runs without plugins.
+pub(crate) fn alert_task_outcome(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     progress: &ilium_core::PaneProgress,
 ) {
-    let Some(kind) = crate::notifications::TaskOutcomeKind::from_progress(progress) else {
+    let status = match progress.report.status {
+        ilium_core::ProgressTaskStatus::Done => "done",
+        ilium_core::ProgressTaskStatus::Error => "error",
+        _ if progress.monitor_health.is_failed() => "lost",
+        _ => return,
+    };
+    let Some(plugins) = state.plugins.get() else {
         return;
     };
-    let notification_settings = *state.notifications_config.read().await;
-    let sound_settings = state.sound_settings.read().await.clone();
-    let is_sound_enabled = sound_settings.events.is_enabled(kind.sound_event());
-    let is_notification_enabled = notification_settings.is_enabled(kind.notification_event());
-    if !is_sound_enabled && !is_notification_enabled {
-        return;
-    }
-    let (pane_name, session_status) = {
-        let tree = state.tree.read().await;
-        let Some(node) = tree.get(pane_id) else {
-            return;
-        };
-        let pane_name = node.short_name.clone().unwrap_or_else(|| node.name.clone());
-        let status = match &node.kind {
-            ilium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
-            _ => None,
-        };
-        (pane_name, status)
-    };
-    let is_redundant = session_status.as_ref().is_some_and(|status| {
-        crate::notifications::is_task_outcome_redundant(&notification_settings, status, progress)
+    let payload = serde_json::json!({
+        "monitor": progress.monitor_id,
+        "pane": pane_id.0,
+        "job_id": progress.report.job_id,
+        "status": status,
     });
-    if is_redundant {
-        return;
-    }
-    let is_admitted = state
-        .task_outcome_coalescer
-        .lock()
-        .map(|mut coalescer| {
-            coalescer.admit(
-                pane_id,
-                kind,
-                std::time::Instant::now(),
-                notification_settings.task_coalesce_seconds,
-            )
-        })
-        // A poisoned lock only loses burst suppression; never drop the alert.
-        .unwrap_or(true);
-    if !is_admitted {
-        return;
-    }
-    if is_sound_enabled {
-        match state.sound_requests.prepare(
-            &sound_settings,
-            Some(kind.sound_event()),
-            Some(&pane_name),
-        ) {
-            Ok(request) => crate::sounds::enqueue_prepared(state, request),
-            Err(reason) => {
-                tracing::warn!(?reason, "task sound preparation refused before allocation")
-            }
-        }
-    }
-    if is_notification_enabled {
-        let is_agent_working = session_status
-            .as_ref()
-            .is_some_and(|status| crate::notifications::is_agent_mid_turn(status, progress));
-        let pending = crate::notifications::PendingNotification::for_task_outcome(
-            state.session_name.clone(),
-            pane_name,
-            kind,
-            progress.report.job_id.clone(),
-            is_agent_working,
-        );
-        if let Some(execution) = state.execution.get() {
-            crate::notifications::send(&execution.client, pending);
-        } else {
-            tracing::warn!(
-                "desktop notification skipped because the execution bank is unavailable"
-            );
-        }
+    if !plugins.publish_topic(
+        TASK_OUTCOME_TOPIC,
+        TASK_OUTCOME_TOPIC_OWNER,
+        payload.to_string(),
+    ) {
+        tracing::warn!("task outcome alert skipped because the plugin host stopped");
     }
 }
+
+/// The topic a monitored task's terminal outcome is reported on, and the plugin it belongs to.
+const TASK_OUTCOME_TOPIC: &str = "ilium.core.progress/changed";
+const TASK_OUTCOME_TOPIC_OWNER: &str = "ilium.core.progress";
 
 async fn handle_progress_monitor_outcome(
     state: &Arc<ServerState>,
@@ -4257,7 +4208,7 @@ async fn handle_progress_monitor_outcome(
         drop(panes);
         state.request_snapshot_save();
         if is_first_outcome_notification {
-            alert_task_outcome(state, pane_id, &progress).await;
+            alert_task_outcome(state, pane_id, &progress);
         }
         if hand_outcome_to_progress_waiters(state, pane_id, monitor_id, &progress).await {
             return;

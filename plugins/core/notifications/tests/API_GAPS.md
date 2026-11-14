@@ -26,3 +26,11 @@
 - Not ported yet: `ilium-server/src/notifications.rs` rules (39 rows), `sounds.rs` rules (9 rows), `sound_settings_storage.rs`, and the discovery tests of `ilium-sound` (need the `fs` import, G10).
 - G3: `Notify`, `PlaySound` and `Toast` intents are not routed, so the plugin cannot raise an alert yet.
 - G4: the plugin cannot subscribe to `ilium.core.agent-detect/activity-changed` across sides yet.
+
+## Deletion round (built-in alerts removed from the kernel)
+
+- Resolved: the plugin reads the `sound` kernel tab through `settings.read-kernel:sound`; a read of that tab carries the `[notifications]` table under `notifications`, and a change of either table is one `kernel-settings-changed` for `sound` (ilium-plugin-host `config_settings.rs`, `events_feed.rs`). The tests write the tab through `FakeHost::kernel_settings`, which the testkit bridge now answers (`bridge_kernel.rs`).
+- Resolved: the session name comes from `HostSessions::list_live` (the entry marked `is_self`); the short pane title reaches the plugin as `AgentView.objective` and the full title as the node title.
+- Resolved: the kernel publishes `{ monitor, pane, job_id, status }` on `ilium.core.progress/changed` when a monitored task ends (`alert_task_outcome` in ilium-server `ipc/handlers.rs`). No `running` reports are published by the kernel.
+- Resolved: the six sound ids map to the sound events on the server (`intent_routing.rs`); a core plugin's `notify` is shown verbatim and is not rate limited.
+- Open: the server does not feed `Event::PaneFocused` or `Event::AttentionChanged` to the plugin yet, so the plugin never learns the focused pane; the kernel's own acknowledgement of an attention mark on focus is unchanged.

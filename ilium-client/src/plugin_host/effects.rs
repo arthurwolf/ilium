@@ -71,16 +71,16 @@ fn refused(code: ErrorCode, message: impl Into<String>) -> Classified {
     Classified::Refused(Outcome::Refused(PluginError::new(code, message.into())))
 }
 
-/// Resolves a plugin path for opening. Parent segments and absolute paths are refused.
+/// Resolves a plugin path for opening. A parent segment is refused. A relative path joins the
+/// scope's base directory. An absolute path (a link a terminal pane printed, joined to the
+/// pane's working directory) is accepted only when it lies inside the project or the home
+/// directory, whichever scope the plugin named.
 fn resolve_path(path: &FsPath, project_dir: &Path, home_dir: Option<&Path>) -> Option<PathBuf> {
-    let relative = Path::new(&path.path);
-    let escapes = relative.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    });
-    if escapes {
+    let requested = Path::new(&path.path);
+    if requested
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
         return None;
     }
     let base = match path.scope.as_str() {
@@ -88,7 +88,18 @@ fn resolve_path(path: &FsPath, project_dir: &Path, home_dir: Option<&Path>) -> O
         "home" => home_dir?.to_path_buf(),
         _ => return None,
     };
-    Some(base.join(relative))
+    if requested.is_absolute() {
+        let inside_project = requested.starts_with(project_dir);
+        let inside_home = home_dir.is_some_and(|home| requested.starts_with(home));
+        return (inside_project || inside_home).then(|| requested.to_path_buf());
+    }
+    if requested
+        .components()
+        .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
+    {
+        return None;
+    }
+    Some(base.join(requested))
 }
 
 /// The node of a `kernel.focus-node` invocation: `{"node": 5}` or `5`.
@@ -380,6 +391,25 @@ mod tests {
         ));
         assert!(matches!(
             open("project", "//example.org", Some(0)),
+            Classified::Refused(_)
+        ));
+        // An absolute path is accepted only inside the project or the home directory.
+        assert!(matches!(
+            open("project", "/work/project/crate/src/lib.rs", Some(0)),
+            Classified::Effect(ClientEffect::EditorOpen { path, .. })
+                if path == Path::new("/work/project/crate/src/lib.rs")
+        ));
+        assert!(matches!(
+            open("project", "/home/someone/.bashrc", None),
+            Classified::Effect(ClientEffect::EditorOpen { path, .. })
+                if path == Path::new("/home/someone/.bashrc")
+        ));
+        assert!(matches!(
+            open("project", "/etc/passwd", None),
+            Classified::Refused(_)
+        ));
+        assert!(matches!(
+            open("project", "/work/project/../secret", None),
             Classified::Refused(_)
         ));
         assert!(matches!(

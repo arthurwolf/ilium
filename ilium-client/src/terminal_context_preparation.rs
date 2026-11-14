@@ -74,7 +74,7 @@ impl Job for ContextJob {
             crate::terminal_selection::text(&self.snapshot.visible, selection)
         });
         let column =
-            crate::terminal_links::cell_column_to_byte_offset(&source_line_text, self.column);
+            crate::terminal_view::cell_column_to_byte_offset(&source_line_text, self.column);
         let osc_target = self
             .snapshot
             .links
@@ -118,7 +118,7 @@ impl Job for ResolveJob {
         if context.stop_requested() {
             return Err("context target resolution cancelled".into());
         }
-        // Plugin link detectors first (G5), then the kernel's detection, then an OSC 8 link.
+        // The plugin link detectors (G5) are the only text detection; an OSC 8 link is the fallback.
         let (target, plugin_link) = crate::open_target::resolve_at_with_plugins(
             &self.text.source_line_text,
             self.column,
@@ -303,7 +303,7 @@ struct CaptureSlot {
 pub(crate) struct PreparedLink {
     #[cfg(test)]
     pub worker_thread: std::thread::ThreadId,
-    pub link: Option<crate::terminal_links::TerminalLink>,
+    pub link: Option<crate::open_target::TerminalLink>,
     pub storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) struct LinkRequest<'a> {
@@ -311,9 +311,7 @@ pub(crate) struct LinkRequest<'a> {
     pub pane_id: NodeId,
     pub row: usize,
     pub column: usize,
-    pub cwd: &'a std::path::Path,
-    pub home: Option<&'a std::path::Path>,
-    /// Link detectors of the enabled plugins (G5); they are asked before the kernel's own.
+    /// Link detectors of the enabled plugins (G5), the only source of detected links.
     pub detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 pub(crate) struct LinkCompletion {
@@ -332,8 +330,6 @@ struct LinkJob {
     source: PreparationSnapshot,
     row: usize,
     column: usize,
-    cwd: PathBuf,
-    home: Option<PathBuf>,
     detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 impl Job for LinkJob {
@@ -350,38 +346,33 @@ impl Job for LinkJob {
             .rows(0, columns)
             .nth(self.row)
             .unwrap_or_default();
-        // A plugin detector whose match covers the cell wins; the kernel's detection is the
-        // fallback (contract G5).
+        // A plugin detector whose match covers the cell is the only detection (contract G5);
+        // the OSC 8 hyperlinks the foreground program emitted are the fallback.
         let plugin_link =
             crate::plugin_host::links::plugin_link_at(&self.detectors, &line, self.column).map(
-                |found| crate::terminal_links::TerminalLink::Plugin {
+                |found| crate::open_target::TerminalLink::Plugin {
                     plugin: found.plugin,
                     detector_id: found.detector_id,
                     command: found.command,
                     text: found.text,
                 },
             );
-        let link = plugin_link
-            .or_else(|| {
-                crate::terminal_links::link_at(&line, self.column, &self.cwd, self.home.as_deref())
+        let link = plugin_link.or_else(|| {
+            let column = crate::terminal_view::cell_column_to_byte_offset(&line, self.column);
+            self.source.links.iter().rev().find_map(|(label, target)| {
+                let start = line.find(label)?;
+                (start..start + label.len())
+                    .contains(&column)
+                    .then(|| crate::open_target::TerminalLink::Url(target.clone()))
             })
-            .or_else(|| {
-                let column = crate::terminal_links::cell_column_to_byte_offset(&line, self.column);
-                self.source.links.iter().rev().find_map(|(label, target)| {
-                    let start = line.find(label)?;
-                    (start..start + label.len())
-                        .contains(&column)
-                        .then(|| crate::terminal_links::TerminalLink::Url(target.clone()))
-                })
-            });
+        });
         if context.stop_requested() {
             return Err("Terminal link preparation cancelled".into());
         }
         let bytes = std::mem::size_of::<PreparedLink>()
             + match &link {
-                Some(crate::terminal_links::TerminalLink::Url(url)) => url.capacity(),
-                Some(crate::terminal_links::TerminalLink::File { path, .. }) => path.capacity(),
-                Some(crate::terminal_links::TerminalLink::Plugin {
+                Some(crate::open_target::TerminalLink::Url(url)) => url.capacity(),
+                Some(crate::open_target::TerminalLink::Plugin {
                     plugin,
                     detector_id,
                     command,
@@ -446,8 +437,6 @@ impl TerminalContextPreparation {
             pane_id,
             row,
             column,
-            cwd,
-            home,
             detectors,
         } = request;
         if self.links.len() >= 8 {
@@ -456,18 +445,13 @@ impl TerminalContextPreparation {
             );
         }
         let (_, columns) = source.with_screen(|screen| screen.size());
-        let paths = cwd
-            .as_os_str()
-            .len()
-            .saturating_add(home.map_or(0, |home| home.as_os_str().len()));
-        let result_bytes = paths
-            .saturating_mul(2)
-            .saturating_add(usize::from(columns).saturating_mul(128))
+        let result_bytes = usize::from(columns)
+            .saturating_mul(128)
             .saturating_add(4096)
             .max(128 * 1024);
         let source_bytes = source.allocation_bytes();
         let cost = JobCost {
-            input_bytes: source_bytes.saturating_add(paths.saturating_mul(2)),
+            input_bytes: source_bytes,
             result_bytes,
         };
         let reservation = self
@@ -478,8 +462,6 @@ impl TerminalContextPreparation {
             source: source.preparation_snapshot()?,
             row,
             column,
-            cwd: cwd.to_path_buf(),
-            home: home.map(std::path::Path::to_path_buf),
             detectors,
         };
         let receipt = reservation.submit(job).map_err(|rejected| {
@@ -988,7 +970,7 @@ mod tests {
         }
     }
     #[test]
-    fn a_plugin_link_detector_wins_over_the_kernel_link_and_misses_fall_back() {
+    fn a_plugin_link_detector_is_the_only_source_of_detected_links() {
         let manifests = vec![(
             "example.issues".to_owned(),
             r##"{"contributes":{"commands":[{"id":"open"}],
@@ -1011,8 +993,6 @@ mod tests {
                         pane_id: NodeId(72),
                         row: 0,
                         column,
-                        cwd: std::path::Path::new("/captured"),
-                        home: None,
                         detectors: Arc::clone(&detectors),
                     },
                 ) {
@@ -1038,7 +1018,7 @@ mod tests {
             if id == 91 {
                 assert_eq!(
                     output.link,
-                    Some(crate::terminal_links::TerminalLink::Plugin {
+                    Some(crate::open_target::TerminalLink::Plugin {
                         plugin: "example.issues".to_owned(),
                         detector_id: "issue-ref".to_owned(),
                         command: "example.issues/open".to_owned(),
@@ -1046,14 +1026,8 @@ mod tests {
                     })
                 );
             } else {
-                assert_eq!(
-                    output.link,
-                    Some(crate::terminal_links::TerminalLink::File {
-                        path: PathBuf::from("/captured/./original.rs"),
-                        line: Some(12),
-                        column: None
-                    })
-                );
+                // No detector covers the cell, and the kernel detects no links itself.
+                assert_eq!(output.link, None);
             }
         }
     }
@@ -1065,6 +1039,12 @@ mod tests {
         assert_eq!(b"./original.rs:12:7 plain words"[24], b' ');
         let source = view.painted_source();
         view.feed(b"\r\nhttps://newer.test");
+        let detectors: Arc<[crate::plugin_host::links::LinkDetector]> =
+            crate::plugin_host::links::active_detectors(&[(
+                "ilium.core.terminal".to_owned(),
+                include_str!("../../plugins/core/terminal/manifest.json").to_owned(),
+            )])
+            .into();
         for (id, column) in [(81, 4), (82, 24)] {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
@@ -1075,9 +1055,7 @@ mod tests {
                         pane_id: NodeId(71),
                         row: 0,
                         column,
-                        cwd: std::path::Path::new("/captured"),
-                        home: None,
-                        detectors: Arc::from(Vec::new()),
+                        detectors: Arc::clone(&detectors),
                     },
                 ) {
                     Ok(_) => break,
@@ -1105,10 +1083,11 @@ mod tests {
             if id == 81 {
                 assert_eq!(
                     output.link,
-                    Some(crate::terminal_links::TerminalLink::File {
-                        path: PathBuf::from("/captured/./original.rs"),
-                        line: Some(12),
-                        column: Some(7)
+                    Some(crate::open_target::TerminalLink::Plugin {
+                        plugin: "ilium.core.terminal".to_owned(),
+                        detector_id: "path-line".to_owned(),
+                        command: "ilium.core.terminal/link-open".to_owned(),
+                        text: "./original.rs:12".to_owned(),
                     })
                 );
                 assert!(output.storage.is_some());

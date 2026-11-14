@@ -15,7 +15,6 @@ use crate::app::{
     SettingsTab,
 };
 use crate::board::BoardPane;
-use crate::text_prompt::TextPromptState;
 
 use super::command::*;
 use super::resolver::{resolve_node, resolve_parent};
@@ -133,112 +132,27 @@ fn execute_terminal_typing(
     ))
 }
 
+/// Workspace search is the Search plugin's panel. The control plane can open that panel but
+/// cannot type into it or move through its results, so every other action is refused.
 fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionReceipt, String> {
-    let requested_query = if matches!(command.action, SearchAction::Query) {
-        Some(required_nonempty(command.query.clone(), "query")?)
-    } else {
-        None
-    };
-    let mut state = match std::mem::replace(&mut app.mode, Mode::Normal) {
-        Mode::Search(state) => state,
-        _ => Box::default(),
-    };
     match command.action {
         SearchAction::Query => {
-            let query = requested_query.unwrap_or_default();
-            state.query = TextPromptState::new(&query);
-            state.note_query_changed(std::time::Instant::now());
-            if let Some(index) = command.index {
-                state.queue_control(crate::search_ui::SearchContinuationAction::Select(index))?;
-            }
-            let revision = state.revision();
-            app.mode = Mode::Search(state);
-            return Ok(ExecutionReceipt {
+            let query = required_nonempty(command.query, "query")?;
+            app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Voice);
+            Ok(ExecutionReceipt {
                 status: "queued",
-                message: "Workspace search accepted; results and optional selection are pending preparation".into(),
-                data: json!({ "query": query, "revision": revision, "preparation": "pending", "index": command.index, "verification": "Read ilium_get_state after search preparation completes" }),
+                message: "Workspace search panel requested from the Search plugin; the query text is not entered by the control plane".into(),
+                data: json!({ "query": query, "preparation": "not-supported" }),
                 terminate_session_after_delivery: false,
-            });
+            })
         }
-        SearchAction::SelectNext | SearchAction::SelectPrevious => {
-            let delta = if matches!(command.action, SearchAction::SelectNext) {
-                1
-            } else {
-                -1
-            };
-            if state.is_preparing() {
-                let queued =
-                    state.queue_control(crate::search_ui::SearchContinuationAction::Move(delta));
-                let revision = state.revision();
-                app.mode = Mode::Search(state);
-                queued?;
-                return Ok(ExecutionReceipt {
-                    status: "queued",
-                    message: "Search navigation is pending preparation of the current query".into(),
-                    data: json!({ "revision": revision, "preparation": "pending" }),
-                    terminate_session_after_delivery: false,
-                });
-            }
-            state.move_selection(delta, usize::MAX);
-        }
-        SearchAction::OpenResult => {
-            if state.is_preparing() {
-                let queued = state.queue_control(crate::search_ui::SearchContinuationAction::Open(
-                    command.index,
-                ));
-                let revision = state.revision();
-                app.mode = Mode::Search(state);
-                queued?;
-                return Ok(ExecutionReceipt {
-                    status: "queued",
-                    message:
-                        "Opening the search result is pending preparation of the current query"
-                            .into(),
-                    data: json!({ "revision": revision, "preparation": "pending", "index": command.index }),
-                    terminate_session_after_delivery: false,
-                });
-            }
-            if let Some(index) = command.index {
-                if index >= state.results.len() {
-                    app.mode = Mode::Search(state);
-                    return Err(ilium_prompts::render_value(
-                        "voice/executor/search-result-index-v0-does-not-exist",
-                        &serde_json::json!({"v0": (index).to_string()}),
-                    ));
-                }
-                state.selected_index = index;
-            }
-            let Some(result) = state.selected_result().cloned() else {
-                app.mode = Mode::Search(state);
-                return Err(
-                    ilium_prompts::voice::VOICE_EXECUTOR_THERE_IS_NO_SELECTED_SEARCH_RESULT
-                        .to_owned(),
-                );
-            };
-            app.mode = Mode::Search(state);
-            app.activate_search_result(result);
-            return Ok(ExecutionReceipt::immediate(
-                ilium_prompts::voice::VOICE_EXECUTOR_OPENED_THE_SELECTED_SEARCH_RESULT,
-            ));
-        }
-        SearchAction::Close => {
-            app.mode = Mode::Normal;
-            return Ok(ExecutionReceipt::immediate(
-                ilium_prompts::voice::VOICE_EXECUTOR_CLOSED_WORKSPACE_SEARCH,
-            ));
+        SearchAction::SelectNext
+        | SearchAction::SelectPrevious
+        | SearchAction::OpenResult
+        | SearchAction::Close => {
+            Err("Workspace search is a plugin panel; the control plane can only open it".to_owned())
         }
     }
-    let revision = state.revision();
-    let selected_index = state.selected_index;
-    let result_count = state.results.len();
-    app.mode = Mode::Search(state);
-    Ok(ExecutionReceipt {
-        status: "ok",
-        message: "Workspace search selection updated; read ilium_get_state for completed results"
-            .into(),
-        data: json!({ "revision": revision, "selected_index": selected_index, "result_count": result_count }),
-        terminate_session_after_delivery: false,
-    })
 }
 
 fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, String> {
@@ -330,7 +244,7 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
             )))
         }
         UiAction::OpenSearch => {
-            app.action_open_search();
+            app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Voice);
             Ok(ExecutionReceipt::immediate(
                 ilium_prompts::voice::VOICE_EXECUTOR_OPENED_WORKSPACE_SEARCH,
             ))

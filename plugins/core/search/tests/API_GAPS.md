@@ -19,6 +19,20 @@ tests as written below; the gap helpers in `tests/features/support.rs` hold the 
 - G17: a server seam that returns a terminal's retained raw history bytes (`Content::Terminal`) and the jump offset (`Location::Terminal { history_end_byte }`) -- needed by the terminal source of `matching::search_workspace`; `terminal.read-screen` returns only the visible screen.
 - Pure rule modules `src/matching.rs` (control stripping, case-insensitive match, context, last command, result cap 800) and `src/results.rs` (debounced `SearchState` on a millisecond clock, 1 s `SEARCH_DEBOUNCE_MILLIS`, continuation queue of 32, 5-row result geometry) are ported from ilium-client/src/search_ui.rs; the command and panel wiring waits on the gaps above.
 
+## Port round (the kernel code is deleted; the plugin owns the feature)
+
+Closed by this round: the testkit gaps above (`FakeTree::set_screen`, `FakeVector`, `FakeExtensions`, the `terminal.read-screen`, `vector`, `fs.scan`, `jobs` output and `services.call` fakes) are implemented in `ilium-plugin-testkit`; the server (`src/server.rs`), the panel state (`src/client.rs`) and the panel view (`src/panel.rs`) exist; `ilium-client/src/search_ui.rs`, `ilium-client/src/search_workers.rs`, `Mode::Search` and every caller are removed. Open key, tree toolbar button, context menu entry and `ilium ctl` search all run the command `ilium.core.search/open`.
+
+Still open (named so the kernel can supply them):
+
+- Terminal history: `terminal.read-screen` with `ScreenPart::Scrollback` is searched (2000 rows), but the original searched the whole retained raw history and jumped to a byte offset (`history_end_byte`). The plugin jumps by focusing the pane (`kernel.focus-node`); the in-pane scroll to the match needs a terminal intent (scroll to history offset) that does not exist. `TerminalView::jump_to_search_history`, `search_history_origin` and `search_history_len` in ilium-client are now unused.
+- Editor buffers and board cards as search sources: the server reads files from disk (`fs.read:project`), so unsaved editor text and board cards are not searched; both need a host import that returns an open buffer's or board's text.
+- Control plane: the `ilium_search` voice and control tool can only open the panel (`query` opens it, the text is not entered); select-next, select-previous, open-result and close are refused. They need a plugin-side control entry (a service or an intent that sets the panel's query and moves its selection).
+- The panel's text twin: the test host draws only paragraphs, so the panel carries a hidden paragraph that repeats the frame as plain lines beside the real widgets (`TextInput` key `query`, `TreeList` key `results`). The hidden paragraph is skipped by the client. When the test host draws real widgets, the twin and its code in `src/panel.rs` (`twin_lines` and helpers) can be deleted.
+- `services.use`: the testkit lets the plugin call a service named by an entry of `ilium.core.search/sources` (`lists_service`), because the manifest declares no `services.use` grant; the real host must do the same or the manifest must declare the grant.
+- PRN-008 (private panes are not searched) and PRN-009 (embedding index eviction and rebuild) are not implemented.
+- The file scan runs as the `scan-files` job over at most 20,000 project files; files over 8 MiB, `.git`, `target`, `node_modules` and `.ilium` are skipped.
+
 ## Move blockers (re-verified 2026-11-14, second pass)
 
 The per-file reasons and the blocker keys B1 to B10 (each with its evidence in the source) are in `docs/tasks/02-cuts/search.md`. The earlier K1 (no `intent_routing.rs`), K3 (no popup text input) and K6 (no terminal menu entries) of this section are closed by the consumer streams; the rest were re-read against the current tree.

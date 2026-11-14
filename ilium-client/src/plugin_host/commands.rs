@@ -13,6 +13,9 @@ use crate::app::App;
 /// The Layout plugin's "New split view" command.
 pub(crate) const NEW_SPLIT_COMMAND: &str = "ilium.core.layout/new-split";
 
+/// The Search plugin's "Search the workspace" command; it opens the search panel.
+pub(crate) const SEARCH_COMMAND: &str = "ilium.core.search/open";
+
 impl App {
     /// Runs a plugin command. Tells the user when no plugin host is running; a command that
     /// no enabled plugin contributes is reported by the host as a toast.
@@ -41,6 +44,11 @@ impl App {
         self.invoke_plugin_command(NEW_SPLIT_COMMAND, arguments, origin);
     }
 
+    /// "Search the workspace" from the key binding, the tree toolbar or the context menu.
+    pub(crate) fn action_open_search(&mut self, origin: CommandOrigin) {
+        self.invoke_plugin_command(SEARCH_COMMAND, "{}".to_owned(), origin);
+    }
+
     /// The arguments of `new-split`: the group the selection points at. The plugin reads the
     /// tree itself and decides which panes may join.
     fn new_split_arguments(&self) -> String {
@@ -63,6 +71,17 @@ mod tests {
             serde_json::from_str(&app.new_split_arguments()).unwrap();
 
         assert_eq!(arguments, serde_json::json!({ "parent": group.0 }));
+    }
+
+    #[test]
+    fn the_search_action_without_a_plugin_host_names_the_search_plugin() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.action_open_search(CommandOrigin::TreeToolbar);
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.search is not running, so this action is unavailable")
+        );
+        assert!(!matches!(app.mode, crate::app::Mode::Settings(_)));
     }
 
     #[test]

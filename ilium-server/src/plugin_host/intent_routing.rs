@@ -26,8 +26,27 @@ use super::{
     failed, refused, shell_word, to_core, to_plugin, unsupported, RequestEnd, ServerFacade,
 };
 
-/// The id of the one sound Ilium ships (capability-sound-play.md, "Sound ids and files").
+/// The id of the one sound file Ilium ships (capability-sound-play.md, "Sound ids and files").
 pub(crate) const BUNDLED_SOUND_ID: &str = "chirping";
+
+/// The catalogue id of each alert sound event. The ids are the ones the Notifications plugin
+/// plays; the player resolves the sound file from the user's sound settings for the event.
+fn sound_event_for_id(sound: &str) -> Option<ilium_sound::SoundEvent> {
+    match sound {
+        "finished" => Some(ilium_sound::SoundEvent::AgentFinished),
+        "ask" => Some(ilium_sound::SoundEvent::ApprovalRequired),
+        "started" => Some(ilium_sound::SoundEvent::AgentStarted),
+        "waiting" => Some(ilium_sound::SoundEvent::WaitingBackground),
+        "task-done" => Some(ilium_sound::SoundEvent::TaskSucceeded),
+        "task-failed" => Some(ilium_sound::SoundEvent::TaskFailed),
+        _ => None,
+    }
+}
+
+/// Whether `sound` is in the sound catalogue.
+fn is_catalogue_sound(sound: &str) -> bool {
+    sound == BUNDLED_SOUND_ID || sound_event_for_id(sound).is_some()
+}
 /// Most stages one `send-input` carries (reference-wit.md section 4.12).
 const MAXIMUM_INPUT_STAGES: usize = 16;
 /// Longest total delay of the stages of one `send-input`.
@@ -1072,7 +1091,7 @@ impl ServerFacade {
     /// Plays a catalogue sound through the server's sound player. A user who muted sounds
     /// hears nothing and the intent still completes.
     fn play_sound(&self, sound: &str) -> Outcome {
-        if sound != BUNDLED_SOUND_ID {
+        if !is_catalogue_sound(sound) {
             return refused(
                 ErrorCode::NotFound,
                 format!("{sound:?} is not in the sound catalogue"),
@@ -1081,8 +1100,23 @@ impl ServerFacade {
         let Some(state) = self.state.upgrade() else {
             return failed(ErrorCode::Internal, "the server is shutting down");
         };
-        if state.sound_settings.blocking_read().source == ilium_sound::SoundSourceKind::Muted {
+        let settings = state.sound_settings.blocking_read().clone();
+        if settings.source == ilium_sound::SoundSourceKind::Muted {
             return Outcome::Ok;
+        }
+        if let Some(event) = sound_event_for_id(sound) {
+            // The plugin already applied the user's per-event toggle; the player still
+            // resolves the file for the event.
+            return match state.sound_requests.prepare(&settings, Some(event), None) {
+                Ok(request) => {
+                    crate::sounds::enqueue_prepared(&state, request);
+                    Outcome::Ok
+                }
+                Err(reason) => {
+                    tracing::warn!(?reason, "plugin sound refused before allocation");
+                    failed(ErrorCode::Busy, "the sound player did not admit the sound")
+                }
+            };
         }
         self.simple(ClientRequest::PreviewSound {
             source: ilium_sound::SoundSourceKind::BundledChirping,
@@ -1097,7 +1131,7 @@ impl ServerFacade {
             return refused(ErrorCode::NotPermitted, "only a plugin sends a notice");
         };
         if let Some(sound) = spec.sound.as_deref() {
-            if sound != BUNDLED_SOUND_ID {
+            if !is_catalogue_sound(sound) {
                 return refused(
                     ErrorCode::NotFound,
                     format!("{sound:?} is not in the sound catalogue"),
@@ -1119,12 +1153,16 @@ impl ServerFacade {
                 "the user turned desktop notifications off",
             );
         }
+        // A core plugin is the user's own alert rules, which carry their own merge window, so the
+        // third-party rate does not apply to it.
+        let is_core = ilium_plugin_host::lifecycle::is_core_plugin(&plugin.0);
         // Checked before the coalescing key, so a refused notice does not start its window.
-        let within_rate = self
-            .notify_coalescer
-            .lock()
-            .map(|mut coalescer| coalescer.within_rate(&plugin.0, Instant::now()))
-            .unwrap_or(true);
+        let within_rate = is_core
+            || self
+                .notify_coalescer
+                .lock()
+                .map(|mut coalescer| coalescer.within_rate(&plugin.0, Instant::now()))
+                .unwrap_or(true);
         if !within_rate {
             return refused(
                 ErrorCode::RateLimited,
@@ -1155,16 +1193,19 @@ impl ServerFacade {
             plugin.0.clone(),
             spec.title,
             spec.body,
+            is_core,
         );
         if !crate::notifications::send_admitted(&execution.client, pending) {
             return failed(ErrorCode::Busy, "the notifier did not admit the notice");
         }
-        if let Ok(mut coalescer) = self.notify_coalescer.lock() {
-            coalescer.record_notice(&plugin.0, Instant::now());
+        if !is_core {
+            if let Ok(mut coalescer) = self.notify_coalescer.lock() {
+                coalescer.record_notice(&plugin.0, Instant::now());
+            }
         }
-        if spec.sound.is_some() {
+        if let Some(sound) = spec.sound.as_deref() {
             // The notice is shown; a sound the player cannot queue does not undo it.
-            let _ = self.play_sound(BUNDLED_SOUND_ID);
+            let _ = self.play_sound(sound);
         }
         Outcome::Ok
     }
@@ -1450,5 +1491,23 @@ mod tests {
         assert!(coalescer.within_rate("p", later));
         coalescer.record_notice("p", later);
         assert!(!coalescer.within_rate("p", later));
+    }
+
+    #[test]
+    fn the_alert_sound_ids_map_to_their_events() {
+        use ilium_sound::SoundEvent;
+        for (id, event) in [
+            ("finished", SoundEvent::AgentFinished),
+            ("ask", SoundEvent::ApprovalRequired),
+            ("started", SoundEvent::AgentStarted),
+            ("waiting", SoundEvent::WaitingBackground),
+            ("task-done", SoundEvent::TaskSucceeded),
+            ("task-failed", SoundEvent::TaskFailed),
+        ] {
+            assert_eq!(sound_event_for_id(id), Some(event));
+            assert!(is_catalogue_sound(id));
+        }
+        assert!(is_catalogue_sound(BUNDLED_SOUND_ID));
+        assert!(!is_catalogue_sound("nonexistent"));
     }
 }

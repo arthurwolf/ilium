@@ -123,7 +123,8 @@ fn unsupported(what: &str) -> Outcome {
 }
 
 /// The agent of a pane as a plugin sees it. The signature is the provider's lower-case name;
-/// the objective text is not part of the tree and stays absent.
+/// the objective is the pane's short title when it has one (set by [`node_view`]), which a plugin
+/// shows in place of the full title and follows with it.
 fn agent_view(state: &ilium_core::AgentState) -> AgentView {
     let activity = match state.activity() {
         ilium_core::AgentActivity::Working
@@ -178,6 +179,7 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         // activity `none`, so a plugin can tell it from a plain shell and from a live agent.
         NodeKind::Pane { status, .. } => status.known_agent_state().map(|state| {
             let mut view = agent_view(state);
+            view.objective = node.short_name.clone();
             if status.agent_state().is_none() {
                 view.activity = AgentActivity::None;
             }

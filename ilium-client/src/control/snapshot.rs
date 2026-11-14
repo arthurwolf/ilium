@@ -23,68 +23,17 @@ pub struct ControlSnapshot {
     pub nodes: Vec<NodeSnapshot>,
     pub settings: Value,
     pub status_message: Option<String>,
-    #[serde(skip)]
-    pub(crate) search: Option<SearchCapture>,
 }
 
-#[derive(Debug)]
-pub(crate) struct SearchCapture {
-    query: String,
-    revision: u64,
-    pending: bool,
-    selected: usize,
-    error: Option<String>,
-    results: std::sync::Arc<Vec<crate::search_ui::SearchResult>>,
-    _storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
-}
 impl ControlSnapshot {
-    /// CPU-owner-only projection; raw result heaps remain shared until this ends.
+    /// CPU-owner-only projection of the captured state.
     pub(crate) fn prepare(mut self) -> Result<Value, String> {
         for node in &mut self.nodes {
             if let Some(source) = node.pending_content.take() {
                 node.content = Some(source.prepare());
             }
         }
-        let search = self.search.take();
-        let mut value = serde_json::to_value(self).map_err(|error| error.to_string())?;
-        if let Some(search) = search {
-            let results = search.results.iter().enumerate().map(|(index, result)| json!({
-                "index": index, "selected": index == search.selected,
-                "pane_id": result.pane_id.0, "kind": result.kind.label(), "name": result.object_name,
-                "path": result.path.as_ref().map(|path| path.display().to_string()),
-                "context": format!("{}{}{}", result.before, result.matched, result.after),
-            })).collect::<Vec<_>>();
-            let mut projection = serde_json::Map::new();
-            projection.insert("query".into(), Value::String(search.query));
-            projection.insert("revision".into(), Value::from(search.revision));
-            projection.insert(
-                "preparation".into(),
-                Value::String(
-                    if search.pending {
-                        "pending"
-                    } else {
-                        "complete"
-                    }
-                    .into(),
-                ),
-            );
-            projection.insert(
-                "error".into(),
-                search.error.map(Value::String).unwrap_or(Value::Null),
-            );
-            projection.insert("selected_index".into(), Value::from(search.selected));
-            projection.insert("results".into(), Value::Array(results));
-            value
-                .as_object_mut()
-                .ok_or("Control snapshot was not an object")?
-                .insert("search".into(), Value::Object(projection));
-        } else {
-            value
-                .as_object_mut()
-                .ok_or("Control snapshot was not an object")?
-                .insert("search".into(), Value::Null);
-        }
-        Ok(value)
+        serde_json::to_value(self).map_err(|error| error.to_string())
     }
 }
 
@@ -216,25 +165,6 @@ pub(super) fn preflight(app: &App) -> Result<(), String> {
                 .saturating_mul(256),
         );
     }
-    if let Mode::Search(state) = &app.mode {
-        bytes = bytes
-            .saturating_add(state.query.buf.len())
-            .saturating_add(state.control_error.as_ref().map_or(0, String::len));
-        for result in state.results.iter() {
-            bytes = bytes
-                .saturating_add(result.object_name.len())
-                .saturating_add(result.before.len())
-                .saturating_add(result.matched.len())
-                .saturating_add(result.after.len())
-                .saturating_add(4096)
-                .saturating_add(
-                    result
-                        .path
-                        .as_ref()
-                        .map_or(0, |path| path.as_os_str().len().saturating_mul(3)),
-                );
-        }
-    }
     if bytes.saturating_mul(8) > 128 * 1024 * 1024 {
         return Err("Control state exceeds bounded preparation admission; request a smaller workspace snapshot".into());
     }
@@ -285,18 +215,6 @@ pub fn capture(
         nodes,
         settings: settings_snapshot(app),
         status_message: app.status_message.clone(),
-        search: match &app.mode {
-            Mode::Search(state) => Some(SearchCapture {
-                query: state.query.buf.clone(),
-                revision: state.revision(),
-                pending: state.is_preparing(),
-                selected: state.selected_index,
-                error: state.control_error.clone(),
-                results: std::sync::Arc::clone(&state.results),
-                _storage: state.result_retention.clone(),
-            }),
-            _ => None,
-        },
     })
 }
 
@@ -847,7 +765,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
         Mode::SettingsHelp(_) => "settings_help",
-        Mode::Search(_) => "search",
         Mode::AnimationTextPrompt(_, _) => "animation_text_prompt",
         Mode::LocationPicker(_) => "location_picker",
     }

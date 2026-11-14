@@ -558,18 +558,11 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     .await;
     assert!(matches!(delivered_prompt, ServerEvent::ScreenUpdate { .. }));
 
-    let sound_dispatched = common::wait_until(
-        || sound_calls.lock().unwrap().len() == 1,
-        Duration::from_secs(5),
-    )
-    .await;
+    // The finished sound and notice are the Notifications plugin's alerts now (its own tests
+    // cover them); the kernel's detection loop plays nothing.
     assert!(
-        sound_dispatched,
-        "expected exactly one server-owned sound after the real Working -> Done transition"
-    );
-    assert_eq!(
-        sound_calls.lock().unwrap().as_slice(),
-        &[Some(ilium_sound::SoundEvent::AgentFinished)]
+        sound_calls.lock().unwrap().is_empty(),
+        "the detection loop must not play the finished sound itself"
     );
 
     // Wait for one post-input classification to establish the stable Idle
@@ -1478,15 +1471,11 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         )
     })
     .await;
-    let sound_dispatched = common::wait_until(
-        || sound_calls.lock().unwrap().len() == 1,
-        Duration::from_secs(5),
-    )
-    .await;
-    assert!(sound_dispatched, "the terminal task must emit one sound");
-    assert_eq!(
-        sound_calls.lock().unwrap().as_slice(),
-        &[Some(ilium_sound::SoundEvent::TaskSucceeded)]
+    // The task-outcome sound and notice belong to the Notifications plugin; the kernel only
+    // reports the outcome to it on a topic and plays nothing itself.
+    assert!(
+        sound_calls.lock().unwrap().is_empty(),
+        "the progress outcome must not play a sound from the kernel"
     );
     // The result is delivered at the next ready composer. Progress must be
     // the only thing written to the agent: no `/goal pause`, no `/goal resume`.

@@ -1,11 +1,15 @@
 //! Core plugin `ilium.core.search` (manual page core-plugin-search.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
+//! Workspace search as a plugin. The server side answers queries (open panes, files, meaning
+//! by embeddings, and the sources other plugins contribute) in `server`; the client side keeps
+//! the panel's state in `client` and draws it in `panel`. `matching` and `results` hold the
+//! pure text matching and result shaping both sides share.
 
+pub mod client;
 pub mod matching;
+pub mod panel;
 pub mod results;
+pub mod server;
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
@@ -14,11 +18,9 @@ use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::{
-    Alignment, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, Widget,
-};
-use ilium_plugin_sdk::types::{ErrorCode, PluginError};
+use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider, Views};
+use serde_json::{json, Value};
 
 /// The server side of `ilium.core.search` (core-plugin-search.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
@@ -27,23 +29,25 @@ pub struct SearchServer;
 
 impl Lifecycle for SearchServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        server::reset();
         Ok(())
     }
 }
 
 impl Handler for SearchServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        server::on_events(batch)
     }
 }
 
+/// Job `scan-files`: reads the files of the project and returns their text for matching.
 impl JobRunner for SearchServer {
-    fn run(&mut self, kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        Err(PluginError {
-            code: ErrorCode::Unsupported,
-            message: format!("ilium.core.search: unknown job kind {kind}"),
-            retry_after_ms: None,
-        })
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        if kind == server::SCAN_JOB {
+            Ok(server::run_scan_job(&input))
+        } else {
+            Err(server::unknown_job(&kind))
+        }
     }
 }
 
@@ -51,10 +55,19 @@ impl JobRunner for SearchServer {
 /// `Done` JSON `{ "hits": [...] }`.
 impl ServiceProvider for SearchServer {
     fn handle(&mut self, call: ServiceCall) -> ServiceReply {
-        {
-            let _ = &call;
-            ServiceReply::Done(r#"{"error":"unsupported method"}"#.to_string())
+        if call.method != "query" {
+            return ServiceReply::Done(json!({ "error": "unsupported method" }).to_string());
         }
+        let query = serde_json::from_str::<Value>(&call.payload_json)
+            .ok()
+            .and_then(|payload| payload["query"].as_str().map(str::to_string))
+            .unwrap_or_default();
+        let hits = if query.is_empty() {
+            Vec::new()
+        } else {
+            server::quick_hits(&query)
+        };
+        ServiceReply::Done(json!({ "hits": hits }).to_string())
     }
 }
 
@@ -65,43 +78,25 @@ pub struct SearchClient;
 
 impl Lifecycle for SearchClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        client::reset();
         Ok(())
     }
 }
 
 impl Handler for SearchClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        client::on_events(batch)
     }
 }
 
 impl Views for SearchClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        UiTree {
-            version: 1,
-            nodes: vec![UiNode {
-                key: None,
-                widget: Widget::Paragraph(ParagraphSpec {
-                    lines: vec![vec![Span {
-                        text: "Search".to_string(),
-                        style: Style::default(),
-                    }]],
-                    rich: None,
-                    wrap: Some(false),
-                    alignment: Alignment::Left,
-                    style: Style::default(),
-                    scrollable: false,
-                }),
-                children: Vec::new(),
-                flags: NodeFlags::default(),
-                tooltip: None,
-                tab_index: None,
-                disabled_reason: None,
-            }],
-            root: 0,
-        }
+    fn render(&mut self, _view: ViewTarget, area: Area) -> UiTree {
+        panel::render(area)
     }
 }
+
+use ilium_plugin_sdk::types::UiTree;
+
 #[cfg(test)]
 mod spec_tests {
     use super::*;

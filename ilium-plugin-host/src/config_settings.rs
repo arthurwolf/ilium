@@ -184,10 +184,22 @@ impl KernelSettings for ConfigFileSettings {
             .as_deref()
             .and_then(|path| Self::read_document(path).ok())
             .unwrap_or_default();
-        let values = match document.get(table) {
+        let mut values = match document.get(table) {
             Some(toml::Value::Table(values)) => serde_json::to_value(values).ok()?,
             _ => serde_json::Value::Object(serde_json::Map::new()),
         };
+        // The desktop-notification switches live in `[notifications]` but are set on the Sound
+        // tab, so a read of that tab carries them under the key `notifications`.
+        if key == "sound" {
+            if let (Some(toml::Value::Table(notifications)), Some(object)) =
+                (document.get("notifications"), values.as_object_mut())
+            {
+                object.insert(
+                    "notifications".to_owned(),
+                    serde_json::to_value(notifications).ok()?,
+                );
+            }
+        }
         Some(values.to_string())
     }
 
@@ -517,6 +529,26 @@ mod tests {
         assert_eq!(terminal["scrollback"], 2000);
         assert_eq!(terminal["shell"], "zsh");
         assert_eq!(settings.revision(), 1);
+    }
+
+    #[test]
+    fn the_sound_tab_carries_the_desktop_notification_switches() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[sound]\nsource = \"muted\"\n[notifications]\nenabled = false\ntask_coalesce_seconds = 45\n",
+        )
+        .expect("config written");
+        let settings = ConfigFileSettings::at(path);
+        let sound: serde_json::Value =
+            serde_json::from_str(&settings.get("sound").expect("sound tab")).expect("json");
+        assert_eq!(sound["source"], "muted");
+        assert_eq!(sound["notifications"]["enabled"], false);
+        assert_eq!(sound["notifications"]["task_coalesce_seconds"], 45);
+        let terminal: serde_json::Value =
+            serde_json::from_str(&settings.get("terminal").expect("terminal tab")).expect("json");
+        assert!(terminal.get("notifications").is_none());
     }
 
     #[test]

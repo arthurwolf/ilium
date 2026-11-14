@@ -157,21 +157,61 @@ impl UiActionRecord {
 /// One drawn widget of the rig's tree.
 #[derive(Debug, Clone)]
 enum Node {
-    Button { key: String, label: String, tooltip: Option<String> },
-    Toggle { key: String, label: String, value: bool },
-    Confirm { key: String, label: String },
-    TextInput { key: String },
-    TextArea { key: String, debounce_ms: Option<u32> },
-    Paragraph { text: String, action_key: Option<String> },
-    Gauge { ratio: f64 },
-    ProgressRow { percent: f32 },
-    Chart { values: Vec<f64> },
-    Calendar { year: u32, month: u8 },
-    Notice { text: String },
-    List { key: String, items: u32 },
-    Layout { widths: Vec<u16> },
-    PointerOnly { label: String },
-    FocusItem { key: String, tab_index: Option<i16> },
+    Button {
+        key: String,
+        label: String,
+        tooltip: Option<String>,
+    },
+    Toggle {
+        key: String,
+        label: String,
+        value: bool,
+    },
+    Confirm {
+        key: String,
+        label: String,
+    },
+    TextInput {
+        key: String,
+    },
+    TextArea {
+        key: String,
+        debounce_ms: Option<u32>,
+    },
+    Paragraph {
+        text: String,
+        action_key: Option<String>,
+    },
+    Gauge {
+        ratio: f64,
+    },
+    ProgressRow {
+        percent: f32,
+    },
+    Chart {
+        values: Vec<f64>,
+    },
+    Calendar {
+        year: u32,
+        month: u8,
+    },
+    Notice {
+        text: String,
+    },
+    List {
+        key: String,
+        items: u32,
+    },
+    Layout {
+        widths: Vec<u16>,
+    },
+    PointerOnly {
+        label: String,
+    },
+    FocusItem {
+        key: String,
+        tab_index: Option<i16>,
+    },
 }
 
 /// A popup layered over the content; it takes no layout space (WID-029).
@@ -265,7 +305,13 @@ impl Frame {
     }
 
     fn add_region(&mut self, row: u16, first_cell: u16, end_cell: u16, target: Target) {
-        self.regions.push(Region { row, first_cell, end_cell, target, tooltip: None });
+        self.regions.push(Region {
+            row,
+            first_cell,
+            end_cell,
+            target,
+            tooltip: None,
+        });
     }
 
     fn rows_as_text(&self) -> Vec<String> {
@@ -351,7 +397,10 @@ impl WidgetRig {
             first_view.declared.push(format!("p{index}"));
         }
         first_view.declared.push("same".to_string());
-        let second_view = ViewPopups { declared: vec!["same".to_string()], open: Vec::new() };
+        let second_view = ViewPopups {
+            declared: vec!["same".to_string()],
+            open: Vec::new(),
+        };
         WidgetRig {
             columns,
             rows,
@@ -414,7 +463,11 @@ impl WidgetRig {
     /// Draws one node starting at `row` and returns the number of rows it used.
     fn draw_node(&self, frame: &mut Frame, index: usize, node: &Node, row: u16) -> u16 {
         match node {
-            Node::Button { key, label, tooltip } => {
+            Node::Button {
+                key,
+                label,
+                tooltip,
+            } => {
                 let end = frame.put(row, 0, label);
                 frame.add_region(row, 0, end, Target::Activate(key.clone()));
                 if let Some(region) = frame.regions.last_mut() {
@@ -441,7 +494,10 @@ impl WidgetRig {
             }
             Node::TextArea { key, .. } => {
                 let content = self.texts.get(key).filter(|text| !text.is_empty());
-                let lines = wrap_to_width(content.map_or("_", String::as_str), usize::from(self.columns));
+                let lines = wrap_to_width(
+                    content.map_or("_", String::as_str),
+                    usize::from(self.columns),
+                );
                 let mut used = 0;
                 for line in &lines {
                     let end = frame.put(row + used, 0, line);
@@ -466,21 +522,34 @@ impl WidgetRig {
             Node::Gauge { ratio } => {
                 let filled = gauge_cells(*ratio, self.columns);
                 let empty = self.columns.saturating_sub(filled);
-                let bar = "\u{2588}".repeat(usize::from(filled)) + &"\u{2591}".repeat(usize::from(empty));
+                let bar =
+                    "\u{2588}".repeat(usize::from(filled)) + &"\u{2591}".repeat(usize::from(empty));
                 frame.put(row, 0, &bar);
                 1
             }
             Node::ProgressRow { percent } => {
-                let shown = if percent.is_nan() { 0.0 } else { percent.clamp(0.0, 100.0) };
+                let shown = if percent.is_nan() {
+                    0.0
+                } else {
+                    percent.clamp(0.0, 100.0)
+                };
                 let label = format!("{shown:.0}% ");
                 let start = frame.put(row, 0, &label);
                 let room = self.columns.saturating_sub(start);
                 let filled = (f64::from(shown) / 100.0 * f64::from(room)).round() as u16;
-                frame.put(row, start, &"\u{2588}".repeat(usize::from(filled.min(room))));
+                frame.put(
+                    row,
+                    start,
+                    &"\u{2588}".repeat(usize::from(filled.min(room))),
+                );
                 1
             }
             Node::Chart { values } => {
-                let line = if self.braille { braille_line(values) } else { text_line(values) };
+                let line = if self.braille {
+                    braille_line(values)
+                } else {
+                    text_line(values)
+                };
                 frame.put(row, 0, &line);
                 1
             }
@@ -491,16 +560,25 @@ impl WidgetRig {
             }
             Node::List { key, items } => {
                 let offset = self.scroll.get(key).copied().unwrap_or(0);
-                let visible = u32::from(self.rows.saturating_sub(row)).min(items.saturating_sub(offset));
+                let visible =
+                    u32::from(self.rows.saturating_sub(row)).min(items.saturating_sub(offset));
                 for line in 0..visible {
-                    frame.put(row + cell_count(line as usize), 0, &format!("item {}", offset + line));
+                    frame.put(
+                        row + cell_count(line as usize),
+                        0,
+                        &format!("item {}", offset + line),
+                    );
                 }
                 cell_count(visible as usize).max(1)
             }
             Node::Layout { widths } => {
                 let mut at: u16 = 0;
                 for (child, width) in widths.iter().enumerate() {
-                    frame.put(row, at, &fit_to_box(&format!("child {child}"), usize::from(*width)));
+                    frame.put(
+                        row,
+                        at,
+                        &fit_to_box(&format!("child {child}"), usize::from(*width)),
+                    );
                     at = at.saturating_add(*width);
                 }
                 1
@@ -587,7 +665,10 @@ impl WidgetRig {
     // ----- showing widgets -----
 
     fn replace_tree(&mut self, nodes: Vec<Node>) {
-        self.tree = Tree { nodes, ..Tree::default() };
+        self.tree = Tree {
+            nodes,
+            ..Tree::default()
+        };
         self.hover = None;
         self.prune_focus();
     }
@@ -597,7 +678,10 @@ impl WidgetRig {
     }
 
     fn prune_focus(&mut self) {
-        let keys: Vec<String> = focusables(&self.tree).into_iter().map(|(key, _)| key).collect();
+        let keys: Vec<String> = focusables(&self.tree)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
         if let Some(current) = &self.focus {
             if !keys.contains(current) {
                 self.focus = None;
@@ -646,30 +730,46 @@ impl WidgetRig {
 
     /// Shows this widget (WID-008).
     pub fn show_confirm(&mut self, key: &str, label: &str) {
-        self.replace_with_node(Node::Confirm { key: key.to_string(), label: label.to_string() });
+        self.replace_with_node(Node::Confirm {
+            key: key.to_string(),
+            label: label.to_string(),
+        });
     }
 
     /// Shows this widget (WID-025).
     pub fn show_text_input(&mut self, key: &str) {
-        self.replace_with_node(Node::TextInput { key: key.to_string() });
+        self.replace_with_node(Node::TextInput {
+            key: key.to_string(),
+        });
         self.request_focus(key);
     }
 
     /// Shows this widget (WID-009).
     pub fn show_text_area(&mut self, key: &str, debounce_ms: Option<u32>) {
-        self.replace_with_node(Node::TextArea { key: key.to_string(), debounce_ms });
+        self.replace_with_node(Node::TextArea {
+            key: key.to_string(),
+            debounce_ms,
+        });
         self.request_focus(key);
     }
 
     /// Shows this widget (WID-009).
-    pub fn show_text_area_with_initial(&mut self, key: &str, debounce_ms: Option<u32>, initial: &str) {
+    pub fn show_text_area_with_initial(
+        &mut self,
+        key: &str,
+        debounce_ms: Option<u32>,
+        initial: &str,
+    ) {
         self.texts.insert(key.to_string(), initial.to_string());
         self.show_text_area(key, debounce_ms);
     }
 
     /// Shows this widget (WID-016).
     pub fn show_paragraph(&mut self, text: &str) {
-        self.replace_with_node(Node::Paragraph { text: text.to_string(), action_key: None });
+        self.replace_with_node(Node::Paragraph {
+            text: text.to_string(),
+            action_key: None,
+        });
     }
 
     /// Shows this widget (WID-016).
@@ -692,7 +792,9 @@ impl WidgetRig {
 
     /// Shows this widget (WID-024).
     pub fn show_chart(&mut self, values: &[f64]) {
-        self.replace_with_node(Node::Chart { values: values.to_vec() });
+        self.replace_with_node(Node::Chart {
+            values: values.to_vec(),
+        });
     }
 
     /// Shows this widget (WID-022).
@@ -701,7 +803,9 @@ impl WidgetRig {
     }
 
     fn show_notice(&mut self, text: &str) {
-        self.replace_with_node(Node::Notice { text: text.to_string() });
+        self.replace_with_node(Node::Notice {
+            text: text.to_string(),
+        });
     }
 
     /// Shows this widget (WID-019).
@@ -759,7 +863,10 @@ impl WidgetRig {
 
     /// Shows this widget (WID-021).
     pub fn show_list_of(&mut self, key: &str, items: u32) {
-        self.replace_with_node(Node::List { key: key.to_string(), items });
+        self.replace_with_node(Node::List {
+            key: key.to_string(),
+            items,
+        });
     }
 
     /// Shows this widget (WID-010).
@@ -804,7 +911,9 @@ impl WidgetRig {
 
     /// Shows this widget (WID-008).
     pub fn show_pointer_only_node(&mut self, _key: &str, label: &str) {
-        self.replace_with_node(Node::PointerOnly { label: label.to_string() });
+        self.replace_with_node(Node::PointerOnly {
+            label: label.to_string(),
+        });
     }
 
     /// Shows this widget (WID-011).
@@ -827,7 +936,10 @@ impl WidgetRig {
     pub fn show_focus_order_tree(&mut self, order: &[(&str, Option<i16>)]) {
         let nodes = order
             .iter()
-            .map(|(key, tab_index)| Node::FocusItem { key: (*key).to_string(), tab_index: *tab_index })
+            .map(|(key, tab_index)| Node::FocusItem {
+                key: (*key).to_string(),
+                tab_index: *tab_index,
+            })
             .collect();
         self.replace_tree(nodes);
     }
@@ -839,13 +951,20 @@ impl WidgetRig {
             return;
         }
         self.queued = Some(Tree {
-            nodes: vec![Node::Paragraph { text: text.to_string(), action_key: None }],
+            nodes: vec![Node::Paragraph {
+                text: text.to_string(),
+                action_key: None,
+            }],
             ..Tree::default()
         });
     }
 
     /// Shows a layout row; `Err` carries the diagnostic code (WID-005).
-    pub fn show_layout(&mut self, children: usize, constraints: &[Constraint]) -> Result<(), String> {
+    pub fn show_layout(
+        &mut self,
+        children: usize,
+        constraints: &[Constraint],
+    ) -> Result<(), String> {
         if children != constraints.len() {
             return Err(INVALID_TREE_CODE.to_string());
         }
@@ -871,7 +990,10 @@ impl WidgetRig {
         let Some((row, cell)) = frame.locate(text) else {
             return;
         };
-        let Some(target) = frame.region_at(row, cell).map(|region| region.target.clone()) else {
+        let Some(target) = frame
+            .region_at(row, cell)
+            .map(|region| region.target.clone())
+        else {
             return;
         };
         match target {
@@ -910,7 +1032,10 @@ impl WidgetRig {
             return;
         };
         let explicit = self.tree.nodes.iter().find_map(|node| match node {
-            Node::TextArea { key: node_key, debounce_ms } if *node_key == key => Some(*debounce_ms),
+            Node::TextArea {
+                key: node_key,
+                debounce_ms,
+            } if *node_key == key => Some(*debounce_ms),
             Node::TextInput { key: node_key } if *node_key == key => Some(None),
             _ => None,
         });
@@ -964,7 +1089,11 @@ impl WidgetRig {
         if order.is_empty() {
             return;
         }
-        let next = match self.focus.as_ref().and_then(|key| order.iter().position(|item| item == key)) {
+        let next = match self
+            .focus
+            .as_ref()
+            .and_then(|key| order.iter().position(|item| item == key))
+        {
             Some(position) => (position + 1) % order.len(),
             None => 0,
         };
@@ -974,7 +1103,10 @@ impl WidgetRig {
     /// Input or popup operation (WID-021).
     pub fn scroll_list(&mut self, key: &str, rows: u32) {
         let items = self.tree.nodes.iter().find_map(|node| match node {
-            Node::List { key: node_key, items } if node_key == key => Some(*items),
+            Node::List {
+                key: node_key,
+                items,
+            } if node_key == key => Some(*items),
             _ => None,
         });
         if let Some(items) = items {
@@ -1073,7 +1205,10 @@ impl WidgetRig {
 
     /// State query (WID-008). Actions that were routed to a view other than the plugin's.
     pub fn actions_for_other_views(&self) -> usize {
-        self.action_views.iter().filter(|view| **view != PLUGIN_VIEW).count()
+        self.action_views
+            .iter()
+            .filter(|view| **view != PLUGIN_VIEW)
+            .count()
     }
 
     /// State query (WID-010).
@@ -1166,8 +1301,16 @@ fn recognised_image(bytes: &[u8]) -> bool {
 
 fn normalised(values: &[f64]) -> Vec<f64> {
     let finite = |value: &f64| value.is_finite();
-    let low = values.iter().copied().filter(finite).fold(f64::INFINITY, f64::min);
-    let high = values.iter().copied().filter(finite).fold(f64::NEG_INFINITY, f64::max);
+    let low = values
+        .iter()
+        .copied()
+        .filter(finite)
+        .fold(f64::INFINITY, f64::min);
+    let high = values
+        .iter()
+        .copied()
+        .filter(finite)
+        .fold(f64::NEG_INFINITY, f64::max);
     values
         .iter()
         .map(|value| {
@@ -1229,9 +1372,16 @@ fn days_in_month(year: u32, month: u8) -> u32 {
 /// Column of the first day of the month, Monday first (0 = Monday).
 fn first_weekday_monday_first(year: u32, month: u8) -> u32 {
     const OFFSETS: [u32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-    let adjusted = if month < 3 { year.saturating_sub(1) } else { year };
-    let sunday_first =
-        (adjusted + adjusted / 4 - adjusted / 100 + adjusted / 400 + OFFSETS[usize::from(month - 1)] + 1) % 7;
+    let adjusted = if month < 3 {
+        year.saturating_sub(1)
+    } else {
+        year
+    };
+    let sunday_first = (adjusted + adjusted / 4 - adjusted / 100
+        + adjusted / 400
+        + OFFSETS[usize::from(month - 1)]
+        + 1)
+        % 7;
     (sunday_first + 6) % 7
 }
 
@@ -1243,7 +1393,8 @@ fn draw_calendar(frame: &mut Frame, row: u16, year: u32, month: u8) -> u16 {
     }
     frame.put(row, 0, &format!("{year}-{month:02}"));
     frame.put(row + 1, 0, "Mo Tu We Th Fr Sa Su");
-    let mut cells: Vec<String> = vec!["  ".to_string(); first_weekday_monday_first(year, month) as usize];
+    let mut cells: Vec<String> =
+        vec!["  ".to_string(); first_weekday_monday_first(year, month) as usize];
     cells.extend((1..=days_in_month(year, month)).map(|day| format!("{day:>2}")));
     let mut used: u16 = 2;
     for week in cells.chunks(7) {

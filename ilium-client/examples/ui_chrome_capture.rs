@@ -300,13 +300,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ),
             ("help", ilium_client::app::Mode::Help),
             (
-                "search-empty",
-                ilium_client::app::Mode::Search(Box::new(
-                    ilium_client::search_ui::SearchState::new(),
-                )),
-            ),
-            ("search-overflow", synthetic_search()),
-            (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(
                     ilium_client::text_prompt::TextPromptState::new("synthetic-command --example"),
@@ -866,30 +859,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
         "output_dir": output, "synthetic": true})
     );
     Ok(())
-}
-
-fn synthetic_search() -> ilium_client::app::Mode {
-    use ilium_client::search_ui::{SearchLocation, SearchObjectKind, SearchResult, SearchState};
-    let mut search = SearchState::new();
-    search.query = ilium_client::text_prompt::TextPromptState::new("example");
-    search.replace_results(
-        (0..60)
-            .map(|index| SearchResult {
-                pane_id: ilium_core::ROOT_ID,
-                kind: SearchObjectKind::File,
-                object_name: format!("Synthetic file {index:02}"),
-                automatic_title: None,
-                path: None,
-                last_command: None,
-                before: "Synthetic context before ".to_owned(),
-                matched: "example".to_owned(),
-                after: " and after the match".to_owned(),
-                location: SearchLocation::Editor { line: index },
-            })
-            .collect(),
-    );
-    search.selected_index = 59;
-    ilium_client::app::Mode::Search(Box::new(search))
 }
 
 fn synthetic_board(storage_kind: ilium_client::app::BoardStorageKind) -> ilium_client::app::Mode {

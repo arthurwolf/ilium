@@ -65,7 +65,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       "services.provide:ilium.core.terminal/transfer"
     ],
     "client": [
-      "terminal.read-screen", "editor.edit",
+      "terminal.read-screen", "tree.read", "editor.edit",
       "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal",
       "open-external",
       "extensions.provide:ilium.core.terminal/open-link",
@@ -74,8 +74,9 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   },
   "contributes": {
     "link_detectors": [
-      { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" },
-      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+      { "id": "url", "regex": "https?://[^\\s]*[^\\s)\\]},.;\"'`]", "command": "link-open" },
+      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" },
+      { "id": "path", "regex": "[^\\s()\\[\\]{},;\"'`]*[^\\s()\\[\\]{},;\"'`.]", "command": "link-open" }
     ],
     "commands": [
       { "id": "link-open", "title": "Open link", "side": "client" }
@@ -243,6 +244,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "client": [
       "terminal.read-screen",
+      "tree.read",
       "editor.edit",
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
@@ -260,12 +262,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "link_detectors": [
       {
         "id": "url",
-        "regex": "https?://[^\\s]+",
+        "regex": "https?://[^\\s]*[^\\s)\\]},.;\"'`]",
         "command": "link-open"
       },
       {
         "id": "path-line",
         "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      },
+      {
+        "id": "path",
+        "regex": "[^\\s()\\[\\]{},;\"'`]*[^\\s()\\[\\]{},;\"'`.]",
         "command": "link-open"
       }
     ],
@@ -424,7 +431,7 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### Clickable links
 
-Paths and URLs in terminal output become links. The manifest declares two `link_detectors` entries, `url` first so a `host:port` inside a URL stays part of the URL, then `path-line` for paths with a `:line` suffix. Both name the client command `link-open`, which `contributes.commands` declares. On `link-activated` the client submits `editor-open` for a `path-line` link, with the path, the line and `placement: split`, and `open-external` for an `http` or `https` URL. Pages: [terminal primitive](/pages/primitives-terminal/), [commands.invoke](/pages/capability-commands-invoke/), [events](/pages/api-events/) and [intents](/pages/api-intents/).
+Paths and URLs in terminal output become links, and the Terminal plugin is the only thing that finds them: with the plugin off, output has no clickable links except the OSC 8 hyperlinks a program emits itself. The manifest declares three `link_detectors` entries, tried in this order: `url` first so a `host:port` inside a URL stays part of the URL (a trailing `.`, `,`, `;`, quote or closing bracket is not part of it), then `path-line` for paths with a `:line` suffix, then `path` for every other whitespace-delimited token (`STYLE.md`, `~/.bashrc`, `../src/main.rs`, `file:///tmp/a.log`, `src/main.rs:42:7`), without wrapping punctuation at its ends. All three name the client command `link-open`, which `contributes.commands` declares. On `link-activated` the client reads the clicked pane's working directory with `tree.read` and submits `editor-open` for a `path-line` or `path` link, with the path (joined to the working directory, or in the `home` scope for `~/`), the line and `placement: split`, and `open-external` for an `http` or `https` URL. The kernel opens only paths that stay inside the project or the home directory, and it still decides whether a right-click offers "Open file" or "Open folder" (the path must exist). Pages: [terminal primitive](/pages/primitives-terminal/), [commands.invoke](/pages/capability-commands-invoke/), [events](/pages/api-events/) and [intents](/pages/api-intents/).
 
 **Rust**
 

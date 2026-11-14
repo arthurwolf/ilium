@@ -5,11 +5,11 @@
 mod attention_tooltips;
 mod common;
 mod finished;
+mod sound_model;
 mod sound_preview;
 mod sounds;
 mod svc_server;
 mod svc_sounds;
 mod synthesis;
-mod sound_model;
 mod tasks;
 mod texts;

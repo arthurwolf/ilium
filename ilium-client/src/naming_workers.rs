@@ -422,8 +422,7 @@ impl Drop for InferencePermit {
 /// transcript text) degrades to a failed result instead of silently
 /// dropping the worker's completion event. A dropped event would leave the
 /// matching `*_in_flight` guard set forever, permanently disabling that
-/// naming feature for the rest of the client's run -- mirrors
-/// `search_workers::start`'s containment of the same risk.
+/// naming feature for the rest of the client's run.
 fn catch_worker_panic<T>(
     worker_name: &str,
     body: impl FnOnce() -> anyhow::Result<T> + UnwindSafe,

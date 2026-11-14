@@ -1,23 +1,25 @@
 //! Ports of the notice-text tests of ilium-server/src/notifications.rs: the title and body of the
 //! finished, approval and task-outcome notices, as carried by the plugin's `notify` submissions.
 //!
-//! The session name and the long agent description reach the original through its arguments; the
-//! plugin API gives neither (API_GAPS.md), so the session part is asserted as a prefix and the long
-//! description is taken from the agent's `objective`.
+//! The session name comes from the host's live session list (the fake host names none, so the text
+//! falls back to `default` and the session part is asserted as a prefix). A pane with a short title
+//! is named by it and its full title is the description: the host carries the short title as the
+//! agent's `objective` and the full title as the node title.
 
 use ilium_plugin_sdk::types::AgentActivity;
 use serde_json::json;
 
 use crate::common::*;
 
-fn finished_body(name: &str, objective: Option<&str>) -> (String, String) {
+/// The finished notice of a pane whose full title is `title` and whose short title is `short`.
+fn finished_body(title: &str, short: Option<&str>) -> (String, String) {
     let mut host = server_host();
     let node = add_pane_full(
         &mut host,
-        name,
+        title,
         "claude",
         Some(AgentActivity::Working),
-        objective,
+        short,
         None,
     );
     let found = notices(&finish_turn(&mut host, node, 1));
@@ -28,7 +30,7 @@ fn finished_body(name: &str, objective: Option<&str>) -> (String, String) {
 /// REQ: PORT:ilium-server/src/notifications.rs::notification_appends_distinct_long_agent_description_after_current_text
 #[test]
 fn texts_port_a_distinct_long_description_follows_the_current_text() {
-    let (title, body) = finished_body("Auth Bug", Some("Fix Authentication Bug In Login Flow"));
+    let (title, body) = finished_body("Fix Authentication Bug In Login Flow", Some("Auth Bug"));
     assert_eq!(title, "Auth Bug finished");
     assert!(body.starts_with("Session \""), "{body}");
     assert!(

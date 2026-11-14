@@ -31,6 +31,7 @@
     ],
     "client": [
       "terminal.read-screen",
+      "tree.read",
       "editor.edit",
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
@@ -48,12 +49,17 @@
     "link_detectors": [
       {
         "id": "url",
-        "regex": "https?://[^\\s]+",
+        "regex": "https?://[^\\s]*[^\\s)\\]},.;\"'`]",
         "command": "link-open"
       },
       {
         "id": "path-line",
         "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      },
+      {
+        "id": "path",
+        "regex": "[^\\s()\\[\\]{},;\"'`]*[^\\s()\\[\\]{},;\"'`.]",
         "command": "link-open"
       }
     ],

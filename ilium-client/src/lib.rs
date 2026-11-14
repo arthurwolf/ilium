@@ -158,8 +158,6 @@ pub mod resource_queue;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
-pub mod search_ui;
-pub mod search_workers;
 pub mod section_frame;
 pub mod selectable_cards;
 mod semantic_animation;
@@ -218,7 +216,6 @@ mod terminal_context_preparation;
 pub mod terminal_guard;
 mod terminal_input;
 mod terminal_input_owner;
-pub mod terminal_links;
 pub mod terminal_naming;
 pub mod terminal_parsing;
 pub mod terminal_selection;
@@ -291,7 +288,6 @@ use crate::connection::Connection;
 use crate::error::ClientError;
 use crate::icon_search_workers::IconSearchWorkers;
 use crate::naming_workers::{NamingWorkerEvent, NamingWorkers};
-use crate::search_workers::SearchWorkers;
 use crate::smart_copy_workers::{SmartCopyWorkerUpdate, SmartCopyWorkers};
 use crate::terminal_guard::TerminalGuard;
 use crate::trigger_execution_lease::TriggerExecutionLease;
@@ -1321,10 +1317,6 @@ async fn run_inner(
         .with_completion_wake(move || {
             reset_wake.notify_one();
         });
-    let search_client = execution.client_when_ready(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 }).await
-        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("workspace search startup: {error:?}"))))?;
-    let mut search_workers = SearchWorkers::new(search_client);
-    let search_notification = search_workers.notification();
     let icon_search_notification = icon_search_workers.notification();
     let (reset_events_tx, mut reset_events_rx) = mpsc::channel(4);
     let (reset_settings_tx, reset_settings_rx) =
@@ -1774,11 +1766,6 @@ async fn run_inner(
                 needs_redraw |= collected;
                 needs_immediate_redraw |= collected;
             }
-            _ = search_notification.notified() => {
-                if let Some(search_event) = search_workers.collect() { app.apply_workspace_search_result(search_event); }
-                needs_redraw = true;
-                needs_immediate_redraw = true;
-            }
             _=provider_notification.notified()=>{naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();},
             Some(smart_copy_event) = smart_copy_events_rx.recv() => {
                 let generation = smart_copy_event.generation;
@@ -1867,7 +1854,6 @@ async fn run_inner(
                     &mut app,
                     Instant::now(),
                     maintenance_schedule.was_animating,
-                    &mut search_workers,
                 ) {
                     needs_redraw = true;
                 }

@@ -21,12 +21,87 @@
       "agent.read",
       "tree.read",
       "tree.attention",
+      "extensions.provide:ilium.core.notifications/before-notify",
+      "extensions.provide:ilium.core.notifications/channels",
+      "settings.write-kernel:sound",
+      "settings.read-kernel:sound",
       "topics.subscribe:ilium.core.progress/changed",
       "panes.read"
     ],
     "client": [
-      "notify.toast",
-      "settings.write-kernel:sound"
+      "notify.toast"
+    ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-notify",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before notify",
+        "payload_schema": {
+          "type": "object",
+          "required": [
+            "event",
+            "pane",
+            "title",
+            "urgency",
+            "channels"
+          ],
+          "properties": {
+            "event": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "urgency": {
+              "type": "string"
+            },
+            "channels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "channels",
+        "kind": "collect",
+        "title": "Channels",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
     ]
   },
   "activation": [

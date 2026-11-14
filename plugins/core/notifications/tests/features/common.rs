@@ -30,9 +30,34 @@ pub fn server_host() -> FakeHost {
     host
 }
 
-/// Writes one setting of the `sound` tab and tells the plugin which key changed.
+/// Writes one setting of the `sound` kernel tab and tells the plugin which key changed. A
+/// dotted key is the path of the value in the settings object the plugin reads: `sound.<key>`
+/// is a key of the tab itself and `notifications.<key>` is a key of its `notifications` object.
 pub fn set_setting(host: &mut FakeHost, key: &str, value: Value) {
-    host.settings().set(key, value).expect("setting accepted");
+    host.settings()
+        .set(key, value.clone())
+        .expect("setting accepted");
+    let mut tab = host
+        .kernel_settings()
+        .tab("sound")
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let path: Vec<&str> = key.split('.').collect();
+    let path = match path.split_first() {
+        Some((&"sound", rest)) => rest,
+        _ => &path[..],
+    };
+    let mut cursor = &mut tab;
+    for (index, segment) in path.iter().enumerate() {
+        let Value::Object(map) = cursor else { break };
+        if index + 1 == path.len() {
+            map.insert((*segment).to_string(), value.clone());
+        } else {
+            cursor = map
+                .entry((*segment).to_string())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        }
+    }
+    host.kernel_settings().set_tab("sound", tab);
     host.deliver_one(Event::KernelSettingsChanged(KernelSettingsEvent {
         tab: "sound".to_string(),
         keys: vec![key.to_string()],

@@ -1105,20 +1105,11 @@ mod tests {
     }
 
     #[test]
-    fn semantic_search_returns_local_content_and_opens_the_exact_result() {
+    fn search_control_asks_the_search_plugin_for_its_panel_and_refuses_navigation() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
-        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let editor_id = app
-            .tree
-            .add_pane(group_id, "notes", PaneContentKind::Editor)
-            .unwrap();
-        let mut editor = crate::editor_pane::EditorPane::empty();
-        editor.insert_text("alpha voice-control needle omega");
-        app.panes
-            .insert(editor_id, crate::app::PaneRuntime::Editor(Box::new(editor)));
         let mut plane = ControlPlane::default();
 
-        let search = plane.execute_invocation(
+        let query = plane.execute_invocation(
             &mut app,
             VoiceToolInvocation {
                 call_id: "search-1".to_owned(),
@@ -1126,32 +1117,12 @@ mod tests {
                 arguments_json: r#"{"action":"query","query":"voice-control needle"}"#.to_owned(),
             },
         );
-        assert_eq!(search.result["status"], "queued");
-        assert_eq!(search.result["data"]["preparation"], "pending");
-        let mut workers =
-            crate::search_workers::SearchWorkers::new(crate::execution::test_client());
-        let due = std::time::Instant::now() + crate::search_ui::SEARCH_DEBOUNCE;
-        assert!(app.tick_workspace_search(due, &mut workers));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let completed = loop {
-            if let Some(event) = workers.collect() {
-                break event;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "search completion timeout"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        };
-        assert!(app.apply_workspace_search_result(completed));
-        let crate::app::Mode::Search(state) = &app.mode else {
-            panic!("completed search should remain open");
-        };
-        assert_eq!(state.results.len(), 1);
-        assert_eq!(state.results[0].pane_id, editor_id);
-        assert_eq!(state.results[0].matched, "voice-control needle");
-        assert_eq!(state.results[0].before, "alpha ");
-        assert_eq!(state.results[0].after, " omega");
+        assert_eq!(query.result["status"], "queued");
+        assert_eq!(query.result["data"]["preparation"], "not-supported");
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.search is not running, so this action is unavailable")
+        );
 
         let opened = plane.execute_invocation(
             &mut app,
@@ -1161,8 +1132,7 @@ mod tests {
                 arguments_json: r#"{"action":"open_result","index":0}"#.to_owned(),
             },
         );
-        assert_eq!(opened.result["status"], "ok");
-        assert_eq!(app.active_pane_id(), Some(editor_id));
+        assert_ne!(opened.result["status"], "ok");
     }
 
     #[test]

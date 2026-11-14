@@ -1,5 +1,7 @@
 //! Fake jobs (reference-test-harness.md "Fake tree, panes, agents and jobs").
 
+use std::collections::BTreeMap;
+
 use ilium_plugin_sdk_core::generated::types::{
     Event, JobProgressEvent, Outcome, RequestId, RequestRef, RequestResult,
 };
@@ -25,6 +27,8 @@ pub struct FakeJobs {
     cancelled: Vec<u64>,
     progress: Vec<f32>,
     cancel_requested: bool,
+    /// Output of finished jobs, taken once by `jobs.take-output`.
+    outputs: BTreeMap<u64, Vec<u8>>,
     outbox: Outbox,
 }
 
@@ -61,6 +65,11 @@ impl FakeJobs {
         std::mem::take(&mut self.cancel_requested)
     }
 
+    /// The output a finished job produced, once (`jobs.take-output`).
+    pub(crate) fn take_output(&mut self, request: u64) -> Option<Vec<u8>> {
+        self.outputs.remove(&request)
+    }
+
     /// Jobs the plugin started.
     pub fn list(&self) -> Vec<JobRecord> {
         self.jobs.clone()
@@ -69,7 +78,10 @@ impl FakeJobs {
     /// Delivers one `request-completed` event for the job.
     pub fn finish(&mut self, request: u64, result: Result<Vec<u8>, PluginError>) {
         let outcome = match result {
-            Ok(_) => Outcome::Ok,
+            Ok(output) => {
+                self.outputs.insert(request, output);
+                Outcome::Ok
+            }
             Err(error) => Outcome::Failed(error),
         };
         self.outbox

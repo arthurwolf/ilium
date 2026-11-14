@@ -185,7 +185,7 @@ async fn stop_observation(
         progress_monitors,
     });
     state.request_snapshot_save();
-    crate::ipc::handlers::alert_task_outcome(state, pane_id, &failed).await;
+    crate::ipc::handlers::alert_task_outcome(state, pane_id, &failed);
     // The next pass delivers the failure to the agent.
 }
 

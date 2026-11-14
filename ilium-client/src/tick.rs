@@ -8,7 +8,6 @@ use ilium_core::NodeId;
 
 use crate::app::App;
 use crate::naming_workers::{NamingWorkerEvent, NamingWorkers, TitleTrigger};
-use crate::search_workers::SearchWorkers;
 
 /// Runs every poll tick, regardless of whether any input/`ServerEvent`
 /// fired this iteration. Returns whether anything it did actually changed
@@ -19,12 +18,7 @@ use crate::search_workers::SearchWorkers;
 /// new event at all. `was_animating` reuses the schedule observation made
 /// before the timer sleep, preserving the final-frame contract without a
 /// second pane traversal.
-pub fn on_tick(
-    app: &mut App,
-    now: Instant,
-    was_animating: bool,
-    search_workers: &mut SearchWorkers,
-) -> bool {
+pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     if app.custom_status_screen_observations.retry_due(now) {
         app.refresh_custom_status_screen_watches();
     }
@@ -50,7 +44,6 @@ pub fn on_tick(
         | app.tick_inference_number_autosave(now)
         | app.tick_remote_compaction_save(now)
         | app.tick_custom_status_rules_save(now);
-    let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     // Focus and `config.toml` changes reach the plugins (gap G2); no redraw of its own.
@@ -93,7 +86,6 @@ pub fn on_tick(
         || resource_saved
         || autosave_wrote
         || budget_saved
-        || workspace_search_started
         || chatroom_changed
         || attention_changed
         || session_stats_changed
@@ -662,18 +654,12 @@ mod tests {
             200_000
         );
         let deadline = app.restructure_budget_autosave_deadline.unwrap();
-        let mut workers = SearchWorkers::new(crate::execution::test_client());
-        on_tick(
-            &mut app,
-            deadline - Duration::from_nanos(1),
-            false,
-            &mut workers,
-        );
+        on_tick(&mut app, deadline - Duration::from_nanos(1), false);
         assert_eq!(
             app.inference_settings.restructure_prompt_token_limit,
             200_000
         );
-        on_tick(&mut app, deadline, false, &mut workers);
+        on_tick(&mut app, deadline, false);
         app.settle_filesystem_for_test();
         assert_eq!(
             app.inference_settings.restructure_prompt_token_limit,

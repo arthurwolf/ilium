@@ -50,13 +50,6 @@ use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeS
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
 use crate::screen_transfer::ScreenTransfer;
-#[cfg(test)]
-use crate::search_ui;
-use crate::search_ui::{
-    SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
-    WorkspaceSearchRequest, WorkspaceSearchSource, WorkspaceSearchText,
-};
-use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
 use crate::terminal_activity::{
     TerminalActivityCause, TerminalActivityTracker, VisibleTextEvidence,
@@ -498,8 +491,6 @@ pub enum Mode {
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
-    /// Full-screen finder over terminal replay and locally-open buffers.
-    Search(Box<SearchState>),
     /// Step/progress/log dialog over a frozen agent pane while its session is
     /// converted to the other provider. State lives in `App::conversion`.
     ConvertSession,
@@ -2376,7 +2367,7 @@ pub struct App {
     plugin_clipboard_waiting:
         std::collections::HashMap<u64, plugin_devices_app::PendingPluginClipboard>,
     /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
-    pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
+    pub pending_terminal_link: Option<crate::open_target::TerminalLink>,
     pending_terminal_link_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
     /// Set by input dispatch when the client should leave its event loop.
     /// `None` keeps rendering; the concrete reason controls whether the CLI
@@ -9498,417 +9489,6 @@ impl App {
         self.mode = Mode::Settings(Box::default());
     }
 
-    /// Opens the full-screen workspace finder. Its index is intentionally
-    /// built only after the user pauses typing, so opening the finder and
-    /// every query edit remain immediate even with large retained journals.
-    pub fn action_open_search(&mut self) {
-        self.mode = Mode::Search(Box::default());
-    }
-
-    /// Starts one debounced background scan when the active finder has been
-    /// quiet for at least `SEARCH_DEBOUNCE`. The worker receives immutable
-    /// snapshots and never borrows `App`, leaving the event loop free to
-    /// render each key immediately.
-    pub fn tick_workspace_search(&mut self, now: Instant, workers: &mut SearchWorkers) -> bool {
-        workers.reconcile(match &self.mode {
-            Mode::Search(state) => Some((&state.identity, state.revision())),
-            _ => None,
-        });
-        if !workers.is_idle() {
-            return false;
-        }
-        let due_search = match &mut self.mode {
-            Mode::Search(state) => state
-                .take_due_search(now)
-                .map(|(revision, query)| (revision, query, std::sync::Arc::clone(&state.identity))),
-            _ => return false,
-        };
-        let Some((revision, query, identity)) = due_search else {
-            return false;
-        };
-        let started = (|| {
-            let cost = self.workspace_search_cost(query.len());
-            let reservation = workers.reserve(cost)?;
-            let sources = self.workspace_search_sources()?;
-            workers.start(
-                reservation,
-                WorkspaceSearchRequest {
-                    fences: self.workspace_search_fences(),
-                    identity,
-                    revision,
-                    query,
-                    sources,
-                },
-            )
-        })();
-        if let Err(error) = started {
-            if let Mode::Search(state) = &mut self.mode {
-                state.cancel_in_flight_search(revision);
-            }
-            self.status_message = Some(format!("Could not admit workspace search: {error}"));
-            return false;
-        }
-        true
-    }
-
-    /// Search scans are independent of terminal width; their raw history-byte
-    /// navigation targets and snippets are composed using the current layout.
-    fn workspace_search_cost(&self, query_bytes: usize) -> ilium_execution::JobCost {
-        let mut captured_bytes = 4096_usize;
-        let mut peak_history = 0_usize;
-        let mut largest_metadata = 0_usize;
-        for (pane_id, runtime) in &self.panes {
-            let Some(node) = self.tree.get(*pane_id) else {
-                continue;
-            };
-            let metadata = node.name.len().saturating_mul(4).saturating_add(4096);
-            largest_metadata = largest_metadata.max(metadata);
-            captured_bytes = captured_bytes.saturating_add(metadata);
-            match runtime {
-                PaneRuntime::Terminal(view) => {
-                    peak_history = peak_history.max(view.search_history_len())
-                }
-                PaneRuntime::Editor(editor) => {
-                    let path_bytes = editor
-                        .path
-                        .as_ref()
-                        .or_else(|| self.restored_editor_paths.get(pane_id))
-                        .map_or(0, |path| path.as_os_str().len());
-                    largest_metadata = largest_metadata.max(metadata.saturating_add(path_bytes));
-                    captured_bytes = captured_bytes.saturating_add(path_bytes);
-                    for line in editor.textarea.lines() {
-                        captured_bytes = captured_bytes
-                            .saturating_add(line.len().saturating_add(64).saturating_mul(4));
-                    }
-                }
-                PaneRuntime::Board(board) => {
-                    if let NodeKind::Pane {
-                        board_storage: Some(storage),
-                        ..
-                    } = &node.kind
-                    {
-                        let path_bytes = storage.path().as_os_str().len();
-                        largest_metadata =
-                            largest_metadata.max(metadata.saturating_add(path_bytes));
-                        captured_bytes = captured_bytes.saturating_add(path_bytes);
-                    }
-                    for column in &board.columns {
-                        for card in &column.cards {
-                            let bytes = column
-                                .title
-                                .len()
-                                .saturating_add(card.title.len())
-                                .saturating_add(card.body.len())
-                                .saturating_add(66);
-                            captured_bytes = captured_bytes.saturating_add(bytes.saturating_mul(4));
-                        }
-                    }
-                }
-            }
-        }
-        // Strip capacity <= raw bytes: invalid bytes are dropped, never expanded.
-        // Raw copy + stripped UTF-8 + u32 offset map + folded copy + headroom.
-        ilium_execution::JobCost {
-            input_bytes: captured_bytes
-                .saturating_add(peak_history.saturating_mul(8))
-                .saturating_add(query_bytes.saturating_mul(2)),
-            result_bytes: 800_usize
-                .saturating_mul(
-                    largest_metadata
-                        .saturating_mul(2)
-                        .saturating_add(query_bytes.saturating_mul(4))
-                        .saturating_add(2048),
-                )
-                .saturating_add(
-                    self.panes
-                        .len()
-                        .saturating_mul(2)
-                        .saturating_mul(std::mem::size_of::<crate::search_workers::SourceFence>()),
-                )
-                .saturating_add(4096),
-        }
-    }
-
-    fn workspace_search_fences(&self) -> Vec<crate::search_workers::SourceFence> {
-        self.panes
-            .iter()
-            .map(|(pane, runtime)| match runtime {
-                PaneRuntime::Terminal(view) => crate::search_workers::SourceFence::Terminal {
-                    pane: *pane,
-                    instance: std::sync::Arc::clone(&view.identity),
-                    origin: view.search_history_origin(),
-                },
-                PaneRuntime::Editor(editor) => crate::search_workers::SourceFence::Editor {
-                    pane: *pane,
-                    instance: editor.instance_identity(),
-                    revision: editor.content_revision(),
-                },
-                PaneRuntime::Board(board) => crate::search_workers::SourceFence::Board {
-                    pane: *pane,
-                    instance: board.instance_identity(),
-                    revision: board.intent_revision(),
-                },
-            })
-            .collect()
-    }
-
-    fn workspace_search_fences_match(&self, fences: &[crate::search_workers::SourceFence]) -> bool {
-        use crate::search_workers::SourceFence;
-        fences.iter().all(|fence| match fence {
-            SourceFence::Terminal { pane, instance, origin } => matches!(self.panes.get(pane), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(instance, &view.identity) && std::sync::Arc::ptr_eq(origin, &view.search_history_origin())),
-            SourceFence::Editor { pane, instance, revision } => matches!(self.panes.get(pane), Some(PaneRuntime::Editor(editor)) if std::sync::Arc::ptr_eq(instance, &editor.instance_identity()) && *revision == editor.content_revision()),
-            SourceFence::Board { pane, instance, revision } => matches!(self.panes.get(pane), Some(PaneRuntime::Board(board)) if std::sync::Arc::ptr_eq(instance, &board.instance_identity()) && *revision == board.intent_revision()),
-        })
-    }
-
-    pub fn apply_workspace_search_result(&mut self, event: SearchWorkerEvent) -> bool {
-        let sources_current = self.workspace_search_fences_match(&event.fences);
-        let Mode::Search(state) = &mut self.mode else {
-            return false;
-        };
-        if !std::sync::Arc::ptr_eq(&state.identity, &event.identity)
-            || state.revision() != event.revision
-        {
-            return false;
-        }
-        if !sources_current {
-            state.cancel_in_flight_search(event.revision);
-            self.status_message =
-                Some("Workspace search source changed; refreshing matches".into());
-            return true;
-        }
-        if let Some(error) = event.error {
-            state.cancel_in_flight_search(event.revision);
-            self.status_message = Some(format!("Workspace search failed: {error}"));
-            return true;
-        }
-        if state.complete_search(event.revision, event.results) {
-            state.source_fences = event.fences;
-            state.result_retention = event.retention;
-            let mut opened = None;
-            let mut cancelled_after_open = false;
-            while let Some(continuation) = state.pending_control.pop_front() {
-                if continuation.revision != state.revision() {
-                    state.control_error = Some(
-                        "Search continuation cancelled because its query was superseded".into(),
-                    );
-                    continue;
-                }
-                match continuation.action {
-                    crate::search_ui::SearchContinuationAction::Move(delta) => {
-                        state.move_selection(delta, usize::MAX)
-                    }
-                    crate::search_ui::SearchContinuationAction::Select(index)
-                    | crate::search_ui::SearchContinuationAction::Open(Some(index))
-                        if index >= state.results.len() =>
-                    {
-                        let message = format!("Search result index {index} does not exist");
-                        state.control_error = Some(message.clone());
-                        self.status_message = Some(message);
-                    }
-                    crate::search_ui::SearchContinuationAction::Select(index) => {
-                        state.selected_index = index
-                    }
-                    crate::search_ui::SearchContinuationAction::Open(index) => {
-                        if let Some(index) = index {
-                            state.selected_index = index;
-                        }
-                        if let Some(result) = state.selected_result().cloned() {
-                            opened = Some(result);
-                            if !state.pending_control.is_empty() {
-                                cancelled_after_open = true;
-                                state.pending_control.clear();
-                            }
-                            break;
-                        } else {
-                            let message = "There is no selected search result".to_string();
-                            state.control_error = Some(message.clone());
-                            self.status_message = Some(message);
-                        }
-                    }
-                }
-            }
-            if let Some(result) = opened {
-                self.activate_search_result(result);
-                if cancelled_after_open {
-                    self.status_message = Some("Later search continuations cancelled because an earlier command closed the finder".into());
-                }
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Synchronous helper retained for focused unit tests. Interactive
-    /// search uses `tick_workspace_search` and `SearchWorkers` instead.
-    #[cfg(test)]
-    pub fn refresh_search_results(&self, state: &mut SearchState) {
-        // Adopt (rather than plain-replace) so the revision advances: a
-        // debounced background worker still running for the previous query
-        // must be rejected on completion instead of clobbering these
-        // synchronously-computed results afterwards.
-        let query = state.query.buf.trim();
-        if query.is_empty() {
-            state.adopt_synchronous_results(Vec::new());
-            return;
-        }
-
-        let request = WorkspaceSearchRequest {
-            fences: self.workspace_search_fences(),
-            identity: std::sync::Arc::clone(&state.identity),
-            revision: 0,
-            query: query.to_string(),
-            sources: match self.workspace_search_sources() {
-                Ok(sources) => sources,
-                Err(_) => return,
-            },
-        };
-        state.adopt_synchronous_results(search_ui::search_workspace(&request, || false));
-    }
-
-    /// Captures all searchable client-owned state. The terminal half is an
-    /// O(1) immutable-segment snapshot of server-replayed history; editor and board text
-    /// is copied only after the debounce has elapsed and on a background scan.
-    fn workspace_search_sources(&self) -> Result<Vec<WorkspaceSearchSource>, String> {
-        let mut sources = Vec::new();
-        for (pane_id, runtime) in &self.panes {
-            let Some(node) = self.tree.get(*pane_id) else {
-                continue;
-            };
-            let NodeKind::Pane {
-                content,
-                status,
-                title_source,
-                board_storage,
-                ..
-            } = &node.kind
-            else {
-                continue;
-            };
-            let automatic_title =
-                (*title_source == PaneTitleSource::Automatic).then(|| node.name.clone());
-
-            match (content, runtime) {
-                (PaneContentKind::Terminal, PaneRuntime::Terminal(view)) => {
-                    let kind = if status.known_agent_state().is_some() {
-                        SearchObjectKind::Agent
-                    } else {
-                        SearchObjectKind::Shell
-                    };
-                    sources.push(WorkspaceSearchSource {
-                        pane_id: *pane_id,
-                        kind,
-                        object_name: node.name.clone(),
-                        automatic_title,
-                        path: None,
-                        // Terminal parsing belongs exclusively to the worker;
-                        // extracting this metadata here would rescan retained
-                        // output on the input/UI thread.
-                        last_command: None,
-                        content: WorkspaceSearchContent::Terminal(
-                            view.try_searchable_history_snapshot()?,
-                        ),
-                    });
-                }
-                (PaneContentKind::Editor, PaneRuntime::Editor(editor)) => {
-                    let path = editor
-                        .path
-                        .clone()
-                        .or_else(|| self.restored_editor_paths.get(pane_id).cloned());
-                    let text = editor
-                        .textarea
-                        .lines()
-                        .iter()
-                        .enumerate()
-                        .map(|(line, text)| WorkspaceSearchText {
-                            text: text.clone(),
-                            location: SearchLocation::Editor { line },
-                        })
-                        .collect();
-                    sources.push(WorkspaceSearchSource {
-                        pane_id: *pane_id,
-                        kind: SearchObjectKind::File,
-                        object_name: node.name.clone(),
-                        automatic_title,
-                        path,
-                        last_command: None,
-                        content: WorkspaceSearchContent::Text(text),
-                    });
-                }
-                (PaneContentKind::Board, PaneRuntime::Board(board)) => {
-                    let path = board_storage
-                        .as_ref()
-                        .map(|storage| storage.path().to_path_buf());
-                    let text = board
-                        .columns
-                        .iter()
-                        .flat_map(|column| {
-                            column.cards.iter().map(move |card| WorkspaceSearchText {
-                                text: format!("{}\n{}\n{}", column.title, card.title, card.body),
-                                location: SearchLocation::Board,
-                            })
-                        })
-                        .collect();
-                    sources.push(WorkspaceSearchSource {
-                        pane_id: *pane_id,
-                        kind: SearchObjectKind::Board,
-                        object_name: node.name.clone(),
-                        automatic_title,
-                        path,
-                        last_command: None,
-                        content: WorkspaceSearchContent::Text(text),
-                    });
-                }
-                _ => {}
-            }
-        }
-        Ok(sources)
-    }
-
-    /// Leaves search and navigates to the selected pane at the exact recorded
-    /// editor line or terminal-history byte position.
-    pub fn activate_search_result(&mut self, result: SearchResult) {
-        if let Mode::Search(state) = &self.mode {
-            if !self.workspace_search_fences_match(&state.source_fences) {
-                if let Mode::Search(state) = &mut self.mode {
-                    state.note_query_changed(Instant::now());
-                }
-                self.status_message =
-                    Some("Search source changed; refresh before opening this match".into());
-                return;
-            }
-        }
-        let history_origin = match &self.mode {
-            Mode::Search(state) => state.source_fences.iter().find_map(|fence| match fence {
-                crate::search_workers::SourceFence::Terminal { pane, origin, .. }
-                    if *pane == result.pane_id =>
-                {
-                    Some(std::sync::Arc::clone(origin))
-                }
-                _ => None,
-            }),
-            _ => None,
-        };
-        self.mode = Mode::Normal;
-        self.focus_pane(result.pane_id);
-        match result.location {
-            SearchLocation::Terminal { history_end_byte } => {
-                if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&result.pane_id) {
-                    let origin = history_origin.unwrap_or_else(|| view.search_history_origin());
-                    view.jump_to_search_history(history_end_byte, origin);
-                }
-            }
-            SearchLocation::Editor { line } => {
-                if let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&result.pane_id) {
-                    editor.jump_to_line(line);
-                }
-            }
-            SearchLocation::Board => {}
-        }
-        self.status_message = Some(format!("Opened search result in {}", result.object_name));
-    }
-
     /// Selects one of the three cards without discarding values owned by the
     /// other policies, allowing quick comparison and later restoration.
     pub fn settings_set_left_panel_sizing_mode(&mut self, mode: LeftPanelSizingMode) {
@@ -16086,7 +15666,6 @@ impl App {
                     rejected.reason
                 )
             })?;
-        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
         let detectors = self.plugin_link_detectors();
         let owner = self
             .terminal_context_preparation
@@ -16099,8 +15678,6 @@ impl App {
                 pane_id,
                 row: usize::from(position.y.saturating_sub(viewport.content_area.y)),
                 column: usize::from(position.x.saturating_sub(viewport.content_area.x)),
-                cwd: &self.session_cwd,
-                home: home.as_deref(),
                 detectors,
             },
         )?;
@@ -16317,6 +15894,7 @@ impl App {
             click_column,
             &self.session_cwd,
             home_dir.as_deref(),
+            &self.plugin_link_detectors(),
         )
         .or_else(|| {
             view.osc8_link_at(&source_line_text, click_column)
@@ -17418,6 +16996,7 @@ impl App {
             click_column,
             &self.session_cwd,
             home_dir.as_deref(),
+            &self.plugin_link_detectors(),
         ) {
             if let Some(path) = target.file_path() {
                 actions.push(EditorLineContextAction::OpenInEditor {
@@ -17828,7 +17407,9 @@ impl App {
         match action {
             // A plugin entry needs the menu that holds it: `execute_menu_action` runs it.
             ContextMenuAction::Plugin(_) => {}
-            ContextMenuAction::Search => self.action_open_search(),
+            ContextMenuAction::Search => {
+                self.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Menu)
+            }
             ContextMenuAction::FocusPane => self.focus_pane(target),
             ContextMenuAction::CreateBoardFromMarkdown => {
                 self.request_board_from_markdown_editor(target)
@@ -18819,10 +18400,6 @@ impl App {
             .min();
         let next_deadline = autosave_deadline
             .into_iter()
-            .chain(match &self.mode {
-                Mode::Search(search) => search.next_due_search_at(),
-                _ => None,
-            })
             .chain(self.restructure_budget_autosave_deadline)
             .chain(self.remote_compaction_save_deadline)
             .chain(self.custom_status_rules_save_deadline)
@@ -20935,21 +20512,21 @@ impl App {
                             .unwrap_or_default()
                             .to_string()
                     });
-                    // Resolved once per click (not cached on `App`): a Ctrl+click
-                    // is not a hot path, and computing it here keeps
-                    // `terminal_links::link_at` itself free of I/O so it stays a
-                    // plain, unit-testable function.
-                    let home_dir = directories::BaseDirs::new()
-                        .map(|directories| directories.home_dir().to_path_buf());
-                    let link = crate::terminal_links::link_at(
+                    // The plugin link detectors are the only detection; OSC 8 is the fallback.
+                    let link = crate::plugin_host::links::plugin_link_at(
+                        &self.plugin_link_detectors(),
                         &line,
                         column,
-                        &self.session_cwd,
-                        home_dir.as_deref(),
                     )
+                    .map(|found| crate::open_target::TerminalLink::Plugin {
+                        plugin: found.plugin,
+                        detector_id: found.detector_id,
+                        command: found.command,
+                        text: found.text,
+                    })
                     .or_else(|| {
                         view.osc8_link_at(&line, column)
-                            .map(crate::terminal_links::TerminalLink::Url)
+                            .map(crate::open_target::TerminalLink::Url)
                     });
                     if let Some(link) = link {
                         self.status_message = Some(format!(
@@ -21169,18 +20746,10 @@ impl App {
         };
         if open {
             match link {
-                crate::terminal_links::TerminalLink::Url(url) => {
+                crate::open_target::TerminalLink::Url(url) => {
                     self.queue_external_open(crate::open_target::OpenTarget::Url(url), source_hold);
                 }
-                crate::terminal_links::TerminalLink::File { path, line, column } => {
-                    let target = self.group_for_new_node();
-                    self.request_new_editor_at(target, path.clone(), line, column);
-                    self.status_message = Some(match line {
-                        Some(line) => format!("Opening {} at line {line}", path.display()),
-                        None => format!("Opening {}", path.display()),
-                    });
-                }
-                crate::terminal_links::TerminalLink::Plugin {
+                crate::open_target::TerminalLink::Plugin {
                     plugin,
                     detector_id,
                     command,
@@ -21912,10 +21481,8 @@ mod tests {
             .unwrap();
         app.agent_session_ids.insert(pane_id, "session".into());
         let now = Instant::now();
-        let mut workers =
-            crate::search_workers::SearchWorkers::new(crate::execution::test_client());
-        crate::tick::on_tick(&mut app, now, false, &mut workers);
-        assert!(!crate::tick::on_tick(&mut app, now, false, &mut workers));
+        crate::tick::on_tick(&mut app, now, false);
+        assert!(!crate::tick::on_tick(&mut app, now, false));
         let tail = PromptTail::new("session".into(), now);
         let binding = Arc::clone(&tail.binding);
         app.last_prompt_tails.insert(pane_id, tail);
@@ -21935,7 +21502,7 @@ mod tests {
             })
             .unwrap();
 
-        assert!(crate::tick::on_tick(&mut app, now, false, &mut workers));
+        assert!(crate::tick::on_tick(&mut app, now, false));
         assert_eq!(app.display_last_agent_prompt(pane_id), Some("new prompt"));
     }
 
@@ -27438,23 +27005,6 @@ mod tests {
     }
 
     #[test]
-    fn workspace_search_debounce_wakes_at_its_exact_deadline() {
-        let mut app = app();
-        let edited_at = Instant::now();
-        app.action_open_search();
-        let Mode::Search(state) = &mut app.mode else {
-            panic!("opening workspace search must enter search mode");
-        };
-        state.query = TextPromptState::new("needle");
-        state.note_query_changed(edited_at);
-
-        assert_eq!(
-            app.next_maintenance_delay(edited_at),
-            crate::search_ui::SEARCH_DEBOUNCE
-        );
-    }
-
-    #[test]
     fn setting_layout_resizes_the_visible_terminal_pane() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -31311,104 +30861,6 @@ mod tests {
         assert_eq!(persisted.notifications, settings);
 
         let _ = std::fs::remove_dir_all(config_dir);
-    }
-
-    #[test]
-    fn workspace_search_finds_terminal_history_and_activates_its_exact_location() {
-        let mut app = app();
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let mut terminal = TerminalView::new(4, 40);
-        terminal.feed(b"before\r\nWORKSPACE_SEARCH_NEEDLE\r\nafter\r\n");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
-
-        let mut state = SearchState::new();
-        state.query = TextPromptState::new("workspace_search_needle");
-        app.refresh_search_results(&mut state);
-
-        let result = state.selected_result().cloned().expect("terminal result");
-        assert_eq!(result.pane_id, pane_id);
-        assert!(matches!(result.location, SearchLocation::Terminal { .. }));
-
-        app.activate_search_result(result);
-
-        assert_eq!(app.active_pane_id(), Some(pane_id));
-        let PaneRuntime::Terminal(terminal) = app.panes.get(&pane_id).unwrap() else {
-            unreachable!();
-        };
-        assert!(terminal
-            .with_screen(|screen| screen.contents())
-            .contains("WORKSPACE_SEARCH_NEEDLE"));
-    }
-
-    #[test]
-    fn workspace_search_waits_then_applies_a_worker_result_for_the_current_query() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let mut terminal = TerminalView::new(4, 40);
-        terminal.feed(b"background WORKSPACE_DEBOUNCE_NEEDLE\r\n");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
-        app.action_open_search();
-        let started = Instant::now();
-        let Mode::Search(state) = &mut app.mode else {
-            panic!("workspace finder should be open");
-        };
-        state.query = TextPromptState::new("workspace_debounce_needle");
-        state.note_query_changed(started);
-
-        let mut workers = SearchWorkers::new(crate::execution::test_client());
-        assert!(!app.tick_workspace_search(
-            started + search_ui::SEARCH_DEBOUNCE - std::time::Duration::from_millis(1),
-            &mut workers,
-        ));
-        assert!(workers.is_idle());
-
-        assert!(app.tick_workspace_search(started + search_ui::SEARCH_DEBOUNCE, &mut workers));
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        let event = loop {
-            if let Some(event) = workers.collect() {
-                break event;
-            }
-            assert!(Instant::now() < deadline, "search completion timeout");
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        };
-        assert!(app.apply_workspace_search_result(event));
-
-        let Mode::Search(state) = &app.mode else {
-            panic!("workspace finder should remain open");
-        };
-        assert_eq!(state.results.len(), 1);
-        assert_eq!(state.results[0].pane_id, pane_id);
-    }
-
-    #[test]
-    fn workspace_search_maintenance_preserves_an_active_settings_view() {
-        let mut app = app();
-        app.action_open_settings();
-        let mut workers = SearchWorkers::new(crate::execution::test_client());
-
-        assert!(!app.tick_workspace_search(Instant::now(), &mut workers));
-        assert!(matches!(app.mode, Mode::Settings(_)));
-
-        assert!(!app.apply_workspace_search_result(SearchWorkerEvent {
-            identity: std::sync::Arc::new(()),
-            revision: 1,
-            results: Vec::new(),
-            error: None,
-            fences: Vec::new(),
-            retention: None,
-        }));
-        assert!(matches!(app.mode, Mode::Settings(_)));
     }
 
     #[test]

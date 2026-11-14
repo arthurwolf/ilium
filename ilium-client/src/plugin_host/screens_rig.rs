@@ -185,21 +185,13 @@ const GRANT_TABLE: [(&str, &str, bool); 61] = [
         true,
     ),
     ("editor.read", "Read the text of open editor panes", false),
-    (
-        "editor.edit",
-        "Change the text of open editor panes",
-        false,
-    ),
+    ("editor.edit", "Change the text of open editor panes", false),
     (
         "editor.provide",
         "Offer its own editor, for a new file type",
         true,
     ),
-    (
-        "ui.panels",
-        "Show its own panels and settings pages",
-        false,
-    ),
+    ("ui.panels", "Show its own panels and settings pages", false),
     (
         "ui.chrome",
         "Add items to menus, toolbars, status bar and tree rows",
@@ -213,12 +205,12 @@ const GRANT_TABLE: [(&str, &str, bool); 61] = [
     ("keymap.read", "Read your key bindings", false),
     ("commands.invoke", "Run Ilium commands", false),
     ("fs.read", "Read files in one named place", false),
-    ("fs.write", "Create and change files in one named place", true),
     (
-        "fs.watch",
-        "Be told when files in a place change",
-        false,
+        "fs.write",
+        "Create and change files in one named place",
+        true,
     ),
+    ("fs.watch", "Be told when files in a place change", false),
     (
         "fs.pick",
         "Ask you to choose a file or folder, then read that one only",
@@ -252,7 +244,11 @@ const GRANT_TABLE: [(&str, &str, bool); 61] = [
         "Turn text into embeddings with your AI providers",
         false,
     ),
-    ("services.use", "Call a named service of another plugin", false),
+    (
+        "services.use",
+        "Call a named service of another plugin",
+        false,
+    ),
     (
         "services.provide",
         "Offer a named service to other plugins",
@@ -273,11 +269,7 @@ const GRANT_TABLE: [(&str, &str, bool); 61] = [
         "Read the host's record of recent events",
         false,
     ),
-    (
-        "extensions.provide",
-        "Offer its own extension point",
-        false,
-    ),
+    ("extensions.provide", "Offer its own extension point", false),
     (
         "extensions.contribute",
         "Fill another plugin's extension point",
@@ -300,14 +292,19 @@ const GRANT_TABLE: [(&str, &str, bool); 61] = [
         true,
     ),
     ("audio.playback", "Play audio streams", false),
-    ("location.observer", "Know your approximate location for scenes", true),
+    (
+        "location.observer",
+        "Know your approximate location for scenes",
+        true,
+    ),
 ];
 
 /// Plain wording and risk of a permission string such as `http:api.example.com`.
 fn grant_info(grant: &str) -> (String, bool) {
     let base = grant.split(':').next().unwrap_or(grant);
     let argument = grant.split_once(':').map(|(_, rest)| rest);
-    let bare_star_is_high = matches!(base, "commands.invoke" | "topics.subscribe") && argument == Some("*");
+    let bare_star_is_high =
+        matches!(base, "commands.invoke" | "topics.subscribe") && argument == Some("*");
     match GRANT_TABLE.iter().find(|(name, _, _)| *name == base) {
         Some((_, wording, high)) => ((*wording).to_string(), *high || bare_star_is_high),
         None => (format!("Use the {base} permission"), false),
@@ -772,14 +769,11 @@ impl ScreensRig {
     /// USR-014..USR-214 input: selects the first row of the open view or dialog that matches.
     pub fn move_selection_to(&mut self, text: &str) {
         let items = self.items();
-        let found = items
-            .iter()
-            .position(|item| item.key == text)
-            .or_else(|| {
-                items
-                    .iter()
-                    .position(|item| item.key.contains(text) || item.label.contains(text))
-            });
+        let found = items.iter().position(|item| item.key == text).or_else(|| {
+            items
+                .iter()
+                .position(|item| item.key.contains(text) || item.label.contains(text))
+        });
         if let Some(index) = found {
             self.selection = index;
         }
@@ -916,7 +910,9 @@ impl ScreensRig {
         self.install_named(id, id, "T2");
         if let Some(plugin) = self.plugin_mut(id) {
             for grant in grants {
-                plugin.grants.insert((*grant).to_string(), "granted".to_string());
+                plugin
+                    .grants
+                    .insert((*grant).to_string(), "granted".to_string());
             }
         }
     }
@@ -1264,7 +1260,8 @@ impl ScreensRig {
 
     /// USR-014 read-back.
     pub fn plugin_is_running(&self, id: &str) -> bool {
-        self.plugin(id).is_some_and(|plugin| self.is_running(plugin))
+        self.plugin(id)
+            .is_some_and(|plugin| self.is_running(plugin))
     }
 
     /// USR-160 read-back.
@@ -1548,14 +1545,11 @@ impl ScreensRig {
             return;
         };
         if plugin.is_protected() {
-            self.last_notice = Some(format!(
-                "{id} cannot be turned off: Ilium always needs it."
-            ));
+            self.last_notice = Some(format!("{id} cannot be turned off: Ilium always needs it."));
             return;
         }
         if !plugin.core && self.safe_mode {
-            self.last_notice =
-                Some("Third-party plugins stay off in safe mode.".to_string());
+            self.last_notice = Some("Third-party plugins stay off in safe mode.".to_string());
             return;
         }
         match plugin.state {
@@ -1627,7 +1621,11 @@ impl ScreensRig {
         };
         if let Some(order) = self.extension_orders.get_mut(&point) {
             if let Some(index) = order.iter().position(|id| *id == item.key) {
-                let target = if up { index.checked_sub(1) } else { Some(index + 1) };
+                let target = if up {
+                    index.checked_sub(1)
+                } else {
+                    Some(index + 1)
+                };
                 if let Some(target) = target.filter(|target| *target < order.len()) {
                     order.swap(index, target);
                     self.selection = self.selection.saturating_add(target).saturating_sub(index);
@@ -1677,7 +1675,10 @@ impl ScreensRig {
 
     fn clipboard_allowed(&self, id: &str, grant: &str) -> bool {
         match self.plugin(id) {
-            Some(plugin) => plugin.grants.get(grant).is_some_and(|state| state == "granted"),
+            Some(plugin) => plugin
+                .grants
+                .get(grant)
+                .is_some_and(|state| state == "granted"),
             None => true,
         }
     }
@@ -1716,7 +1717,8 @@ impl ScreensRig {
                     }
                     'u' => {
                         if self.plugin(&id).is_some_and(|plugin| plugin.core) {
-                            self.last_notice = Some(format!("{id} is a core plugin and stays installed."));
+                            self.last_notice =
+                                Some(format!("{id} is a core plugin and stays installed."));
                         } else {
                             self.ask_confirm(ConfirmKind::Uninstall, &id);
                         }
@@ -1860,7 +1862,10 @@ impl ScreensRig {
                 continue;
             }
             let number = index + 1;
-            if let Some(name) = line.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            if let Some(name) = line
+                .strip_prefix('[')
+                .and_then(|rest| rest.strip_suffix(']'))
+            {
                 if !["packages", "publishers", "grants", "network", "notice"].contains(&name) {
                     return (Some(policy_error(name, number)), true);
                 }
@@ -2085,7 +2090,10 @@ impl ScreensRig {
         }
         for toast in &self.toasts {
             if self.now_ms < toast.until {
-                lines.push(Self::prose_line(format!("[{}] {}", toast.plugin, toast.text)));
+                lines.push(Self::prose_line(format!(
+                    "[{}] {}",
+                    toast.plugin, toast.text
+                )));
             }
         }
         lines.extend(self.footer_lines());
@@ -2136,11 +2144,15 @@ impl ScreensRig {
             View::Tree => lines.push(Self::prose_line("Project tree")),
             View::Settings => {
                 lines.push(Self::prose_line("Settings"));
-                lines.push(Self::prose_line("General   Plugins   Animations   Diagnostics"));
+                lines.push(Self::prose_line(
+                    "General   Plugins   Animations   Diagnostics",
+                ));
             }
             View::PluginsTab => {
                 lines.push(Self::prose_line("Settings > Plugins"));
-                lines.push(Self::row_line("Plugin                       Tier  State".to_string()));
+                lines.push(Self::row_line(
+                    "Plugin                       Tier  State".to_string(),
+                ));
                 for (index, plugin) in self.plugins.iter().enumerate() {
                     let marker = if index == self.selection { ">" } else { " " };
                     lines.push(Self::row_line(format!(
@@ -2158,7 +2170,10 @@ impl ScreensRig {
                     Some(plugin) => {
                         lines.push(Self::row_line(format!("Plugin: {}", plugin.id)));
                         lines.push(Self::row_line(format!("Tier: {}", plugin.tier)));
-                        lines.push(Self::row_line(format!("State: {}", self.state_word(plugin))));
+                        lines.push(Self::row_line(format!(
+                            "State: {}",
+                            self.state_word(plugin)
+                        )));
                         lines.push(Self::row_line("[Forget settings]".to_string()));
                         if !plugin.core {
                             lines.push(Self::row_line("[Uninstall]".to_string()));
@@ -2288,10 +2303,15 @@ impl ScreensRig {
                 continue;
             }
             // The row is too wide: the grant string goes on its own lines, never cut.
-            lines.push(Self::row_line(format!("{marker}{check} {wording}{risk}{lock}")));
+            lines.push(Self::row_line(format!(
+                "{marker}{check} {wording}{risk}{lock}"
+            )));
             let chars: Vec<char> = row.grant.chars().collect();
             for chunk in chars.chunks(columns.saturating_sub(4).max(1)) {
-                lines.push(Self::row_line(format!("    {}", chunk.iter().collect::<String>())));
+                lines.push(Self::row_line(format!(
+                    "    {}",
+                    chunk.iter().collect::<String>()
+                )));
             }
         }
     }
@@ -2299,7 +2319,9 @@ impl ScreensRig {
     fn draw_dialog(&self, dialog: &Dialog, lines: &mut Vec<DrawnLine>) {
         match dialog {
             Dialog::FirstStart { plugin, rows } => {
-                lines.push(Self::prose_line(format!("First start: {plugin} asks for permissions")));
+                lines.push(Self::prose_line(format!(
+                    "First start: {plugin} asks for permissions"
+                )));
                 self.draw_rows(rows, lines);
                 lines.push(Self::row_line("[Allow selected]  [Not now]".to_string()));
             }
@@ -2313,8 +2335,13 @@ impl ScreensRig {
                 fingerprint,
             } => {
                 let compact = compact_fingerprint(fingerprint);
-                lines.push(Self::prose_line(format!("Do you trust the publisher {publisher}?")));
-                lines.push(Self::prose_line(format!("Short form: {}", head_chars(&compact, 8))));
+                lines.push(Self::prose_line(format!(
+                    "Do you trust the publisher {publisher}?"
+                )));
+                lines.push(Self::prose_line(format!(
+                    "Short form: {}",
+                    head_chars(&compact, 8)
+                )));
                 lines.push(Self::prose_line("Full fingerprint:"));
                 lines.push(Self::prose_line(format!("  {fingerprint}")));
                 lines.push(Self::row_line("[Trust]  [Do not trust]".to_string()));
@@ -2322,8 +2349,13 @@ impl ScreensRig {
             Dialog::KeyChange { plugin, old, new } => {
                 let old_compact = compact_fingerprint(old);
                 let new_compact = compact_fingerprint(new);
-                lines.push(Self::prose_line(format!("The signing key of {plugin} changed.")));
-                lines.push(Self::prose_line(format!("Old key: {}", head_chars(&old_compact, 8))));
+                lines.push(Self::prose_line(format!(
+                    "The signing key of {plugin} changed."
+                )));
+                lines.push(Self::prose_line(format!(
+                    "Old key: {}",
+                    head_chars(&old_compact, 8)
+                )));
                 lines.push(Self::prose_line(format!("  {old}")));
                 lines.push(Self::prose_line(format!(
                     "New key: {}\u{2026}{}",
@@ -2331,14 +2363,22 @@ impl ScreensRig {
                     tail_chars(&new_compact, 4)
                 )));
                 lines.push(Self::prose_line(format!("  {new}")));
-                lines.push(Self::row_line("[Trust the new key]  [Do not trust]".to_string()));
+                lines.push(Self::row_line(
+                    "[Trust the new key]  [Do not trust]".to_string(),
+                ));
             }
             Dialog::Replace { plugin, replaced } => {
-                lines.push(Self::prose_line(format!("{plugin} wants to replace {replaced}.")));
-                lines.push(Self::row_line("[Replace]  [Install without replacing]".to_string()));
+                lines.push(Self::prose_line(format!(
+                    "{plugin} wants to replace {replaced}."
+                )));
+                lines.push(Self::row_line(
+                    "[Replace]  [Install without replacing]".to_string(),
+                ));
             }
             Dialog::SupportBundle { plugin } => {
-                lines.push(Self::prose_line(format!("Build support bundle for {plugin}")));
+                lines.push(Self::prose_line(format!(
+                    "Build support bundle for {plugin}"
+                )));
                 let failures = self.plugin(plugin).map_or(0, |entry| entry.failures);
                 let settings = self.plugin(plugin).map_or(0, |entry| entry.settings.len());
                 let sizes = [
@@ -2399,7 +2439,6 @@ fn policy_error(key: &str, line: usize) -> String {
         "System policy file is malformed: unknown key {key} on line {line}. Third-party plugins will not load."
     )
 }
-
 
 #[cfg(test)]
 mod spec_tests {

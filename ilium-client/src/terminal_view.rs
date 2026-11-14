@@ -31,6 +31,25 @@ use tui_term::widget::PseudoTerminal;
 
 use crate::terminal_activity::{VisibleRowEvidence, VisibleTextEvidence};
 
+/// Converts a terminal cell column into the byte offset of the character
+/// occupying that cell, walking `line` cell-by-cell so multi-byte and
+/// double-width characters (box-drawing glyphs, agent status icons, emoji)
+/// preceding the click point are accounted for rather than counted as a
+/// single byte each. Clicking either half of a double-width character
+/// resolves to that character's own start, matching the token it belongs to.
+pub(crate) fn cell_column_to_byte_offset(line: &str, column: usize) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    let mut cell = 0;
+    for (byte_offset, character) in line.char_indices() {
+        let width = UnicodeWidthChar::width(character).unwrap_or(1);
+        if column < cell + width {
+            return byte_offset;
+        }
+        cell += width;
+    }
+    line.len()
+}
+
 #[cfg(test)]
 #[path = "terminal_view_parser_pressure_regressions.rs"]
 mod parser_pressure_regressions;
@@ -654,9 +673,9 @@ impl TerminalState {
         // CLI panes routinely prefix a link's label with a multi-byte status
         // glyph (`⏺`, `⎿`, `→`), so comparing a raw cell index against a byte
         // range here would land inside that glyph's encoding rather than the
-        // clicked label -- the same class of bug `terminal_links::link_at`
-        // already guards against via this identical conversion.
-        let byte_column = crate::terminal_links::cell_column_to_byte_offset(line, column);
+        // clicked label -- the same class of bug every link detector
+        // guards against via this identical conversion.
+        let byte_column = cell_column_to_byte_offset(line, column);
         self.osc8_links.iter().rev().find_map(|(label, target)| {
             let start = line.find(label)?;
             (start..start + label.len())
@@ -1286,7 +1305,7 @@ impl PaintedTerminal {
     }
     #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
-        let column = crate::terminal_links::cell_column_to_byte_offset(line, column);
+        let column = cell_column_to_byte_offset(line, column);
         self.snapshot
             .links
             .iter()
@@ -1784,6 +1803,18 @@ impl TerminalState {
 mod tests {
     use super::TerminalState as TerminalView;
     use super::*;
+
+    #[test]
+    fn accounts_for_multi_byte_glyphs_when_mapping_a_cell_column() {
+        // "⏺ " is 4 bytes but only 2 cells wide: cell 2 is the first byte of what follows.
+        assert_eq!(cell_column_to_byte_offset("⏺ src/main.rs", 2), 4);
+        assert_eq!(cell_column_to_byte_offset("abc", 1), 1);
+        // Both halves of a double-width character resolve to its own start.
+        assert_eq!(cell_column_to_byte_offset("日本x", 1), 0);
+        assert_eq!(cell_column_to_byte_offset("日本x", 2), 3);
+        // Past the end of the line is the line length.
+        assert_eq!(cell_column_to_byte_offset("ab", 9), 2);
+    }
 
     #[test]
     fn private_osc_highwater_survives_termination_and_split_openers() {
@@ -2931,7 +2962,7 @@ impl TerminalView {
         if let Some(state) = &self.standalone {
             return state.osc8_link_at(line, column);
         }
-        let column = crate::terminal_links::cell_column_to_byte_offset(line, column);
+        let column = cell_column_to_byte_offset(line, column);
         self.snapshot
             .links
             .iter()

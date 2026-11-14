@@ -283,3 +283,69 @@ proptest! {
 fn intents_of(submissions: &[Submission]) -> Vec<Intent> {
     crate::common::intents(submissions)
 }
+
+/// REQ: F-015
+#[test]
+fn feature_015_activating_a_path_link_without_a_line_opens_the_editor_in_a_split() {
+    let mut host = client_host();
+    let submissions = activate(&mut host, vec![link(7, "path", "docs/STYLE.md")]);
+    assert_eq!(
+        intents_of(&submissions),
+        vec![open_spec("docs/STYLE.md", None)]
+    );
+}
+
+/// REQ: F-015
+#[test]
+fn feature_015_a_path_link_with_a_line_and_column_reveals_the_line() {
+    let mut host = client_host();
+    let submissions = activate(&mut host, vec![link(7, "path", "src/a.rs:12:3")]);
+    assert_eq!(
+        intents_of(&submissions),
+        vec![open_spec("src/a.rs", Some(11))]
+    );
+}
+
+/// REQ: F-015
+#[test]
+fn feature_015_a_home_path_link_opens_in_the_home_scope() {
+    let mut host = client_host();
+    let submissions = activate(&mut host, vec![link(7, "path", "~/.bashrc")]);
+    assert_eq!(
+        intents_of(&submissions),
+        vec![Intent::EditorOpen(EditorOpenSpec {
+            path: FsPath {
+                scope: "home".to_string(),
+                path: ".bashrc".to_string(),
+            },
+            line: None,
+            placement: EditorPlacement::Split,
+        })]
+    );
+}
+
+/// REQ: F-015
+#[test]
+fn feature_015_an_empty_path_link_is_ignored() {
+    let mut host = client_host();
+    assert!(activate(&mut host, vec![link(7, "path", "")]).is_empty());
+    assert!(activate(&mut host, vec![link(7, "path", "~")]).is_empty());
+}
+
+/// REQ: F-015
+#[test]
+fn feature_015_a_relative_path_joins_the_working_directory_of_the_clicked_pane() {
+    let mut host = client_host();
+    let pane = host.tree().add_agent_pane("shell", "claude");
+    host.tree().set_pane_directory(pane, "/repo/crate");
+    let submissions = activate(&mut host, vec![link(pane, "path", "src/a.rs:12:3")]);
+    assert_eq!(
+        intents_of(&submissions),
+        vec![open_spec("/repo/crate/src/a.rs", Some(11))]
+    );
+    let submissions = activate(&mut host, vec![link(pane, "path-line", "../b.rs:2")]);
+    assert_eq!(
+        intents_of(&submissions),
+        vec![open_spec("/repo/b.rs", Some(1))]
+    );
+}
