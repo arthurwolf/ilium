@@ -3195,11 +3195,6 @@ impl App {
                     self.commit_animation_value_dialog(&mut host, &outcome)
                 } else if matches!(
                     host.target,
-                    crate::value_dialog_host::ValueTarget::Plugin(_)
-                ) {
-                    self.commit_plugin_value_dialog(&mut host, &outcome)
-                } else if matches!(
-                    host.target,
                     crate::value_dialog_host::ValueTarget::Cost { .. }
                 ) {
                     self.commit_cost_value_dialog(&mut host, &outcome)
@@ -3440,15 +3435,8 @@ impl App {
     pub(crate) fn finish_value_dialog_save(
         &mut self,
         token: &std::sync::Arc<()>,
-        mut result: Result<(), String>,
+        result: Result<(), String>,
     ) {
-        if result.is_ok()
-            && matches!(&self.mode, Mode::ValueDialog(host)
-            if matches!(&host.target, crate::value_dialog_host::ValueTarget::Plugin(target)
-                if !target.binding_is_current(self)))
-        {
-            result = Err("Plugin binding changed while saving; reopen this dialog".into());
-        }
         let success = result.is_ok();
         let error = result.as_ref().err().cloned();
         let Mode::ValueDialog(host) = &mut self.mode else {

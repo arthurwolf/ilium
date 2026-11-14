@@ -121,6 +121,15 @@ pub trait ByteSource {
     fn read_at(&self, offset: u64, max: usize) -> Result<Vec<u8>, String>;
 }
 
+/// Complete lines kept from the head and tail windows of a transcript.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TranscriptWindow {
+    pub lines: Vec<String>,
+    /// The middle of the transcript was skipped.
+    pub truncated: bool,
+    pub oversize_lines_skipped: usize,
+}
+
 /// Bytes `[start, end)` of `source`, read in as many calls as the source needs.
 fn read_range(source: &dyn ByteSource, start: u64, end: u64) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
@@ -738,8 +747,6 @@ mod tests {
             .contains("supersecretvalue123"));
         assert!(build_screen_digest("   \n  ").is_empty());
     }
-
-    #[test]
 
     struct Bytes(Vec<u8>);
 

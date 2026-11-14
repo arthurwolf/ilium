@@ -576,7 +576,7 @@ mod tests {
             rows: 24,
         };
         assert_eq!(
-            render(&ViewTarget::Panel("optimizer".to_string()), area),
+            render(&ViewTarget::Panel("optimizer".to_string()), area.clone()),
             UiTree::default()
         );
         assert_ne!(render(&panel(), area), UiTree::default());

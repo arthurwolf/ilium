@@ -2783,6 +2783,41 @@ fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+/// Real source-window UI route, prepared on the shared finite CPU bank.
+#[cfg(test)]
+pub(crate) fn test_source_window_pixels(
+    editor: &mut EditorPane,
+    width: u16,
+    height: u16,
+) -> ratatui::buffer::Buffer {
+    editor.show_minimap = false;
+    // One extra column: the editor reserves it for the scrollbar, so the
+    // text window keeps the requested width.
+    let area = Rect::new(0, 0, width + 1, height + editor_chrome::TOOLBAR_HEIGHT);
+    let content = editor_chrome::compute(area, false).content_area;
+    assert_eq!(content.width, width);
+    assert_eq!(content.height, height);
+    editor.prepare_test_source_window_with_syntax(
+        width,
+        height,
+        &ratatui_image::picker::Picker::halfblocks(),
+    );
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+            .unwrap();
+    terminal
+        .draw(|frame| draw_editor(frame, area, editor))
+        .unwrap();
+    let mut output = ratatui::buffer::Buffer::empty(Rect::new(0, 0, width, height));
+    for row in 0..height {
+        for column in 0..width {
+            output[(column, row)] =
+                terminal.backend().buffer()[(content.x + column, content.y + row)].clone();
+        }
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

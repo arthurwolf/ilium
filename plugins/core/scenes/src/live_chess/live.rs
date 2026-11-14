@@ -6,7 +6,8 @@
 //! only records the error.
 use super::feed::Game;
 use super::position::ChessPosition;
-use ilium_plugin_sdk::host::{HttpRequest, RequestId};
+use ilium_plugin_sdk::host::HttpRequest;
+use ilium_plugin_sdk::types::RequestId;
 use serde_json::Value;
 use std::sync::Arc;
 

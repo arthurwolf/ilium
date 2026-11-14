@@ -206,7 +206,7 @@ impl Scene for CarpetScene {
             let chess = self.chess.get_or_insert_with(|| CarpetChess::new(seed));
             chess.update(
                 mode == Mode::LiveChess,
-                self.tv.as_deref_mut(),
+                self.tv.as_mut().map(|tv| &mut **tv as &mut dyn TvSource),
                 &options,
                 self.simulation_time,
                 unix_seconds,

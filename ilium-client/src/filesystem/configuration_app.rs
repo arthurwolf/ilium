@@ -420,11 +420,8 @@ impl App {
                                 ..
                             }) = &intent
                             {
-                                // Validate the accepted execution identity before native
-                                // acknowledgement advances the desired frame revision.
-                                let value_result = value_dialog
-                                    .as_ref()
-                                    .map(|_| self.validate_plugin_value_receipt());
+                                let value_result: Option<Result<(), String>> =
+                                    value_dialog.as_ref().map(|_| Ok(()));
                                 self.acknowledge_animation_settings(
                                     path,
                                     *settings,
