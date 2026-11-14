@@ -352,11 +352,13 @@ mod tests {
             cancel: &CancelFlag,
         ) -> Result<Completion, PluginError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            while self.block {
-                if cancel.is_set() {
-                    return Err(PluginError::new(ErrorCode::Cancelled, "cancelled"));
+            if self.block {
+                loop {
+                    if cancel.is_set() {
+                        return Err(PluginError::new(ErrorCode::Cancelled, "cancelled"));
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
                 }
-                std::thread::sleep(Duration::from_millis(5));
             }
             let last = request
                 .messages
