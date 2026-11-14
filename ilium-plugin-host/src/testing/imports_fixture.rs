@@ -6,7 +6,6 @@ use super::fake_kernel::FakeKernel;
 use crate::imports::{
     basic::BasicImport,
     codec::CodecImport,
-    env::ImportEnv,
     log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
@@ -541,7 +540,7 @@ fn blocked(hook: &str) -> ! {
 pub struct JobInstance {
     jobs_import: JobsImport,
     settings_import: SettingsImport,
-    clock_import: ClockImport,
+    clock_import: ClockImport::default(),
     log_import: LogImport,
 }
 
@@ -852,7 +851,7 @@ impl ImportsFixture {
         JobInstance {
             jobs_import: JobsImport::default(),
             settings_import: SettingsImport,
-            clock_import: ClockImport,
+            clock_import: ClockImport::default(),
             log_import: LogImport::new(
                 self.logger.clone(),
                 self.budget.clone(),
