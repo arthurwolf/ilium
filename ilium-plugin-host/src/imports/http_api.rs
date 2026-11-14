@@ -1,12 +1,16 @@
-//! Host implementation of `ilium:host/http-api` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/http-api`.
 //!
-//! Written once by the skeleton lane from the generated `HostHttpApi` trait; hand-owned afterwards.
+//! `HttpApiImport` is the standalone import with its own open-call set (the test harness and
+//! single-process embedders). `RoutedHttpApi` is the import of a real server: a response is
+//! handed to an `HttpResponseSink`, which completes the HTTP request that the route
+//! dispatcher queued as `http-called` (REQ API-005, api-http-api.md "Surface" and "Limits").
 
 use ilium_plugin_api::generated::host::http_api::HostHttpApi;
 use ilium_plugin_api::generated::types::errors::PluginError;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Longest response body `respond` accepts: 8 MiB.
 const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -28,6 +32,25 @@ thread_local! {
     static OPEN_CALLS: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
 }
 
+/// One answer a plugin gave to an open call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpResponse {
+    /// Status, 100 to 599.
+    pub status: u16,
+    /// Response headers, none of them hop-by-hop.
+    pub headers: Vec<(String, String)>,
+    /// Response body, at most 8 MiB.
+    pub body: Vec<u8>,
+}
+
+/// Where a server completes the HTTP request behind an open call.
+pub trait HttpResponseSink: Send + Sync {
+    /// Completes `call` of `plugin` with `response`. False when the plugin has no such open
+    /// call: it never existed, another plugin owns it, it was answered already, or the
+    /// request timed out.
+    fn complete(&self, plugin: &str, call: u64, response: HttpResponse) -> bool;
+}
+
 /// Registers `call` as an open request awaiting exactly one `respond` (called by the route dispatcher).
 pub fn open_http_api_call(call: u64) {
     OPEN_CALLS.with(|open| {
@@ -44,7 +67,39 @@ fn invalid_argument(message: &str) -> PluginError {
     }
 }
 
-/// Host side of the `http-api` interface.
+/// Checks the status, body size and headers of one response (api-http-api.md "Limits").
+pub fn validate_response(
+    status: u16,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Result<(), PluginError> {
+    if !(100..=599).contains(&status) {
+        return Err(invalid_argument("response status must be 100 to 599"));
+    }
+    if body.len() > MAX_RESPONSE_BODY_BYTES {
+        return Err(invalid_argument("response body exceeds 8 MiB"));
+    }
+    let hop_by_hop = headers.iter().any(|(name, _)| {
+        HOP_BY_HOP_HEADERS
+            .iter()
+            .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
+    });
+    if hop_by_hop {
+        return Err(invalid_argument("hop-by-hop response headers are refused"));
+    }
+    Ok(())
+}
+
+/// The `not-found` error of an unknown, foreign or already answered call.
+fn unknown_call() -> PluginError {
+    PluginError {
+        code: ilium_plugin_api::generated::types::errors::ErrorCode::NotFound,
+        message: "no open request has this call id".to_owned(),
+        retry_after_ms: None,
+    }
+}
+
+/// Host side of the `http-api` interface over the thread-local open-call set.
 #[derive(Debug)]
 pub struct HttpApiImport;
 
@@ -56,29 +111,51 @@ impl HostHttpApi for HttpApiImport {
         headers: Vec<(String, String)>,
         body: Vec<u8>,
     ) -> Result<(), PluginError> {
-        if !(100..=599).contains(&status) {
-            return Err(invalid_argument("response status must be 100 to 599"));
-        }
-        if body.len() > MAX_RESPONSE_BODY_BYTES {
-            return Err(invalid_argument("response body exceeds 8 MiB"));
-        }
-        let hop_by_hop = headers.iter().any(|(name, _)| {
-            HOP_BY_HOP_HEADERS
-                .iter()
-                .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
-        });
-        if hop_by_hop {
-            return Err(invalid_argument("hop-by-hop response headers are refused"));
-        }
+        validate_response(status, &headers, &body)?;
         let was_open = OPEN_CALLS.with(|open| open.borrow_mut().remove(&call));
         if was_open {
             Ok(())
         } else {
-            Err(PluginError {
-                code: ilium_plugin_api::generated::types::errors::ErrorCode::NotFound,
-                message: "no open request has this call id".to_owned(),
-                retry_after_ms: None,
-            })
+            Err(unknown_call())
+        }
+    }
+}
+
+/// The `http-api` import of one plugin instance in a server: `respond` completes the HTTP
+/// request through the server's sink.
+pub struct RoutedHttpApi {
+    plugin: String,
+    sink: Arc<dyn HttpResponseSink>,
+}
+
+impl RoutedHttpApi {
+    /// An import for `plugin` that answers through `sink`.
+    pub fn new(plugin: &str, sink: Arc<dyn HttpResponseSink>) -> Self {
+        Self {
+            plugin: plugin.to_owned(),
+            sink,
+        }
+    }
+}
+
+impl HostHttpApi for RoutedHttpApi {
+    fn respond(
+        &mut self,
+        call: u64,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Result<(), PluginError> {
+        validate_response(status, &headers, &body)?;
+        let response = HttpResponse {
+            status,
+            headers,
+            body,
+        };
+        if self.sink.complete(&self.plugin, call, response) {
+            Ok(())
+        } else {
+            Err(unknown_call())
         }
     }
 }
@@ -267,5 +344,83 @@ mod tests {
         let mut api = HttpApiImport;
         let result = api.respond(UNKNOWN_CALL, 404, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::NotFound));
+    }
+
+    /// A sink that records every completed call and knows one open call.
+    struct RecordingSink {
+        owner: &'static str,
+        open_call: u64,
+        seen: std::sync::Mutex<Vec<(String, u64, super::HttpResponse)>>,
+    }
+
+    impl super::HttpResponseSink for RecordingSink {
+        fn complete(&self, plugin: &str, call: u64, response: super::HttpResponse) -> bool {
+            let known = plugin == self.owner && call == self.open_call;
+            if known {
+                self.seen
+                    .lock()
+                    .expect("sink lock")
+                    .push((plugin.to_owned(), call, response));
+            }
+            known
+        }
+    }
+
+    fn sink(owner: &'static str, open_call: u64) -> std::sync::Arc<RecordingSink> {
+        std::sync::Arc::new(RecordingSink {
+            owner,
+            open_call,
+            seen: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn routed_respond_hands_the_response_to_the_sink() {
+        let sink = sink("example.notes", 7);
+        let mut api = super::RoutedHttpApi::new("example.notes", sink.clone());
+        let headers = vec![("content-type".to_owned(), "text/plain".to_owned())];
+        api.respond(7, 201, headers.clone(), b"made".to_vec())
+            .expect("the open call is answered");
+        let seen = sink.seen.lock().expect("sink lock");
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].1, 7);
+        assert_eq!(seen[0].2.status, 201);
+        assert_eq!(seen[0].2.headers, headers);
+        assert_eq!(seen[0].2.body, b"made".to_vec());
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn routed_respond_to_a_foreign_or_unknown_call_is_not_found() {
+        let sink = sink("example.notes", 7);
+        let mut other = super::RoutedHttpApi::new("example.other", sink.clone());
+        let mut owner = super::RoutedHttpApi::new("example.notes", sink.clone());
+        assert_eq!(
+            error_code_of(other.respond(7, 200, Vec::new(), Vec::new())),
+            Some(ErrorCode::NotFound),
+            "another plugin cannot answer the call"
+        );
+        assert_eq!(
+            error_code_of(owner.respond(8, 200, Vec::new(), Vec::new())),
+            Some(ErrorCode::NotFound)
+        );
+        assert!(sink.seen.lock().expect("sink lock").is_empty());
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn routed_respond_validates_before_it_reaches_the_sink() {
+        let sink = sink("example.notes", 7);
+        let mut api = super::RoutedHttpApi::new("example.notes", sink.clone());
+        assert_eq!(
+            error_code_of(api.respond(7, 99, Vec::new(), Vec::new())),
+            Some(ErrorCode::InvalidArgument)
+        );
+        assert_eq!(
+            error_code_of(api.respond(7, 200, single_header("Transfer-Encoding"), Vec::new())),
+            Some(ErrorCode::InvalidArgument)
+        );
+        assert!(sink.seen.lock().expect("sink lock").is_empty());
     }
 }

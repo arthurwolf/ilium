@@ -26,6 +26,7 @@ use ilium_plugin_api::generated::types::intents::{
 use ilium_plugin_api::generated::types::tree::{
     AgentActivity, AgentView, ContainerKind, NodeClass,
 };
+use ilium_plugin_api::generated::types::ui::ViewTarget;
 use ilium_plugin_api::generated::types::{
     Color, ErrorCode, Event, Intent, Modifiers, NodeId, Outcome, Placement, PluginError,
     PluginSide, SplitDirection,
@@ -420,6 +421,50 @@ impl ServerFacade {
         }
     }
 
+    /// Forwards a view intent of a server plugin to every attached client, which opens the
+    /// panel, settings page, onboarding step or popup (gap G3). A pane view belongs to the
+    /// tree and is not forwarded.
+    fn forward_view(&self, origin: &Origin, intent: &Intent) -> Outcome {
+        let Origin::Plugin { plugin, .. } = origin else {
+            return refused(
+                ErrorCode::NotPermitted,
+                "only a plugin can ask for a view to open",
+            );
+        };
+        let target = match intent {
+            Intent::OpenView(spec) => &spec.view,
+            Intent::CloseView(view) => view,
+            _ => return failed(ErrorCode::Internal, "not a view intent"),
+        };
+        if matches!(target, ViewTarget::Pane(_)) {
+            return unsupported("a pane view for a server plugin");
+        }
+        let intent_json = match serde_json::to_vec(intent) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return failed(
+                    ErrorCode::Internal,
+                    format!("the intent does not serialize: {error}"),
+                );
+            }
+        };
+        let Some(state) = self.state.upgrade() else {
+            return failed(ErrorCode::Internal, "the server is shutting down");
+        };
+        state.broadcast(ServerEvent::Plugin(ilium_ipc::plugin::PluginEnvelope {
+            plugin: plugin.0.clone(),
+            seq: self.next_envelope.fetch_add(1, Ordering::Relaxed),
+            body: ilium_ipc::plugin::EnvelopeBody::ForwardedIntent(
+                ilium_ipc::plugin::ForwardedIntent {
+                    plugin: plugin.0.clone(),
+                    target: ilium_ipc::plugin::ForwardTarget::AllClients,
+                    intent_json,
+                },
+            ),
+        }));
+        Outcome::Ok
+    }
+
     fn create_pane(&self, spec: CreatePaneSpec) -> Outcome {
         if !spec.content_kind.is_empty() && spec.content_kind != TERMINAL_KIND {
             return unsupported("create-pane for a content kind other than ilium.terminal");
@@ -808,6 +853,21 @@ impl KernelFacade for ServerFacade {
                     ilium_plugin_host::wiring::live_decoration_id(plugin, &key.slot, key.node.0),
                 )
             }),
+            Intent::SignalPane(spec) => {
+                use ilium_plugin_api::generated::types::tree::Signal;
+                let signal = match spec.signal {
+                    Signal::Interrupt => ilium_ipc::PaneSignal::Interrupt,
+                    Signal::Terminate => ilium_ipc::PaneSignal::Terminate,
+                    Signal::Kill => ilium_ipc::PaneSignal::Kill,
+                    Signal::Hangup => ilium_ipc::PaneSignal::Hangup,
+                };
+                self.simple(ClientRequest::SignalPaneProcess {
+                    pane_id: to_core(spec.pane),
+                    signal,
+                })
+            }
+            // Views of a plugin's own client side open in the clients, not in the server.
+            Intent::OpenView(_) | Intent::CloseView(_) => self.forward_view(origin, &intent),
             // The remaining intents belong to features that are not ported yet; each port adds
             // its arm here together with its handler (foundation contract section 12.4).
             _ => unsupported("this intent"),

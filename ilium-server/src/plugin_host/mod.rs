@@ -10,13 +10,18 @@
 //! After each job the host publishes what changed: contribution increments as
 //! `ServerEvent::Contributions` and plugin state changes as plugin control envelopes.
 
+mod cli_bridge;
 mod facade;
+mod http_routes;
+mod remote;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+
+use tokio::task::JoinSet;
 
 use ilium_ipc::plugin::{
     ContributionDelta, ContributionOp as WireOp, ControlBody, DeltaKind, EnvelopeBody,
@@ -35,16 +40,21 @@ use ilium_plugin_host::contributions::ContributionOp;
 use ilium_plugin_host::engine::{EngineConfig, PluginEngine};
 use ilium_plugin_host::imports::backed::LogSink;
 use ilium_plugin_host::imports::basic::BasicBackend;
+use ilium_plugin_host::imports::http_api::{HttpResponseSink, RoutedHttpApi};
 use ilium_plugin_host::lifecycle::StartMode;
+use ilium_plugin_host::runtime::cross_side::{RemoteMessage, REMOTE_ENVELOPE_PLUGIN};
 use ilium_plugin_host::runtime::{
-    CataloguePlugin, HostRuntime, RuntimeConfig, RuntimeThread, ESSENTIAL_PLUGINS,
+    CataloguePlugin, HostRuntime, ImportProvider, RuntimeConfig, RuntimeThread, ESSENTIAL_PLUGINS,
 };
 use ilium_plugin_host::storage::StorageContext;
 use ilium_plugin_host::{registry, wiring};
 
 use crate::ipc::DirectEventSender;
 use crate::state::ServerState;
+use cli_bridge::{CliInvocation, CliRoutes};
 use facade::{RuntimeSlot, ServerFacade};
+use http_routes::{HttpCalls, HttpRoutes};
+pub(crate) use http_routes::{PluginRequest, Reply, MAX_REQUEST_BODY_BYTES};
 
 /// How long plugins get to deactivate when the server stops (contract section 2.2).
 const SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
@@ -113,6 +123,8 @@ struct Publisher {
     next_envelope: Arc<AtomicU64>,
     /// The kernel facade, whose queue holds the chrome server plugins set.
     facade: Arc<ServerFacade>,
+    /// Where the output of running CLI commands goes.
+    cli: Arc<CliRoutes>,
 }
 
 impl Publisher {
@@ -181,6 +193,16 @@ impl Publisher {
                 published.states.insert(plugin, state);
             }
         }
+        for chunk in runtime.take_cli_output() {
+            self.cli.route(chunk);
+        }
+        for message in runtime.take_remote_outbound() {
+            events.push(ServerEvent::Plugin(PluginEnvelope {
+                plugin: REMOTE_ENVELOPE_PLUGIN.to_owned(),
+                seq: self.next_envelope.fetch_add(1, Ordering::Relaxed),
+                body: remote::body_of(message.to_wire()),
+            }));
+        }
         drop(published);
         if let Some(state) = self.state.upgrade() {
             for event in events {
@@ -224,6 +246,12 @@ pub(crate) struct PluginHostHandle {
     epoch: Arc<AtomicU64>,
     pending: Arc<Mutex<Vec<Event>>>,
     feed_scheduled: Arc<AtomicBool>,
+    /// The running CLI invocations; the same table the publisher routes output through.
+    cli: Arc<CliRoutes>,
+    /// The forwarding task of each running CLI invocation, aborted when the host stops.
+    cli_tasks: Mutex<JoinSet<()>>,
+    /// The routes plugins registered on the loopback HTTP API and the requests they answer.
+    http: Arc<HttpRoutes>,
 }
 
 fn log_errors(what: &str, errors: Vec<ilium_plugin_host::runtime::RuntimeError>) {
@@ -272,7 +300,8 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         tracing::warn!("installed plugin registry unreadable, every plugin enabled: {warning}");
     }
     let log: Arc<dyn LogSink> = Arc::new(TracingLog);
-    let provider = wiring::import_provider(wiring::ProcessImports {
+    let http_calls = Arc::new(HttpCalls::default());
+    let base_provider = wiring::import_provider(wiring::ProcessImports {
         storage_root: wiring::storage_root(&start.data_dir),
         scope: StorageContext {
             project: Some(state.session_cwd.clone()),
@@ -282,7 +311,18 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         basic: Some(Arc::clone(&facade) as Arc<dyn BasicBackend>),
         log: Arc::clone(&log),
     });
-    let runtime = HostRuntime::new(
+    // A plugin that holds an `http-api.route` grant answers its requests through the server's
+    // open-call table; the runtime removes the import again for an instance without the grant.
+    let response_sink: Arc<dyn HttpResponseSink> =
+        Arc::clone(&http_calls) as Arc<dyn HttpResponseSink>;
+    let provider: ImportProvider = Box::new(move |context, set| {
+        base_provider(context, set);
+        set.http_api = Some(Box::new(RoutedHttpApi::new(
+            &context.plugin,
+            Arc::clone(&response_sink),
+        )));
+    });
+    let mut runtime = HostRuntime::new(
         engine,
         RuntimeConfig {
             side: Side::Server,
@@ -292,6 +332,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             disabled,
         },
     );
+    runtime.set_durable_timer_file(wiring::durable_timers_path(&start.data_dir, "server"));
     let thread = match RuntimeThread::spawn(runtime) {
         Ok(thread) => thread,
         Err(error) => {
@@ -299,11 +340,13 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             return None;
         }
     };
+    let cli = Arc::new(CliRoutes::default());
     let publisher = Publisher {
         state: Arc::downgrade(state),
         published: Arc::new(Mutex::new(Published::default())),
         next_envelope,
         facade: Arc::clone(&facade),
+        cli: Arc::clone(&cli),
     };
     let versions = start
         .catalogue
@@ -315,6 +358,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             )
         })
         .collect();
+    let http = Arc::new(HttpRoutes::new(&start.catalogue, http_calls));
     let catalogue = start.catalogue;
     let first = publisher.clone();
     // Loading compiles components; it runs on the host thread so `run()` is not held up.
@@ -341,6 +385,9 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         epoch,
         pending: Arc::new(Mutex::new(Vec::new())),
         feed_scheduled: Arc::new(AtomicBool::new(false)),
+        cli,
+        cli_tasks: Mutex::new(JoinSet::new()),
+        http,
     }))
 }
 
@@ -356,6 +403,21 @@ impl PluginHostHandle {
                 })
             })
         })
+    }
+
+    /// True when at least one plugin registered an HTTP route.
+    pub(crate) fn has_http_routes(&self) -> bool {
+        self.http.has_routes()
+    }
+
+    /// The answer for a request that matches no plugin route, `None` when one matches.
+    pub(crate) fn http_precheck(&self, method: &str, target: &str) -> Option<Reply> {
+        self.http.precheck(method, target)
+    }
+
+    /// Serves one request for a plugin route (`/plugins/<plugin-id>/<path>`).
+    pub(crate) async fn http_request(&self, request: PluginRequest) -> Reply {
+        self.http.dispatch(self, request).await
     }
 
     /// The contribution snapshot and plugin states for a client that just attached.
@@ -455,6 +517,45 @@ impl PluginHostHandle {
                     .send(self.publisher.state_event(&target, &state))
                     .await;
             }
+            EnvelopeBody::Control(ControlBody::CliInvoke {
+                invocation_id,
+                plugin: owner,
+                command,
+                args,
+                stdin,
+                cwd,
+                columns: _,
+            }) => {
+                let invocation = CliInvocation {
+                    wire_id: invocation_id,
+                    plugin: owner,
+                    command,
+                    args,
+                    stdin,
+                    cwd,
+                };
+                self.cli_invoke(invocation, direct_tx).await;
+            }
+            EnvelopeBody::Control(ControlBody::CliCancel { invocation_id }) => {
+                self.cli_cancel(invocation_id, direct_tx);
+            }
+            body @ (EnvelopeBody::Event(_)
+            | EnvelopeBody::ClientRequest(_)
+            | EnvelopeBody::ClientReply(_))
+                if plugin == REMOTE_ENVELOPE_PLUGIN =>
+            {
+                // A topic message or service traffic of the client runtime (gap G4).
+                let Some(message) =
+                    remote::wire_of(body).and_then(|wire| RemoteMessage::from_wire(&wire))
+                else {
+                    tracing::debug!("malformed cross-side envelope from a client dropped");
+                    return;
+                };
+                self.post(move |runtime| {
+                    runtime.deliver_remote(vec![message]);
+                    log_errors("pump", runtime.pump());
+                });
+            }
             other => {
                 tracing::debug!(
                     plugin,
@@ -552,6 +653,7 @@ impl PluginHostHandle {
     /// Deactivates every plugin and joins the host thread. Called once, before the session
     /// drain, so plugins can still persist through the kernel.
     pub(crate) async fn stop(&self) {
+        self.cli_stop();
         let thread = self.runtime.lock().ok().and_then(|mut slot| slot.take());
         let Some(thread) = thread else {
             return;

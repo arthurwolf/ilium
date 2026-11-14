@@ -469,12 +469,12 @@ fn pane_env_names_are_pairwise_distinct() {
 }
 
 #[test]
-fn plugin_protocol_version_is_one_at_the_crate_root_and_the_plugin_path() {
+fn plugin_protocol_version_is_two_at_the_crate_root_and_the_plugin_path() {
     assert_eq!(
         ilium_ipc::PLUGIN_PROTOCOL_VERSION,
         plugin::PLUGIN_PROTOCOL_VERSION
     );
-    assert_eq!(plugin::PLUGIN_PROTOCOL_VERSION, 1);
+    assert_eq!(plugin::PLUGIN_PROTOCOL_VERSION, 2);
 }
 
 #[test]

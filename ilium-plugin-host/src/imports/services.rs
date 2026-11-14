@@ -95,6 +95,34 @@ impl ServiceBrokerState {
         self.pending.is_empty() && self.finished.is_empty()
     }
 
+    /// Queues a call that came from the other side. The runtime's pump delivers it to the
+    /// local provider like any other call; `call.caller` names the remote caller. Fails with
+    /// `busy` when too many calls wait.
+    pub fn push_remote(&mut self, call: PendingServiceCall) -> Result<(), PluginError> {
+        if self.pending.len() >= BROKER_CAPACITY {
+            return Err(PluginError::new(
+                ErrorCode::Busy,
+                "too many service calls are waiting",
+            ));
+        }
+        self.pending.push_back(call);
+        Ok(())
+    }
+
+    /// Takes the reply a provider gave to the call of `caller` with `request`.
+    pub fn take_reply_of(&mut self, caller: &str, request: RequestId) -> Option<String> {
+        self.replies.remove(&(caller.to_owned(), request.0))
+    }
+
+    /// A fresh request id and call id for a call the runtime makes on behalf of the other
+    /// side.
+    pub fn fresh_ids() -> (RequestId, u64) {
+        (
+            RequestId(NEXT_SERVICE_REQUEST.fetch_add(1, Ordering::Relaxed)),
+            NEXT_SERVICE_CALL.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
     /// Records the reply of a delivered call.
     pub fn complete(&mut self, call: &PendingServiceCall, reply_json: String) {
         self.finish(&call.caller, call.request, Ok(reply_json));

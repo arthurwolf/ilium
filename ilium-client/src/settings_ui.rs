@@ -6119,6 +6119,7 @@ fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
             selected,
         );
     }
+    let setting_rows = app.plugin_setting_rows();
     let described: Vec<(String, String, String)> = rows
         .into_iter()
         .map(|row| match row {
@@ -6152,14 +6153,24 @@ fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
                     format!("{what} of {plugin} · Enter opens it beside the tree"),
                 )
             }
-            crate::plugin_host::views::PluginListRow::Setting(setting) => (
-                format!("{}: {}", setting.page, setting.title),
-                setting.default,
-                format!(
-                    "{} of {} · key {} · default shown",
-                    setting.row_type, setting.plugin, setting.key
-                ),
-            ),
+            crate::plugin_host::views::PluginListRow::Setting(setting) => {
+                let current = setting_rows
+                    .iter()
+                    .find(|row| row.plugin == setting.plugin && row.key == setting.key);
+                let value = current.map_or(setting.default, |row| row.display());
+                let how = match current {
+                    Some(row) if row.is_editable() => "Enter changes it",
+                    _ => "edit it in the plugin's page or config.toml",
+                };
+                (
+                    format!("{}: {}", setting.page, setting.title),
+                    value,
+                    format!(
+                        "{} of {} · key {} · {how}",
+                        setting.row_type, setting.plugin, setting.key
+                    ),
+                )
+            }
         })
         .collect();
     let borrowed: Vec<(&str, String, &str)> = described

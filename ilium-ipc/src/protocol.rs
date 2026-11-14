@@ -122,6 +122,27 @@ pub enum NewPaneKind {
         identity: ilium_core::custom_agent::CustomAgentIdentity,
         initial_input: Option<String>,
     },
+    /// A pane whose content a plugin draws (a plugin pane kind). Appended to preserve all
+    /// prior variant indexes.
+    Plugin {
+        /// The pane kind id the plugin contributed.
+        kind_id: String,
+        /// The pane title.
+        title: String,
+    },
+}
+
+/// A signal a plugin may send to the process of a terminal pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneSignal {
+    /// Interrupt (Ctrl-C).
+    Interrupt,
+    /// Ask the process to end.
+    Terminate,
+    /// End the process without cleanup.
+    Kill,
+    /// Hang up the terminal.
+    Hangup,
 }
 
 /// Server-side starting-directory strategy for a newly spawned terminal.
@@ -1121,6 +1142,9 @@ pub enum ClientRequest {
         revision: u64,
         watches: Vec<StatusScreenWatch>,
     },
+    /// Send a signal to the foreground process of a terminal pane (plugin `SignalPane` intent).
+    /// Appended to preserve all prior request discriminants.
+    SignalPaneProcess { pane_id: NodeId, signal: PaneSignal },
 }
 
 /// Which client path produced a stored recap.
@@ -1138,6 +1162,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::SignalPaneProcess { .. } => "signal_pane_process",
             Self::SetStatusScreenWatches { .. } => "set_status_screen_watches",
             Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",

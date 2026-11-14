@@ -15,5 +15,6 @@
 //! Unix-only.
 
 pub mod error;
+pub mod plugin_cli;
 pub mod plugin_cmd;
 pub mod session;

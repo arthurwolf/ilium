@@ -7,6 +7,7 @@ pub mod commands;
 pub mod host;
 pub mod keybindings;
 pub mod popup;
+pub(crate) mod remote;
 pub mod screens_rig;
 pub mod view;
 pub mod views;

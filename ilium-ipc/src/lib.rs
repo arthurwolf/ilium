@@ -40,7 +40,7 @@ pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
     BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton,
     MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
-    PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
+    PaneSignal, PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
     StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy, WorkspaceCreateSpec,

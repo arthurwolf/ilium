@@ -335,6 +335,10 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
                 count.string(&identity.profile_id);
                 count.optional_string(initial_input);
             }
+            ilium_ipc::NewPaneKind::Plugin { kind_id, title } => {
+                count.string(kind_id);
+                count.string(title);
+            }
         },
         R::NewBoard { name, storage, .. } => {
             count.string(name);
@@ -583,6 +587,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::QueryWorkspaceInventory { .. }
         | R::QueryWorkspaceCloseOffer { .. }
         | R::TerminatePaneProcess { .. }
+        | R::SignalPaneProcess { .. }
         | R::TerminalHistory { .. }
         | R::FreezePane { .. } => {}
     }

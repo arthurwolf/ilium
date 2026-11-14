@@ -518,6 +518,353 @@ fn validate_value(schema: &Value, value: &Value, pointer: &str, errors: &mut Vec
     }
 }
 
+/// One value row of a plugin's `contributes.settings`, as the client lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsRow {
+    /// The value key (`[a-z][a-z0-9_]{0,63}`).
+    pub key: String,
+    /// The row type of the manifest (`toggle`, `choice`, `number`, `text`, ...).
+    pub kind: String,
+    /// The label of the row.
+    pub title: String,
+    /// The description line under the label, when the manifest gives one.
+    pub description: Option<String>,
+    /// The `default` of the manifest.
+    pub default: Value,
+    /// The tab the row belongs to: a built-in tab id, or `self:<id>` for the plugin's own tab.
+    pub tab: String,
+    /// The title of the section the row sits in, when it has one.
+    pub section: Option<String>,
+    /// The side that owns the value: `client` or `server`.
+    pub scope: String,
+    /// The compiled schema of the row (its property in the plugin's schema).
+    pub schema: Value,
+}
+
+/// Every value row a manifest contributes, in declaration order.
+///
+/// A tab entry contributes the rows of its `sections` under `self:<tab id>`; a section entry
+/// contributes its rows to its `tab`. A `group` row folds its children, which are listed as
+/// ordinary rows. Rows without a valid `key` are skipped: the install check refuses them.
+pub fn manifest_rows(manifest: &Value) -> Vec<SettingsRow> {
+    let mut rows = Vec::new();
+    let Some(entries) = manifest
+        .pointer("/contributes/settings")
+        .and_then(Value::as_array)
+    else {
+        return rows;
+    };
+    for entry in entries {
+        match entry.get("kind").and_then(Value::as_str) {
+            Some("tab") => {
+                let tab = format!("self:{}", text_of(entry, "id").unwrap_or_default());
+                for section in entry
+                    .get("sections")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_section_rows(section, &tab, &mut rows);
+                }
+            }
+            Some("section") => {
+                let tab = text_of(entry, "tab").unwrap_or_default();
+                collect_section_rows(entry, &tab, &mut rows);
+            }
+            _ => {}
+        }
+    }
+    rows
+}
+
+fn text_of(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn collect_section_rows(section: &Value, tab: &str, rows: &mut Vec<SettingsRow>) {
+    let scope = text_of(section, "scope").unwrap_or_else(|| "client".to_owned());
+    let title = text_of(section, "title");
+    collect_rows(section.get("rows"), tab, title.as_deref(), &scope, rows);
+}
+
+fn collect_rows(
+    list: Option<&Value>,
+    tab: &str,
+    section: Option<&str>,
+    scope: &str,
+    rows: &mut Vec<SettingsRow>,
+) {
+    for row in list.and_then(Value::as_array).into_iter().flatten() {
+        let kind = text_of(row, "type").unwrap_or_default();
+        if kind == "group" {
+            collect_rows(row.get("rows"), tab, section, scope, rows);
+            continue;
+        }
+        let Some(key) = text_of(row, "key") else {
+            continue;
+        };
+        let Some(schema) = compile_row(&kind, row) else {
+            continue;
+        };
+        rows.push(SettingsRow {
+            title: text_of(row, "title").unwrap_or_else(|| key.clone()),
+            description: text_of(row, "description"),
+            default: row.get("default").cloned().unwrap_or(Value::Null),
+            tab: tab.to_owned(),
+            section: section.map(str::to_owned),
+            scope: scope.to_owned(),
+            kind,
+            key,
+            schema,
+        });
+    }
+}
+
+/// The schema of one value row (reference-settings-schema.md, "Row types"); `None` for a type
+/// that holds no value.
+fn compile_row(kind: &str, row: &Value) -> Option<Value> {
+    let mut schema = serde_json::Map::new();
+    let mut set = |key: &str, value: Value| {
+        schema.insert(key.to_owned(), value);
+    };
+    match kind {
+        "toggle" => set("type", Value::from("boolean")),
+        "number" => {
+            let integer = row.get("integer").and_then(Value::as_bool) != Some(false);
+            set(
+                "type",
+                Value::from(if integer { "integer" } else { "number" }),
+            );
+            let steps: Vec<f64> = row
+                .get("steps")
+                .and_then(Value::as_array)
+                .map(|steps| steps.iter().filter_map(Value::as_f64).collect())
+                .unwrap_or_default();
+            let ladder_bound = |pick: fn(f64, f64) -> f64| steps.iter().copied().reduce(pick);
+            if let Some(minimum) = row
+                .get("minimum")
+                .and_then(Value::as_f64)
+                .or_else(|| ladder_bound(f64::min))
+            {
+                set("minimum", Value::from(minimum));
+            }
+            if let Some(maximum) = row
+                .get("maximum")
+                .and_then(Value::as_f64)
+                .or_else(|| ladder_bound(f64::max))
+            {
+                set("maximum", Value::from(maximum));
+            }
+            for key in ["step", "unit"] {
+                if let Some(value) = row.get(key).filter(|value| !value.is_null()) {
+                    set(key, value.clone());
+                }
+            }
+            if !steps.is_empty() {
+                set("x-steps", Value::from(steps));
+            }
+            if let Some(special) = row.get("special_values") {
+                set("x-special-values", special.clone());
+            }
+        }
+        "choice" => {
+            let options = choice_values(row.get("options"));
+            let integer =
+                options.iter().all(|value| value.is_i64() || value.is_u64()) && !options.is_empty();
+            set(
+                "type",
+                Value::from(if integer { "integer" } else { "string" }),
+            );
+            let fixed = row.get("allow_custom").and_then(Value::as_bool) != Some(true)
+                && row.get("source").is_none();
+            if fixed && !options.is_empty() && (integer || options.iter().all(Value::is_string)) {
+                let titles = choice_titles(row.get("options"));
+                let count = options.len();
+                set("enum", Value::Array(options));
+                if titles.len() == count {
+                    set("enum_titles", Value::from(titles));
+                }
+            }
+        }
+        "text" | "text-area" | "path" | "color" | "keybinding" => {
+            set("type", Value::from("string"));
+            if let Some(limit) = row.get("max_length").and_then(Value::as_u64) {
+                set("maxLength", Value::from(limit));
+            }
+            if let Some(pattern) = row.get("pattern").and_then(Value::as_str) {
+                set("pattern", Value::from(pattern));
+            }
+            match kind {
+                "color" => set("pattern", Value::from("^#[0-9a-fA-F]{6}$")),
+                "text-area" => set("multiline", Value::Bool(true)),
+                "text" if row.get("secret").and_then(Value::as_bool) == Some(true) => {
+                    set("secret", Value::Bool(true));
+                }
+                "path" => {
+                    if let Some(picker) = row.get("picker").and_then(Value::as_str) {
+                        set("picker", Value::from(picker));
+                    }
+                }
+                _ => {}
+            }
+        }
+        "list" => {
+            set("type", Value::from("array"));
+            set("items", serde_json::json!({"type": "string"}));
+            let limit = row
+                .get("max_items")
+                .and_then(Value::as_u64)
+                .map_or(64, |limit| limit.min(64));
+            set("maxItems", Value::from(limit));
+        }
+        "multi-choice" => {
+            set("type", Value::from("array"));
+            let values = choice_values(row.get("options"));
+            if row.get("source").is_none()
+                && values.iter().all(Value::is_string)
+                && !values.is_empty()
+            {
+                set(
+                    "items",
+                    serde_json::json!({"type": "string", "enum": values}),
+                );
+            } else {
+                set("items", serde_json::json!({"type": "string"}));
+            }
+            set("uniqueItems", Value::Bool(true));
+            if let Some(minimum) = row.get("min_items").and_then(Value::as_u64) {
+                set("minItems", Value::from(minimum));
+            }
+            if let Some(maximum) = row.get("max_items").and_then(Value::as_u64) {
+                set("maxItems", Value::from(maximum));
+            }
+        }
+        "map" => {
+            set("type", Value::from("object"));
+            set(
+                "additionalProperties",
+                serde_json::json!({"type": "string"}),
+            );
+            if let Some(limit) = row.get("max_entries").and_then(Value::as_u64) {
+                set("maxProperties", Value::from(limit));
+            }
+        }
+        "location" => {
+            set("type", Value::from("object"));
+            set(
+                "properties",
+                serde_json::json!({
+                    "lat": {"type": "number", "minimum": -90, "maximum": 90},
+                    "lon": {"type": "number", "minimum": -180, "maximum": 180},
+                    "label": {"type": "string"}
+                }),
+            );
+            set("required", serde_json::json!(["lat", "lon"]));
+            set("x-widget", Value::from("location"));
+        }
+        _ => return None,
+    }
+    if let Some(default) = row.get("default") {
+        set("default", default.clone());
+    }
+    for key in ["title", "help", "description"] {
+        if let Some(text) = row.get(key).and_then(Value::as_str) {
+            set(key, Value::from(text));
+        }
+    }
+    if row.get("scope").and_then(Value::as_str) == Some("project") {
+        set("x-scope", Value::from("project"));
+    }
+    if let Some(applies) = row.get("applies").and_then(Value::as_str) {
+        set("x-applies", Value::from(applies));
+    }
+    Some(Value::Object(schema))
+}
+
+/// The values of a choice's `options`: plain strings or `{ value, title }` records.
+fn choice_values(options: Option<&Value>) -> Vec<Value> {
+    options
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|option| match option {
+            Value::Object(fields) => fields.get("value").cloned(),
+            other => Some(other.clone()),
+        })
+        .collect()
+}
+
+/// The display titles of a choice's `options`, falling back to the value.
+fn choice_titles(options: Option<&Value>) -> Vec<String> {
+    options
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|option| match option {
+            Value::Object(fields) => fields
+                .get("title")
+                .or_else(|| fields.get("value"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+/// The names the plugin may address with the dynamic row calls (`set-info`, `set-row-note`,
+/// `set-meter`, ...): the `key` of every value row and the `id` of every row without a value
+/// (info, meter, notice, button, preview), group children included.
+pub fn manifest_row_names(manifest: &Value) -> std::collections::BTreeSet<String> {
+    fn walk(list: Option<&Value>, names: &mut std::collections::BTreeSet<String>) {
+        for row in list.and_then(Value::as_array).into_iter().flatten() {
+            if text_of(row, "type").as_deref() == Some("group") {
+                walk(row.get("rows"), names);
+                continue;
+            }
+            if let Some(name) = text_of(row, "key").or_else(|| text_of(row, "id")) {
+                names.insert(name);
+            }
+        }
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for entry in manifest
+        .pointer("/contributes/settings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        match entry.get("kind").and_then(Value::as_str) {
+            Some("tab") => {
+                for section in entry
+                    .get("sections")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    walk(section.get("rows"), &mut names);
+                }
+            }
+            Some("section") => walk(entry.get("rows"), &mut names),
+            _ => {}
+        }
+    }
+    names
+}
+
+/// The schema a plugin side checks writes against: one object with a property per value row
+/// that side owns (a section's `scope` is the side that hosts its keys).
+pub fn schema_for_side(manifest: &Value, side: &str) -> Value {
+    let mut properties = serde_json::Map::new();
+    for row in manifest_rows(manifest) {
+        if row.scope == side {
+            properties.insert(row.key, row.schema);
+        }
+    }
+    serde_json::json!({"type": "object", "properties": properties})
+}
+
 #[cfg(test)]
 mod tests {
     use super::{kernel_tab_ids, may_write_kernel_tab, validate_settings, KERNEL_TAB_COUNT};
@@ -739,5 +1086,106 @@ mod tests {
         ];
         assert!(may_write_kernel_tab(&granted, "terminal"));
         assert!(!may_write_kernel_tab(&granted, "editor"));
+    }
+
+    fn demo_manifest() -> serde_json::Value {
+        serde_json::json!({"contributes": {"settings": [
+            {"kind": "section", "id": "notes", "tab": "editor", "title": "Notes", "scope": "client",
+             "rows": [
+                {"type": "toggle", "key": "sound_enabled", "title": "Play a sound", "default": true},
+                {"type": "number", "key": "indent_width", "title": "Indent", "minimum": 1,
+                 "maximum": 8, "step": 1, "unit": "spaces", "default": 4},
+                {"type": "number", "key": "zoom", "title": "Zoom", "integer": false,
+                 "minimum": 0.5, "maximum": 2, "default": 1},
+                {"type": "text", "key": "token", "title": "Token", "secret": true, "default": ""},
+                {"type": "choice", "key": "density", "title": "Density", "default": "compact",
+                 "options": [{"value": "compact", "title": "Compact"}, {"value": "roomy", "title": "Roomy"}]},
+                {"type": "group", "title": "More", "rows": [
+                    {"type": "color", "key": "tint", "title": "Tint", "default": "#112233"},
+                    {"type": "list", "key": "names", "title": "Names", "default": []},
+                    {"type": "multi-choice", "key": "kinds", "title": "Kinds", "default": ["a"],
+                     "options": ["a", "b"]},
+                    {"type": "map", "key": "aliases", "title": "Aliases", "default": {}},
+                    {"type": "location", "key": "home", "title": "Home",
+                     "default": {"lat": 1.0, "lon": 2.0}}
+                ]},
+                {"type": "button", "title": "Run", "label": "Run", "command": "demo.run"},
+                {"type": "info", "id": "status", "title": "Status", "text": "ok"}
+             ]},
+            {"kind": "section", "id": "remote", "tab": "self:demo", "scope": "server",
+             "rows": [{"type": "text", "key": "endpoint", "title": "Endpoint", "default": "x"}]},
+            {"kind": "tab", "id": "demo", "title": "Demo", "sections": [
+                {"id": "main", "title": "Main", "scope": "client",
+                 "rows": [{"type": "toggle", "key": "own_tab", "title": "Own", "default": false}]}
+            ]}
+        ]}})
+    }
+
+    #[test]
+    fn the_rows_of_a_manifest_are_listed_in_order_with_their_tab_and_scope() {
+        let rows = super::manifest_rows(&demo_manifest());
+        let keys: Vec<&str> = rows.iter().map(|row| row.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "sound_enabled",
+                "indent_width",
+                "zoom",
+                "token",
+                "density",
+                "tint",
+                "names",
+                "kinds",
+                "aliases",
+                "home",
+                "endpoint",
+                "own_tab"
+            ]
+        );
+        assert_eq!(rows[0].tab, "editor");
+        assert_eq!(rows[0].section.as_deref(), Some("Notes"));
+        assert_eq!(rows[10].scope, "server");
+        assert_eq!(rows[10].tab, "self:demo");
+        assert_eq!(rows[11].tab, "self:demo");
+        assert_eq!(rows[1].default, 4);
+    }
+
+    #[test]
+    fn the_compiled_schema_of_every_row_type_is_a_valid_schema_of_the_validator() {
+        let schema = super::schema_for_side(&demo_manifest(), "client");
+        let properties = schema["properties"].as_object().expect("properties");
+        assert!(!properties.contains_key("endpoint"));
+        assert_eq!(properties.len(), 11);
+        let defaults = serde_json::json!({
+            "sound_enabled": true, "indent_width": 4, "zoom": 1, "token": "",
+            "density": "compact", "tint": "#112233", "names": [], "kinds": ["a"],
+            "aliases": {}, "home": {"lat": 1.0, "lon": 2.0}
+        });
+        validate_settings(&schema.to_string(), &defaults.to_string())
+            .expect("the defaults pass their own schema");
+        let server = super::schema_for_side(&demo_manifest(), "server");
+        assert_eq!(
+            server["properties"].as_object().map(|map| map.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn the_compiled_schema_refuses_a_value_outside_its_row() {
+        let schema = super::schema_for_side(&demo_manifest(), "client").to_string();
+        for bad in [
+            r#"{"indent_width": 9}"#,
+            r#"{"indent_width": 2.5}"#,
+            r#"{"density": "huge"}"#,
+            r#"{"tint": "red"}"#,
+            r#"{"kinds": ["c"]}"#,
+            r#"{"home": {"lat": 100, "lon": 0}}"#,
+            r#"{"sound_enabled": 1}"#,
+            r#"{"unknown": 1}"#,
+        ] {
+            assert!(validate_settings(&schema, bad).is_err(), "{bad}");
+        }
+        validate_settings(&schema, r#"{"zoom": 1.5, "density": "roomy"}"#)
+            .expect("a value inside its rows");
     }
 }

@@ -72,6 +72,14 @@ pub fn installed_path(data_dir: &Path) -> PathBuf {
     data_dir.join("plugins").join("installed.json")
 }
 
+/// `<data dir>/plugins/durable-timers-<side>.json`, where the durable timers of one side's
+/// plugins wait for the next start (`HostRuntime::set_durable_timer_file`).
+pub fn durable_timers_path(data_dir: &Path, side: &str) -> PathBuf {
+    data_dir
+        .join("plugins")
+        .join(format!("durable-timers-{side}.json"))
+}
+
 /// `<data dir>/plugins/storage`, the root of every plugin's private storage engine.
 pub fn storage_root(data_dir: &Path) -> PathBuf {
     data_dir.join("plugins").join("storage")

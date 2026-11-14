@@ -86,7 +86,7 @@ pub struct PluginCliRequest {
 // ---------------------------------------------------------------------------------------------
 
 /// The plugin protocol version carried by [`PluginHello`] (HST-106).
-pub const PLUGIN_PROTOCOL_VERSION: u16 = 1;
+pub const PLUGIN_PROTOCOL_VERSION: u16 = 2;
 
 /// Largest encoded [`ContributionDelta`] the server sends (HST-109).
 pub const MAX_DELTA_BYTES: usize = 4 * 1024 * 1024;
@@ -102,7 +102,7 @@ pub struct PluginEnvelope {
     pub body: EnvelopeBody,
 }
 
-/// The seven bodies of an envelope, in manual order (HST-101).
+/// The bodies of an envelope, in manual order, with later bodies appended (HST-101).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnvelopeBody {
     /// A client submission (client to server).
@@ -119,6 +119,38 @@ pub enum EnvelopeBody {
     Event(SourcedEvent),
     /// A control record.
     Control(ControlBody),
+    /// Server to client: an intent only a client can carry out (open a view, focus a node,
+    /// copy to the clipboard). Appended after `Control` (append-only rule).
+    ForwardedIntent(ForwardedIntent),
+}
+
+/// Which clients receive a [`ForwardedIntent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ForwardTarget {
+    /// Every attached client (state-like effects, for example a view opening).
+    AllClients,
+    /// Only the client the user is working in (one-shot effects, for example a focus).
+    ActiveClient,
+}
+
+/// An intent the server forwards to a client half (server to client).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardedIntent {
+    /// The plugin that asked for the intent.
+    pub plugin: String,
+    /// Which clients carry it out.
+    pub target: ForwardTarget,
+    /// The intent as UTF-8 JSON bytes.
+    pub intent_json: Vec<u8>,
+}
+
+/// The output stream of a CLI invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CliStream {
+    /// Standard output.
+    Stdout,
+    /// Standard error.
+    Stderr,
 }
 
 /// A client submission (HST-112).
@@ -213,6 +245,44 @@ pub enum ControlBody {
         plugin: String,
         /// The state name.
         state: String,
+    },
+    /// CLI to server: run a plugin CLI command. Appended after `PluginState` (append-only rule).
+    CliInvoke {
+        /// The invocation number the answers quote.
+        invocation_id: u64,
+        /// The plugin that owns the command.
+        plugin: String,
+        /// The command name.
+        command: String,
+        /// The arguments after the command name.
+        args: Vec<String>,
+        /// Bytes for the command's standard input.
+        stdin: Vec<u8>,
+        /// The directory the CLI was started in.
+        cwd: std::path::PathBuf,
+        /// The terminal width the output is shaped for.
+        columns: u16,
+    },
+    /// Server to CLI: bytes the command wrote.
+    CliOutput {
+        /// The invocation number.
+        invocation_id: u64,
+        /// Which stream the bytes belong to.
+        stream: CliStream,
+        /// The bytes.
+        data: Vec<u8>,
+    },
+    /// Server to CLI: the command finished.
+    CliExit {
+        /// The invocation number.
+        invocation_id: u64,
+        /// The process exit code.
+        code: i32,
+    },
+    /// CLI to server: stop a running command.
+    CliCancel {
+        /// The invocation number.
+        invocation_id: u64,
     },
 }
 

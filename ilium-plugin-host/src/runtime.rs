@@ -45,6 +45,7 @@ use crate::imports::backed::{
     KernelPanes, KernelSessions, KernelSettingsTables, KernelTerminal, KernelTree, LogSink,
     RegistryCommands, ResultQueue, SinkLog,
 };
+use crate::imports::cli::{CliBook, CliImport};
 use crate::imports::clock::ClockImport;
 use crate::imports::extension_points::{ExtensionBook, PluginExtensions};
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
@@ -57,6 +58,11 @@ use crate::instance::{ExportCall, ExportReply, PluginInstance};
 use crate::linker::LinkerCache;
 use crate::store_data::GuestIdentity;
 use crate::wasm_guest::WasmGuest;
+
+pub mod cli;
+pub mod cross_side;
+pub mod durable_timers;
+mod hooks;
 
 /// The plugin API string passed to `activate`.
 const API: &str = "ilium:plugin@0.1.0";
@@ -241,12 +247,21 @@ pub struct HostRuntime {
     /// The timers of the current instance of each plugin. Behind a lock because
     /// `build_imports` creates a book while the runtime is borrowed shared.
     timer_books: Mutex<BTreeMap<String, TimerBook>>,
+    /// Durable timers on disk; `None` until the embedder names a file, and then they are only
+    /// kept in memory (`set_durable_timer_file`).
+    durable_timers: Mutex<Option<durable_timers::DurableTimerStore>>,
     /// Topic messages plugins published since the last pump.
     topic_outbox: TopicOutbox,
     /// What plugins registered on extension points at run time.
     extension_book: ExtensionBook,
     /// Service calls between the plugins of this runtime.
     services: ServiceBroker,
+    /// Hook chain breach counters and stops.
+    hooks: hooks::HookState,
+    /// Topics and service calls that cross to the other side's runtime.
+    cross_side: cross_side::CrossSideState,
+    /// The running CLI invocations and what they printed.
+    cli_book: Arc<CliBook>,
     next_instance: u64,
     job_panics: u64,
     next_activation: u64,
@@ -265,6 +280,7 @@ impl std::fmt::Debug for HostRuntime {
 impl HostRuntime {
     /// A runtime without plugins.
     pub fn new(engine: Arc<PluginEngine>, config: RuntimeConfig) -> Self {
+        let results = ResultQueue::default();
         Self {
             engine,
             linkers: LinkerCache::new(),
@@ -275,12 +291,16 @@ impl HostRuntime {
             disabled: config.disabled,
             plugins: BTreeMap::new(),
             contributions: Arc::new(Mutex::new(ContributionRegistry::new())),
-            results: ResultQueue::default(),
+            cli_book: CliBook::new(Arc::clone(&results)),
+            results,
             commands: CommandQueue::default(),
             timer_books: Mutex::new(BTreeMap::new()),
+            durable_timers: Mutex::new(None),
             topic_outbox: TopicOutbox::default(),
             extension_book: ExtensionBook::default(),
             services: ServiceBroker::default(),
+            hooks: hooks::HookState::default(),
+            cross_side: cross_side::CrossSideState::default(),
             next_instance: 1,
             job_panics: 0,
             next_activation: 1,
@@ -409,8 +429,14 @@ impl HostRuntime {
     }
 
     fn build_imports(&self, plugin: &str, record: &PluginRecord, instance: u64) -> ImportSet {
-        // A new instance starts without timers: the book of the previous one is replaced.
+        // A new instance starts without ordinary timers: the book of the previous one is
+        // replaced. Its durable timers are kept: the previous book is written to the store
+        // first, then the new book is armed from it.
+        self.sync_durable_timers();
         let timer_book = TimerBook::default();
+        if let Some(store) = lock(&self.durable_timers).as_ref() {
+            timers::restore_durable(&timer_book, store.entries_of(plugin));
+        }
         lock(&self.timer_books).insert(plugin.to_owned(), Arc::clone(&timer_book));
         // A new instance starts without the replies and deferred calls of the last one.
         lock(&self.services).forget_plugin(plugin);
@@ -428,6 +454,10 @@ impl HostRuntime {
                 self.side,
             ))),
             clock: Some(Box::new(ClockImport)),
+            cli: Some(Box::new(CliImport::with_book(
+                plugin,
+                Arc::clone(&self.cli_book),
+            ))),
             settings: Some(Box::new(SettingsImport)),
             extensions: Some(Box::new(PluginExtensions::new(
                 plugin,
@@ -606,6 +636,8 @@ impl HostRuntime {
                 record.activation_order = order;
                 record.instance_number = instance_number;
                 self.next_activation += 1;
+                // A restarted instance gets its extensions back (EXT-021).
+                self.hooks.clear_plugin(plugin);
                 Ok(())
             }
             Err(error) => {
@@ -633,7 +665,9 @@ impl HostRuntime {
             record.state = PluginState::Failed(trap.code.0.to_string());
         }
         lock(&self.services).forget_plugin(plugin);
+        self.cross_side.forget_plugin(plugin);
         self.extension_book.forget_instance(plugin);
+        self.abandon_cli(plugin);
         RuntimeError::Trapped {
             plugin: plugin.to_owned(),
             code: trap.code.0.to_string(),
@@ -748,6 +782,9 @@ impl HostRuntime {
     /// Delivers `timer-fired` and `durable-timer-fired` for every due timer of an active
     /// plugin. The timers of a plugin that is not active are dropped with its book.
     fn fire_timers(&mut self) -> Vec<RuntimeError> {
+        let mut failures = self.activate_for_durable_timers();
+        // The books of inactive plugins are dropped below; their durable timers stay stored.
+        self.sync_durable_timers();
         let active = self.active_plugins();
         let books: Vec<(String, TimerBook)> = {
             let mut books = lock(&self.timer_books);
@@ -763,7 +800,6 @@ impl HostRuntime {
             .map_or(0, |elapsed| {
                 u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
             });
-        let mut failures = Vec::new();
         for (plugin, book) in books {
             let events = timers::take_due(&book, now, now_unix_millis);
             if events.is_empty() {
@@ -771,7 +807,71 @@ impl HostRuntime {
             }
             failures.extend(self.deliver_chunked(&plugin, &events));
         }
+        // Timers that fired are gone from their books; the store follows.
+        self.sync_durable_timers();
         failures
+    }
+
+    /// Names the file that keeps durable timers across restarts and loads what it holds. A file
+    /// that cannot be read gives an empty store and one log line. Call it before the first
+    /// activation.
+    pub fn set_durable_timer_file(&mut self, path: std::path::PathBuf) {
+        let (store, warning) = durable_timers::DurableTimerStore::open(path);
+        if let Some(warning) = warning {
+            self.log.line("", self.side, Level::Warn, &warning);
+        }
+        *lock(&self.durable_timers) = Some(store);
+    }
+
+    /// Copies the durable timers of every held book into the store and writes the file when
+    /// something changed. A plugin without a book keeps what is stored.
+    fn sync_durable_timers(&self) {
+        let mut guard = lock(&self.durable_timers);
+        let Some(store) = guard.as_mut() else {
+            return;
+        };
+        for (plugin, book) in lock(&self.timer_books).iter() {
+            store.replace(plugin, timers::durable_entries(book));
+        }
+        if let Err(error) = store.save_if_changed() {
+            self.log.line(
+                "",
+                self.side,
+                Level::Warn,
+                &format!(
+                    "the durable timer file {} was not written: {error}",
+                    store.path().display()
+                ),
+            );
+        }
+    }
+
+    /// Activates every plugin that is not running and has a durable timer due: the
+    /// `durable-timer` activation trigger. The new instance gets its timers back from the store
+    /// and the pump that follows delivers the due ones.
+    fn activate_for_durable_timers(&mut self) -> Vec<RuntimeError> {
+        let now_unix_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        let due: Vec<String> = match lock(&self.durable_timers).as_ref() {
+            Some(store) => store.plugins_due(now_unix_millis),
+            None => return Vec::new(),
+        };
+        let dormant: Vec<String> = due
+            .into_iter()
+            .filter(|plugin| {
+                matches!(
+                    self.plugins.get(plugin).map(|record| &record.state),
+                    Some(PluginState::Loaded)
+                )
+            })
+            .collect();
+        dormant
+            .iter()
+            .filter_map(|plugin| self.activate(plugin).err())
+            .collect()
     }
 
     /// A pump nobody waits for: each failure goes to the log of the plugin it stopped.
@@ -789,17 +889,41 @@ impl HostRuntime {
     /// When a held timer next needs a pump; `None` when no plugin holds a timer. The
     /// runtime thread wakes no later than this.
     pub fn next_timer_due(&self) -> Option<Instant> {
-        lock(&self.timer_books)
+        let book_due = lock(&self.timer_books)
             .values()
             .filter_map(timers::next_due)
+            .min();
+        // A stored durable timer of a plugin that is not running is looked at once a second.
+        let stored_due = lock(&self.durable_timers)
+            .as_ref()
+            .is_some_and(|store| !store.is_empty())
+            .then(|| Instant::now() + std::time::Duration::from_secs(1));
+        let timers_due = [book_due, stored_due].into_iter().flatten().min();
+        [timers_due, self.cross_side.next_deadline()]
+            .into_iter()
+            .flatten()
             .min()
     }
 
     /// Delivers `topic-published` for every queued message to the active plugins of this
-    /// runtime that hold `topics.subscribe:<topic>` or `topics.subscribe:*`. Messages do not
-    /// cross to the other side's runtime here.
+    /// runtime that hold `topics.subscribe:<topic>` or `topics.subscribe:*`, then offers the
+    /// messages to the other side's runtime (`cross_side`).
     fn route_topics(&mut self) -> Vec<RuntimeError> {
         let published: Vec<topics::Published> = lock(&self.topic_outbox).drain(..).collect();
+        if published.is_empty() {
+            return Vec::new();
+        }
+        let failures = self.deliver_published(&published);
+        for message in &published {
+            self.cross_side.export_topic(message);
+        }
+        failures
+    }
+
+    /// Delivers topic messages to the local subscribers. Used for the messages plugins of
+    /// this runtime published and for those that arrived from the other side; only the
+    /// first kind is exported again.
+    fn deliver_published(&mut self, published: &[topics::Published]) -> Vec<RuntimeError> {
         if published.is_empty() {
             return Vec::new();
         }
@@ -808,7 +932,7 @@ impl HostRuntime {
             if record.state != PluginState::Active {
                 continue;
             }
-            for message in &published {
+            for message in published {
                 let subscribed = record.granted.iter().any(|grant| {
                     grant == "topics.subscribe:*"
                         || grant
@@ -857,6 +981,14 @@ impl HostRuntime {
                 );
                 continue;
             };
+            // A provider with no component on this side lives on the other side.
+            if self.state(&provider) == Some(PluginState::ManifestOnly) {
+                match self.cross_side.send_call(&call, Instant::now()) {
+                    Ok(()) => {}
+                    Err(error) => lock(&self.services).fail(&call, error),
+                }
+                continue;
+            }
             // A provider that is installed but not running starts with the service trigger.
             if self.state(&provider) == Some(PluginState::Loaded) {
                 let local = call.service.rsplit('/').next().unwrap_or(&call.service);
@@ -900,10 +1032,38 @@ impl HostRuntime {
         let finished = lock(&self.services).take_finished();
         let mut results = lock(&self.results);
         for end in finished {
+            if self
+                .cross_side
+                .finish_served(&mut lock(&self.services), &end)
+            {
+                continue;
+            }
             let outcome = end.error.map_or(Outcome::Ok, Outcome::Failed);
             results.push_back((end.caller, command_result(end.request, outcome)));
         }
         failures
+    }
+
+    /// Takes what is ready to go to the other side's runtime.
+    pub fn take_remote_outbound(&mut self) -> Vec<cross_side::RemoteMessage> {
+        self.cross_side.take_outbound()
+    }
+
+    /// Queues what arrived from the other side's runtime; the next `pump` handles it.
+    pub fn deliver_remote(&mut self, messages: Vec<cross_side::RemoteMessage>) {
+        self.cross_side.receive(messages);
+    }
+
+    /// Handles queued messages and timeouts of the crossing state: topics go to the local
+    /// subscribers, calls to the broker, replies to the calls that waited for them.
+    fn pump_cross_side(&mut self) -> Vec<RuntimeError> {
+        if !self.cross_side.has_work() {
+            return Vec::new();
+        }
+        let topics = self
+            .cross_side
+            .process_inbound(&mut lock(&self.services), Instant::now());
+        self.deliver_published(&topics)
     }
 
     /// Fires due timers, routes published topic messages, then delivers the commands plugins
@@ -914,6 +1074,8 @@ impl HostRuntime {
         for _ in 0..PUMP_ROUNDS {
             // A plugin may publish while it handles a timer, a command or a result, so the
             // outbox is routed in every round.
+            failures.extend(self.route_hooks());
+            failures.extend(self.pump_cross_side());
             let had_topics = !lock(&self.topic_outbox).is_empty();
             failures.extend(self.route_topics());
             failures.extend(self.route_services());
@@ -1020,6 +1182,9 @@ impl HostRuntime {
                 PluginState::ManifestOnly
             };
         }
+        self.abandon_cli(plugin);
+        // Timers armed since the last pump must not be lost with the instance.
+        self.sync_durable_timers();
         Ok(())
     }
 
@@ -1097,6 +1262,7 @@ impl HostRuntime {
                 report.abandoned.push(id);
             }
             record.state = PluginState::Stopped;
+            self.abandon_cli(&id);
         }
         report
     }

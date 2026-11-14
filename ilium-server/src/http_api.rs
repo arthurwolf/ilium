@@ -28,7 +28,14 @@ use crate::workspace::{create_agent_in_workspace, CreateAgentOptions};
 
 /// Starts the HTTP API on `127.0.0.1`, never on a public interface. A server
 /// that cannot bind its configured port keeps its terminal/IPC duties alive.
-pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::task::JoinHandle<()> {
+///
+/// `credentials_dir` is where the plugin route token and port files go (beside the session
+/// socket); they are written only when a plugin registered an HTTP route.
+pub(crate) fn spawn(
+    state: Arc<ServerState>,
+    config: HttpApiConfig,
+    credentials_dir: Option<PathBuf>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let address = SocketAddr::from(([127, 0, 0, 1], config.port));
         let listener = match tokio::net::TcpListener::bind(address).await {
@@ -39,15 +46,57 @@ pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::ta
             }
         };
         tracing::info!(%address, "loopback HTTP API listening");
+        // Port 0 binds any free port; the guard checks the one that was bound.
+        let bound_port = listener
+            .local_addr()
+            .map_or(config.port, |bound| bound.port());
+        let guard = Arc::new(crate::http_plugin::RouteGuard::new(bound_port));
+        publish_plugin_credentials(&state, &guard, credentials_dir.as_deref());
+        let plugin_guard = Arc::clone(&guard);
         let router = Router::new()
             .route("/create_agent", post(create_agent))
             .route("/v1/agents", post(create_agent))
             .merge(crate::http_control::routes())
+            // Plugin routes live under `/plugins/<plugin-id>/` and never shadow a kernel route.
+            .fallback(
+                move |State(state): State<Arc<ServerState>>, request: axum::extract::Request| {
+                    let guard = Arc::clone(&plugin_guard);
+                    async move { crate::http_plugin::serve(state, guard, request).await }
+                },
+            )
             .with_state(state);
         if let Err(error) = axum::serve(listener, router).await {
             tracing::error!(%address, %error, "loopback HTTP API stopped");
         }
     })
+}
+
+/// Writes `http-api.token` and `http-api.port` when at least one plugin serves a route. A
+/// failure is logged: the kernel routes keep working and plugin routes stay unreachable
+/// because nobody can learn the token.
+fn publish_plugin_credentials(
+    state: &ServerState,
+    guard: &crate::http_plugin::RouteGuard,
+    directory: Option<&Path>,
+) {
+    if !state
+        .plugins
+        .get()
+        .is_some_and(|host| host.has_http_routes())
+    {
+        return;
+    }
+    let Some(directory) = directory else {
+        tracing::warn!("plugin HTTP routes have no credentials directory and stay unreachable");
+        return;
+    };
+    if let Err(error) = crate::http_plugin::publish_credentials(directory, guard) {
+        tracing::warn!(
+            directory = %directory.display(),
+            %error,
+            "plugin HTTP route credentials were not written"
+        );
+    }
 }
 
 #[derive(Debug, Deserialize)]

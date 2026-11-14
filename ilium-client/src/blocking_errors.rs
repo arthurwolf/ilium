@@ -66,6 +66,7 @@ impl App {
                 ..
             } => Self::toolbar_action_for_command(command),
             NewPaneKind::Editor(_) => TreeToolbarAction::Editor,
+            NewPaneKind::Plugin { .. } => TreeToolbarAction::Editor,
             NewPaneKind::CustomAgent { identity, .. } => {
                 TreeToolbarAction::Agent(identity.base_provider)
             }

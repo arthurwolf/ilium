@@ -4,7 +4,7 @@
 
 use ilium_ipc::plugin::{
     ClientReplyBody, ClientRequestCall, ContributionDelta, ContributionOp, ControlBody, DeltaKind,
-    EnvelopeBody, InstalledPlugin, OutcomeRecord, PluginEnvelope, PluginHello, PluginMessage,
+    EnvelopeBody, ForwardTarget, ForwardedIntent, InstalledPlugin, OutcomeRecord, PluginEnvelope, PluginHello, PluginMessage,
     Rejection, SourcedEvent, Submission, MAX_DELTA_BYTES,
 };
 use ilium_ipc::{read_frame, write_frame, MAX_FRAME_LEN};
@@ -52,6 +52,11 @@ fn every_body() -> Vec<EnvelopeBody> {
             payload: vec![0],
         }),
         EnvelopeBody::Control(ControlBody::Resync),
+        EnvelopeBody::ForwardedIntent(ForwardedIntent {
+            plugin: PLUGIN.into(),
+            target: ForwardTarget::ActiveClient,
+            intent_json: b"{\"intent\":\"focus-node\"}".to_vec(),
+        }),
     ]
 }
 
@@ -201,7 +206,7 @@ proptest! {
 
 /// REQ: HST-101
 #[test]
-fn hst_101_envelope_body_has_exactly_the_seven_manual_variants() {
+fn hst_101_envelope_body_has_exactly_the_manual_variants_plus_forwarded_intent() {
     // An exhaustive match without a wildcard: adding a hook-call or guest-call variant breaks
     // compilation of this test.
     fn name(body: &EnvelopeBody) -> &'static str {
@@ -213,6 +218,7 @@ fn hst_101_envelope_body_has_exactly_the_seven_manual_variants() {
             EnvelopeBody::ClientReply(_) => "ClientReply",
             EnvelopeBody::Event(_) => "Event",
             EnvelopeBody::Control(_) => "Control",
+            EnvelopeBody::ForwardedIntent(_) => "ForwardedIntent",
         }
     }
     let names: Vec<&str> = every_body().iter().map(name).collect();
@@ -225,7 +231,8 @@ fn hst_101_envelope_body_has_exactly_the_seven_manual_variants() {
             "ClientRequest",
             "ClientReply",
             "Event",
-            "Control"
+            "Control",
+            "ForwardedIntent"
         ]
     );
     assert!(names
@@ -245,10 +252,10 @@ fn hst_101_envelope_body_variant_indices_follow_manual_order() {
 
 /// REQ: HST-101
 #[test]
-fn hst_101_envelope_body_index_seven_is_refused_unknown_variant() {
-    let mut bytes = 7u32.to_le_bytes().to_vec();
+fn hst_101_envelope_body_index_eight_is_refused_unknown_variant() {
+    let mut bytes = 8u32.to_le_bytes().to_vec();
     bytes.extend_from_slice(&[0u8; 64]);
-    let error = bincode::deserialize::<EnvelopeBody>(&bytes).expect_err("index 7 is unknown");
+    let error = bincode::deserialize::<EnvelopeBody>(&bytes).expect_err("index 8 is unknown");
     // serde's derived enum decoder names the variant-index range; a short-input error would not.
     assert!(error.to_string().contains("variant index"), "{error}");
 }
@@ -316,9 +323,11 @@ proptest! {
 
 /// REQ: HST-106
 #[test]
-fn hst_106_protocol_constant_is_u16_equal_to_one() {
+fn hst_106_protocol_constant_is_u16_equal_to_two() {
+    // Version 2 appends `EnvelopeBody::ForwardedIntent` and the CLI control records; the manual
+    // text still says 1 and must be updated (reported by the kernel-routing stream).
     let constant: u16 = PLUGIN_PROTOCOL_VERSION;
-    assert_eq!(constant, 1);
+    assert_eq!(constant, 2);
 }
 
 /// REQ: HST-106

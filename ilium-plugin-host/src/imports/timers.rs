@@ -53,7 +53,7 @@ fn locked(book: &TimerBook) -> MutexGuard<'_, TimerState> {
 }
 
 /// Removes the timers that are due and returns their events: ordinary timers in id order, then
-/// durable timers in name order. A repeating timer stays held and is moved to its next
+/// durable timers in due-time order. A repeating timer stays held and is moved to its next
 /// interval after `now`, so a late pump fires it once, not once for each missed interval.
 pub fn take_due(book: &TimerBook, now: Instant, now_unix_millis: u64) -> Vec<Event> {
     let mut state = locked(book);
@@ -90,14 +90,15 @@ pub fn take_due(book: &TimerBook, now: Instant, now_unix_millis: u64) -> Vec<Eve
         }
         events.push(Event::TimerFired(TimerId(id)));
     }
-    let mut names: Vec<String> = state
+    // Overdue timers fire in due-time order, the name breaking a tie (PRF-027).
+    let mut overdue: Vec<(u64, String)> = state
         .durable
         .iter()
         .filter(|(_, durable)| durable.epoch_millis <= now_unix_millis)
-        .map(|(name, _)| name.clone())
+        .map(|(name, durable)| (durable.epoch_millis, name.clone()))
         .collect();
-    names.sort_unstable();
-    for name in names {
+    overdue.sort_unstable();
+    for (_, name) in overdue {
         if let Some(durable) = state.durable.remove(&name) {
             events.push(Event::DurableTimerFired(DurableTimerEvent {
                 timer: TimerId(durable.id),
@@ -107,6 +108,37 @@ pub fn take_due(book: &TimerBook, now: Instant, now_unix_millis: u64) -> Vec<Eve
         }
     }
     events
+}
+
+/// The durable timers a book holds as `(name, epoch millis)`, in name order. The runtime stores
+/// them so they outlive the process (api-durable-timers).
+pub fn durable_entries(book: &TimerBook) -> Vec<(String, u64)> {
+    let state = locked(book);
+    let mut entries: Vec<(String, u64)> = state
+        .durable
+        .iter()
+        .map(|(name, durable)| (name.clone(), durable.epoch_millis))
+        .collect();
+    entries.sort_unstable();
+    entries
+}
+
+/// Re-arms stored durable timers in a book. Each gets a fresh timer id, because ids belong to
+/// one instance. A name the book already holds is kept as it is, and no more than the held limit
+/// is taken, so a damaged store cannot give a plugin more timers than it may arm.
+pub fn restore_durable(book: &TimerBook, entries: impl IntoIterator<Item = (String, u64)>) {
+    let mut state = locked(book);
+    for (name, epoch_millis) in entries {
+        if state.durable.len() >= HELD_TIMER_LIMIT {
+            break;
+        }
+        if name.is_empty() || state.durable.contains_key(&name) {
+            continue;
+        }
+        state.next_id += 1;
+        let id = state.next_id;
+        state.durable.insert(name, Durable { id, epoch_millis });
+    }
 }
 
 /// How often a book that holds durable timers is looked at: they follow the wall clock, which

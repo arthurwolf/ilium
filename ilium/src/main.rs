@@ -121,6 +121,10 @@ enum Command {
     /// Internal Claude status-line model capture; never opens a session or runtime.
     #[command(name = "__claude-model-statusline", hide = true)]
     ClaudeModelStatusline,
+    /// A subcommand a plugin contributes (`ilium <name> ...`); any word that is not a built-in
+    /// subcommand lands here and is resolved against the enabled plugins' manifests.
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
     /// Internal offline release qualification; opens no terminal or session.
     #[command(hide = true)]
     ReleaseEmbeddingProbe {
@@ -386,7 +390,18 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let matches = Cli::command().get_matches();
+    // The plugin commands of the enabled plugins are listed after the built-in subcommands.
+    let command = Cli::command();
+    let native: Vec<String> = command
+        .get_subcommands()
+        .map(|subcommand| subcommand.get_name().to_owned())
+        .collect();
+    let command =
+        match ilium::plugin_cli::help_section(&ilium::plugin_cli::load_contributed(), &native) {
+            Some(section) => command.after_help(section),
+            None => command,
+        };
+    let matches = command.get_matches();
     let explicit_cwd = matches.value_source("cwd") == Some(clap::parser::ValueSource::CommandLine);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     // Before any thread exists: the client reads the mode from the environment and a server
@@ -535,6 +550,18 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
                 Err(_) => Err(CliError::ExitStatus(1)),
             }
         }
+        Some(Command::External(words)) => match ilium::plugin_cli::run(words, &cli.cwd).await {
+            ilium::plugin_cli::Ran::Exit(0) => Ok(()),
+            ilium::plugin_cli::Ran::Exit(code) => {
+                Err(CliError::ExitStatus(u8::try_from(code).unwrap_or(1)))
+            }
+            ilium::plugin_cli::Ran::Unknown(name) => Cli::command()
+                .error(
+                    clap::error::ErrorKind::InvalidSubcommand,
+                    format!("unrecognized subcommand '{name}'"),
+                )
+                .exit(),
+        },
         Some(Command::AntigravityModelStatusline) => Err(CliError::ServerReportedError(
             "Antigravity model capture must run before runtime startup".into(),
         )),

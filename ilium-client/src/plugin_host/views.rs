@@ -6,7 +6,10 @@
 //! `view`, and turns keys and clicks into `ui-action`s. Status segments and tree decorations
 //! are read here for the status bar and the tree.
 
+use std::time::Instant;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ilium_plugin_api::generated::types::ui::UiAction;
 use ilium_plugin_api::generated::types::ViewTarget;
 use ilium_plugin_host::render::sanitize_plugin_text;
 use ratatui::layout::{Position, Rect};
@@ -15,6 +18,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::host::ChromeItem;
+use super::settings_rows::{rows_for, SettingRow, Step};
 use super::view;
 use crate::app::{App, FocusTarget, RightPanelTarget};
 use crate::theme;
@@ -230,15 +234,63 @@ impl App {
                 self.show_plugin_view(&plugin, kind, &name);
                 true
             }
-            Some(PluginListRow::Setting(setting)) => {
-                self.status_message = Some(format!(
-                    "{} is a setting of {}: its plugin changes it, this list shows the default",
-                    setting.title, setting.plugin
-                ));
+            Some(PluginListRow::Setting(_)) => {
+                self.settings_step_plugin_row(row, Step::Next);
                 false
             }
             None => false,
         }
+    }
+
+    /// Every contributed settings row with the value in effect (the stored value over the
+    /// default). The user's `config.toml` is read once per plugin, not once per row.
+    pub(crate) fn plugin_setting_rows(&self) -> Vec<SettingRow> {
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            return Vec::new();
+        };
+        let store = ilium_plugin_host::config_settings::PluginSettingsStore::of_user();
+        let mut rows = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for setting in plugins.contributed_settings() {
+            if !seen.insert(setting.plugin.clone()) {
+                continue;
+            }
+            let Some(manifest) = plugins
+                .enabled_manifests()
+                .into_iter()
+                .find_map(|(id, text)| (id == setting.plugin).then_some(text))
+            else {
+                continue;
+            };
+            let stored = store.read(&setting.plugin).unwrap_or_default();
+            rows.extend(rows_for(&setting.plugin, manifest, &stored));
+        }
+        rows
+    }
+
+    /// Moves the contributed setting under a row of the plugin list one step: a switch flips,
+    /// a choice cycles, a number steps inside its range. The value is checked against the
+    /// row's schema and written to `config.toml`; a refusal is shown in the status line and
+    /// nothing is stored. Returns whether the stored value changed.
+    pub(crate) fn settings_step_plugin_row(&mut self, row: usize, step: Step) -> bool {
+        let Some(PluginListRow::Setting(setting)) = self.plugin_list_rows().into_iter().nth(row)
+        else {
+            return false;
+        };
+        let Some(mut edited) = self
+            .plugin_setting_rows()
+            .into_iter()
+            .find(|candidate| candidate.plugin == setting.plugin && candidate.key == setting.key)
+        else {
+            return false;
+        };
+        let store = ilium_plugin_host::config_settings::PluginSettingsStore::of_user();
+        let changed = edited.step_and_commit(&store, step);
+        self.status_message = Some(match &edited.validation {
+            Some(reason) => format!("{}: {reason}", edited.title),
+            None => format!("{} is now {}", edited.title, edited.display()),
+        });
+        changed
     }
 
     /// Shows a contributed view on the user's request (a menu entry, a key, the plugin list).
@@ -286,63 +338,116 @@ impl App {
         }
     }
 
-    /// Keyboard in a plugin view: Esc returns to the tree, the rest moves the cursor or sends
-    /// the action under it.
+    /// Keyboard in a plugin view: Esc returns to the tree (unless it closes a number entry), a
+    /// focused text input or number edits, the rest moves the cursor or sends the action under it.
     pub(crate) fn handle_plugin_view_key(&mut self, key: KeyEvent) {
         if key.kind == KeyEventKind::Release {
             return;
         }
-        if key.code == KeyCode::Esc {
+        if key.code == KeyCode::Esc && !view::captures_escape(&self.plugin_view_cursor) {
             self.leave_pane_focus();
             return;
         }
-        let Some((plugin, target)) = self
-            .shown_plugin_view()
-            .map(|(plugin, target)| (plugin.to_owned(), target))
-        else {
+        let Some((plugin, target, scene)) = self.compose_shown_plugin_view() else {
             return;
         };
-        let Some(tree) = self
-            .wasm_plugins
-            .as_ref()
-            .and_then(|plugins| plugins.view_tree(&plugin, &target))
-        else {
-            return;
-        };
-        let scene = view::compose(&tree, inner(self.layout.pane_area));
-        let mut cursor = self.plugin_view_cursor;
-        let action = view::key(&scene, &target, &mut cursor, key.code);
+        let mut cursor = std::mem::take(&mut self.plugin_view_cursor);
+        let actions = view::key(&scene, &target, &mut cursor, key, Instant::now());
         self.plugin_view_cursor = cursor;
-        if let (Some(action), Some(plugins)) = (action, self.wasm_plugins.as_ref()) {
-            plugins.view_action(&plugin, action);
-        }
+        self.send_plugin_view_actions(&plugin, actions);
     }
 
-    /// Pointer in a plugin view: a click gives it the keyboard and sends the action under it.
+    /// Pointer in a plugin view: a click gives it the keyboard and sends the action under it;
+    /// the wheel scrolls, a drag moves a scrollbar, a divider or a slider, and the release ends it.
     pub(crate) fn handle_plugin_view_mouse(&mut self, mouse: MouseEvent, position: Position) {
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        if !matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left)
+                | MouseEventKind::Drag(MouseButton::Left)
+                | MouseEventKind::Up(MouseButton::Left)
+                | MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+        ) {
             return;
         }
+        let Some((plugin, target, scene)) = self.compose_shown_plugin_view() else {
+            return;
+        };
+        let mut cursor = std::mem::take(&mut self.plugin_view_cursor);
+        let actions = match mouse.kind {
+            MouseEventKind::Down(_) => {
+                self.focus = FocusTarget::Pane;
+                view::click(&scene, &target, &mut cursor, position, Instant::now())
+            }
+            MouseEventKind::Drag(_) => {
+                let mut moved = Vec::new();
+                view::drag(&target, &mut cursor, position, &mut moved);
+                moved
+            }
+            MouseEventKind::Up(_) => view::release(&target, &mut cursor),
+            MouseEventKind::ScrollUp => view::wheel(&scene, &target, &mut cursor, position, -1),
+            _ => view::wheel(&scene, &target, &mut cursor, position, 1),
+        };
+        self.plugin_view_cursor = cursor;
+        self.send_plugin_view_actions(&plugin, actions);
+    }
+
+    /// A paste goes to the text input of the shown plugin view that has the keyboard. Returns
+    /// whether the view took it.
+    pub(crate) fn handle_plugin_view_paste(&mut self, pasted: &str) -> bool {
+        if !matches!(self.focus, FocusTarget::Pane) {
+            return false;
+        }
+        let Some((plugin, target, scene)) = self.compose_shown_plugin_view() else {
+            return false;
+        };
+        let mut cursor = std::mem::take(&mut self.plugin_view_cursor);
+        let actions = view::paste(&scene, &target, &mut cursor, pasted, Instant::now());
+        self.plugin_view_cursor = cursor;
+        let taken = actions.is_some();
+        self.send_plugin_view_actions(&plugin, actions.unwrap_or_default());
+        taken
+    }
+
+    /// Sends the plugin view edits whose debounce ran out. Returns whether anything was sent.
+    pub(crate) fn tick_plugin_view_edits(&mut self, now: Instant) -> bool {
         let Some((plugin, target)) = self
             .shown_plugin_view()
             .map(|(plugin, target)| (plugin.to_owned(), target))
         else {
-            return;
+            return false;
         };
-        self.focus = FocusTarget::Pane;
-        let Some(tree) = self
+        if view::next_due(&self.plugin_view_cursor).is_none() {
+            return false;
+        }
+        let actions = view::tick(&target, &mut self.plugin_view_cursor, now);
+        let sent = !actions.is_empty();
+        self.send_plugin_view_actions(&plugin, actions);
+        sent
+    }
+
+    /// The shown plugin view with its tree laid out for the right-hand area.
+    fn compose_shown_plugin_view(&self) -> Option<(String, ViewTarget, view::Scene)> {
+        let (plugin, target) = self
+            .shown_plugin_view()
+            .map(|(plugin, target)| (plugin.to_owned(), target))?;
+        let tree = self
             .wasm_plugins
             .as_ref()
-            .and_then(|plugins| plugins.view_tree(&plugin, &target))
-        else {
-            return;
-        };
-        let scene = view::compose(&tree, inner(self.layout.pane_area));
-        let mut cursor = self.plugin_view_cursor;
-        let action = view::click(&scene, &target, &mut cursor, position);
-        self.plugin_view_cursor = cursor;
-        if let (Some(action), Some(plugins)) = (action, self.wasm_plugins.as_ref()) {
-            plugins.view_action(&plugin, action);
+            .and_then(|plugins| plugins.view_tree(&plugin, &target))?;
+        let scene = view::compose_with(
+            &tree,
+            inner(self.layout.pane_area),
+            &self.plugin_view_cursor.states,
+        );
+        Some((plugin, target, scene))
+    }
+
+    fn send_plugin_view_actions(&self, plugin: &str, actions: Vec<UiAction>) {
+        if let Some(plugins) = self.wasm_plugins.as_ref() {
+            for action in actions {
+                plugins.view_action(plugin, action);
+            }
         }
     }
 
@@ -439,8 +544,8 @@ pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
     plugins.set_view_area(plugin, &target, (body.width, body.height));
     match plugins.view_tree(plugin, &target) {
         Some(tree) => {
-            let scene = view::compose(&tree, body);
-            view::draw(frame, &scene, app.plugin_view_cursor, focused);
+            let scene = view::compose_with(&tree, body, &app.plugin_view_cursor.states);
+            view::draw(frame, &scene, &app.plugin_view_cursor, focused);
         }
         // The plugin has not rendered yet.
         None => frame.render_widget(Paragraph::new(Line::from("…")), body),

@@ -153,6 +153,7 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::PruneWorkspace { project, .. } => Some(*project),
         ClientRequest::QueryWorkspaceCloseOffer { pane_id, .. } => Some(*pane_id),
         ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SignalPaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
         ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
         ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
@@ -692,6 +693,10 @@ async fn handle_scoped_request(
         }
         ClientRequest::TerminatePaneProcess { pane_id } => {
             handle_terminate_pane_process(state, pane_id, direct_tx).await;
+            false
+        }
+        ClientRequest::SignalPaneProcess { pane_id, signal } => {
+            handle_signal_pane_process(state, pane_id, signal, direct_tx).await;
             false
         }
         ClientRequest::FreezePane {
@@ -5206,6 +5211,16 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 close_on_exit: false,
             }
         }
+        // `create_pane` refuses a plugin pane kind before it asks for a plan: the server owns
+        // no terminal or editor for it. This arm keeps the match exhaustive without inventing
+        // a process for the pane, so the plan it returns has no spawn.
+        NewPaneKind::Plugin { title, .. } => NewPanePlan {
+            spawn_kind: PaneSnapshotKind::Editor { path: None },
+            name: title,
+            content_kind: PaneContentKind::Editor,
+            initial_input: None,
+            close_on_exit: false,
+        },
         NewPaneKind::CustomAgent {
             identity,
             initial_input,
@@ -5282,6 +5297,11 @@ async fn create_pane(
     kind: NewPaneKind,
     working_directory: NewPaneWorkingDirectory,
 ) -> Result<NodeId, String> {
+    if let NewPaneKind::Plugin { kind_id, .. } = &kind {
+        return Err(format!(
+            "plugin pane kind {kind_id} cannot be created: this server has no plugin pane host"
+        ));
+    }
     let plan = new_pane_plan(kind);
     let spawn_description = format!("{:?}", plan.spawn_kind);
 
@@ -5532,6 +5552,57 @@ async fn handle_terminate_pane_process(
             result: outcome,
         })
         .await;
+}
+
+/// Sends a signal to the process of a terminal pane for a plugin intent (`pane.signal`).
+/// Interrupt types Ctrl-C into the terminal. Terminate stops the process tree and Kill the
+/// direct child, both through the captured termination handle so a recycled PID is never
+/// signalled. Hangup has no portable route and is refused.
+async fn handle_signal_pane_process(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    signal: ilium_ipc::PaneSignal,
+    direct_tx: &DirectEventSender,
+) {
+    let outcome = match signal {
+        ilium_ipc::PaneSignal::Interrupt => {
+            let input = {
+                let panes = state.panes.read().await;
+                match panes.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => Some(runtime.session.input_handle()),
+                    _ => None,
+                }
+            };
+            match input {
+                Some(input) => input
+                    .write(&[0x03])
+                    .map(|_receipt| ())
+                    .map_err(|error| format!("interrupt could not be queued: {error}")),
+                None => Err(format!("pane {pane_id:?} has no running terminal process")),
+            }
+        }
+        ilium_ipc::PaneSignal::Terminate => {
+            terminate_pane_process_with_work(state, pane_id, |control| {
+                control
+                    .terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT)
+                    .map(|_proof| ())
+            })
+            .await
+        }
+        ilium_ipc::PaneSignal::Kill => {
+            terminate_pane_process_with_work(state, pane_id, |control| {
+                control.kill_direct_child().map_err(std::io::Error::other)
+            })
+            .await
+        }
+        ilium_ipc::PaneSignal::Hangup => {
+            Err("hangup is not supported for pane processes on this platform".to_owned())
+        }
+    };
+    if let Err(message) = outcome {
+        tracing::warn!(pane = pane_id.0, ?signal, %message, "pane signal was not delivered");
+        send_direct_error(direct_tx, message).await;
+    }
 }
 
 async fn handle_freeze_pane(

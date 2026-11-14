@@ -35,6 +35,7 @@ mod foreground_observation;
 mod git_status;
 mod http_api;
 mod http_control;
+mod http_plugin;
 mod initial_prompt;
 mod ipc;
 mod lifecycle_log;
@@ -375,7 +376,11 @@ pub async fn run_with_plugins(
         workspace_git_requests,
     ));
     let http_api_task =
-        AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
+        AbortOnDropHandle::new(http_api::spawn(
+            Arc::clone(&state),
+            options.http_api,
+            options.socket_path.parent().map(std::path::Path::to_path_buf),
+        ));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
     let progress_watchdog_task =
         AbortOnDropHandle::new(progress_watchdog::spawn(Arc::clone(&state)));

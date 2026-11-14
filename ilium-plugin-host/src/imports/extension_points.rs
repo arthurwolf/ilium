@@ -5,11 +5,14 @@
 //! plugins register at run time live in one book the runtime shares between its plugins.
 //! Each plugin gets its own import, which knows the plugin and its grants.
 //!
-//! `run-hook` validates the call and completes it with no handler reply, as the plain import
-//! does: handler chains need an export the plugin world does not have yet.
+//! `run-hook` validates the call and queues it as a [`PendingHook`]. The runtime's hook pump
+//! (`runtime/hooks.rs`) takes the queue, runs the handler chain one handler after another and
+//! stores the folded reply with [`ExtensionBook::finish`]; `take-reply` returns it.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::host::extensions::{
     ExtensionEntry, ExtensionError, HostExtensions,
@@ -31,15 +34,50 @@ const PRIORITY_DEFAULT: u8 = 50;
 const ENTRIES_DEFAULT_MAX: usize = 64;
 /// Hook requests of one plugin whose reply was not taken yet.
 const PENDING_REPLIES_MAX: usize = 256;
+/// Deepest chain nesting: a `run-hook` from a handler at this depth fails (EXT-046).
+const CHAIN_DEPTH_MAX: usize = 3;
+/// Deadline of one handler when the point names none, in milliseconds.
+const HANDLER_DEADLINE_DEFAULT_MS: u64 = 20;
+/// Range a point's `deadline_ms` is clamped into, in milliseconds.
+const HANDLER_DEADLINE_RANGE_MS: (u64, u64) = (5, 50);
+/// Handlers a hook point runs when its manifest names no `max_handlers`.
+const HANDLERS_DEFAULT_MAX: usize = 8;
+/// `run-hook` calls one point accepts per second (EXT-048).
+const RUN_HOOK_PER_SECOND: usize = 200;
+
+/// Request ids of hook chains. Commands count from 1 and services from `1 << 40`, so the
+/// three kinds of `request-completed` never carry the same id for one plugin.
+static NEXT_HOOK_REQUEST: AtomicU64 = AtomicU64::new(1 << 41);
+
+/// A `run-hook` call that waits for its handler chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingHook {
+    /// The plugin that owns the point and called `run-hook`.
+    pub caller: String,
+    /// The request id `run-hook` returned.
+    pub request: u64,
+    /// The global point name `<owner>/<point>`.
+    pub point: String,
+    /// The payload the owner passed.
+    pub payload_json: String,
+    /// The points of the chains this call was started inside, outermost first. Empty for an
+    /// outermost chain (depth 1).
+    pub stack: Vec<String>,
+}
 
 /// What plugins registered at run time, for every point.
 #[derive(Debug, Default)]
 pub struct BookState {
     /// Entries by global point name `<owner>/<point>`.
     entries: BTreeMap<String, Vec<ExtensionEntry>>,
-    next_request: u64,
+    /// Hook requests the pump did not run yet, oldest first.
+    queue: VecDeque<PendingHook>,
+    /// The chains the handler now running sits inside, outermost first; empty between chains.
+    stack: Vec<String>,
     /// Completed hook requests by (calling plugin, request id).
     replies: HashMap<(String, u64), Option<String>>,
+    /// When `run-hook` calls on each point were accepted in the last second.
+    accepted: HashMap<String, VecDeque<Instant>>,
 }
 
 /// The book of run-time extension entries, shared by the plugins of one runtime.
@@ -71,6 +109,25 @@ impl ExtensionBook {
             entries.retain(|entry| entry.contributor.0 != plugin);
         }
         state.replies.retain(|(caller, _), _| caller != plugin);
+        state.queue.retain(|hook| hook.caller != plugin);
+    }
+
+    /// Takes every queued hook request, oldest first. The runtime's pump runs them.
+    pub(crate) fn take_queue(&self) -> Vec<PendingHook> {
+        self.state().queue.drain(..).collect()
+    }
+
+    /// Sets the chains the handler about to run sits inside; `run-hook` calls made by that
+    /// handler are queued one level deeper and refused when they name a point on it.
+    pub(crate) fn set_stack(&self, stack: Vec<String>) {
+        self.state().stack = stack;
+    }
+
+    /// Stores the folded reply of a finished chain for `take-reply`.
+    pub(crate) fn finish(&self, caller: &str, request: u64, reply: Option<String>) {
+        self.state()
+            .replies
+            .insert((caller.to_owned(), request), reply);
     }
 
     /// The entries of a point in run order: priority, contributor, extension id.
@@ -91,6 +148,7 @@ impl ExtensionBook {
 struct Declared {
     dynamic: bool,
     max_entries: usize,
+    payload_schema: Option<Value>,
 }
 
 /// `ilium:host/extensions` of one plugin.
@@ -137,6 +195,7 @@ impl PluginExtensions {
                 .and_then(Value::as_u64)
                 .and_then(|max| usize::try_from(max).ok())
                 .unwrap_or(ENTRIES_DEFAULT_MAX),
+            payload_schema: entry.payload.get("payload_schema").cloned(),
         })
     }
 
@@ -212,26 +271,63 @@ impl HostExtensions for PluginExtensions {
         if payload_json.len() > PAYLOAD_CAP_BYTES {
             return Err(ExtensionError::CapExceeded);
         }
-        self.declared(&point)?;
+        let declared = self.declared(&point)?;
         if !self.provides(&point) {
             return Err(ExtensionError::NotGranted);
         }
-        if serde_json::from_str::<Value>(&payload_json).is_err() {
+        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
             return Err(ExtensionError::SchemaMismatch);
+        };
+        if let Some(schema) = &declared.payload_schema {
+            if !conforms(schema, &payload) {
+                return Err(ExtensionError::SchemaMismatch);
+            }
         }
         let mut state = self.book.state();
-        let pending = state
+        // A chain already running on this point, directly or through other points, cannot
+        // start again (EXT-022), and a handler at depth 3 cannot start a deeper one (EXT-046).
+        if state.stack.iter().any(|running| *running == point) {
+            return Err(ExtensionError::Reentrant);
+        }
+        if state.stack.len() >= CHAIN_DEPTH_MAX {
+            return Err(ExtensionError::Reentrant);
+        }
+        let queued = state
+            .queue
+            .iter()
+            .filter(|hook| hook.caller == self.plugin)
+            .count();
+        let answered = state
             .replies
             .keys()
             .filter(|(caller, _)| *caller == self.plugin)
             .count();
-        if pending >= PENDING_REPLIES_MAX {
+        if queued + answered >= PENDING_REPLIES_MAX {
             return Err(ExtensionError::CapExceeded);
         }
-        state.next_request += 1;
-        let request = state.next_request;
-        // No handler chain runs yet: the request completes at once without a reply.
-        state.replies.insert((self.plugin.clone(), request), None);
+        // More than 200 calls in one second on one point are refused (EXT-048). The WIT
+        // `extension-error` has no rate-limited case, so the closest case reports it.
+        let now = Instant::now();
+        let window = state.accepted.entry(point.clone()).or_default();
+        while window
+            .front()
+            .is_some_and(|accepted| now.duration_since(*accepted) >= Duration::from_secs(1))
+        {
+            window.pop_front();
+        }
+        if window.len() >= RUN_HOOK_PER_SECOND {
+            return Err(ExtensionError::CapExceeded);
+        }
+        window.push_back(now);
+        let request = NEXT_HOOK_REQUEST.fetch_add(1, Ordering::Relaxed);
+        let stack = state.stack.clone();
+        state.queue.push_back(PendingHook {
+            caller: self.plugin.clone(),
+            request,
+            point,
+            payload_json,
+            stack,
+        });
         Ok(RequestId(request))
     }
 
@@ -307,6 +403,163 @@ impl HostExtensions for PluginExtensions {
         entries.remove(position);
         Ok(())
     }
+}
+
+/// True when `value` satisfies `schema` (the data schema subset). A schema whose root is not
+/// an object, or a value the validator cannot compare with an object schema, is checked for
+/// its JSON type only: the subset validator takes object roots.
+pub(crate) fn conforms(schema: &Value, value: &Value) -> bool {
+    let is_object_schema = schema.get("type").and_then(Value::as_str) == Some("object");
+    if !is_object_schema {
+        return true;
+    }
+    if !value.is_object() {
+        return false;
+    }
+    crate::settings::validate_settings(&schema.to_string(), &value.to_string()).is_ok()
+}
+
+/// How a hook point folds the replies of its handlers (api-extension-points.md, hook modes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HookMode {
+    /// Every handler runs; replies are ignored.
+    Observe,
+    /// Each handler gets the output of the previous one.
+    Transform,
+    /// The first `refuse` ends the chain.
+    Veto,
+    /// The first `answer` ends the chain.
+    First,
+}
+
+/// What the owner's manifest says about a hook point.
+#[derive(Debug, Clone)]
+pub(crate) struct HookPoint {
+    pub mode: HookMode,
+    pub payload_schema: Option<Value>,
+    pub reply_schema: Option<Value>,
+    /// The deadline of one handler call in milliseconds, clamped to 5..=50.
+    pub deadline_ms: u64,
+    pub max_handlers: usize,
+    /// Whether a handler that fails refuses the action (`on_failure`, SEC-287).
+    pub refuse_on_failure: bool,
+    /// Whether the guards run once after a transform chain.
+    pub final_check: bool,
+}
+
+/// The hook declaration of a global point name, `None` when no enabled owner declares it.
+pub(crate) fn hook_point(registry: &ContributionRegistry, point: &str) -> Option<HookPoint> {
+    let entry = registry.find_global("extension_points", point)?;
+    let payload = &entry.payload;
+    let mode = match payload.get("mode").and_then(Value::as_str) {
+        Some("transform") => HookMode::Transform,
+        Some("veto") => HookMode::Veto,
+        Some("first") => HookMode::First,
+        _ => HookMode::Observe,
+    };
+    let high_risk = payload.get("risk").and_then(Value::as_str) == Some("high");
+    // `on_failure` matters on a high-risk veto or transform point only, and defaults to
+    // `refuse` there (SEC-287); everywhere else a failing handler counts as `pass`.
+    let refuse_on_failure = high_risk
+        && matches!(mode, HookMode::Veto | HookMode::Transform)
+        && payload.get("on_failure").and_then(Value::as_str) != Some("pass");
+    let (shortest, longest) = HANDLER_DEADLINE_RANGE_MS;
+    Some(HookPoint {
+        mode,
+        payload_schema: payload.get("payload_schema").cloned(),
+        reply_schema: payload.get("reply_schema").cloned(),
+        deadline_ms: payload
+            .get("deadline_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(HANDLER_DEADLINE_DEFAULT_MS)
+            .clamp(shortest, longest),
+        max_handlers: payload
+            .get("max_handlers")
+            .and_then(Value::as_u64)
+            .and_then(|max| usize::try_from(max).ok())
+            .unwrap_or(HANDLERS_DEFAULT_MAX),
+        refuse_on_failure,
+        final_check: payload
+            .get("final_check")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// One handler a contributor offers a hook point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HookHandler {
+    /// The contributing plugin.
+    pub plugin: String,
+    /// The contribution id (`ExtensionEntry.extension`), the identity of the entry.
+    pub extension: String,
+    /// The `handler` name `HookCall.extension` carries.
+    pub handler: String,
+    pub priority: u8,
+    /// A guard runs once after a transform chain with `final_check`.
+    pub guard: bool,
+}
+
+/// The handlers of a point from enabled manifests and from run-time registrations, in run
+/// order (priority, contributor, id). Entries without a `handler` are data, not handlers.
+pub(crate) fn hook_handlers(
+    registry: &ContributionRegistry,
+    book: &ExtensionBook,
+    point: &str,
+) -> Vec<HookHandler> {
+    let mut handlers: Vec<HookHandler> = registry
+        .entries("extensions")
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .payload
+                .get("point")
+                .and_then(Value::as_str)
+                .is_some_and(|named| named.split('@').next() == Some(point))
+        })
+        .filter_map(|entry| {
+            let handler = entry.payload.get("handler")?.as_str()?.to_owned();
+            Some(HookHandler {
+                plugin: entry.plugin.clone(),
+                extension: entry.name.clone(),
+                handler,
+                priority: entry
+                    .payload
+                    .get("priority")
+                    .and_then(Value::as_u64)
+                    .and_then(|priority| u8::try_from(priority).ok())
+                    .unwrap_or(PRIORITY_DEFAULT),
+                guard: entry
+                    .payload
+                    .get("guard")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        })
+        .collect();
+    for entry in book.entries_of(point) {
+        let Ok(body) = serde_json::from_str::<Value>(&entry.entry_json) else {
+            continue;
+        };
+        let Some(handler) = body.get("handler").and_then(Value::as_str) else {
+            continue;
+        };
+        handlers.push(HookHandler {
+            plugin: entry.contributor.0.clone(),
+            extension: entry.extension.clone(),
+            handler: handler.to_owned(),
+            priority: entry.priority,
+            guard: body.get("guard").and_then(Value::as_bool).unwrap_or(false),
+        });
+    }
+    handlers.sort_by(|left, right| {
+        (left.priority, &left.plugin, &left.extension).cmp(&(
+            right.priority,
+            &right.plugin,
+            &right.extension,
+        ))
+    });
+    handlers
 }
 
 #[cfg(test)]

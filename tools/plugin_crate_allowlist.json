@@ -1,0 +1,20 @@
+{
+  "_comment": "Crates a core plugin (plugins/core/*) may depend on. Checked by tools/check_plugin_crates.py. versions: locked versions that are allowed. wasm_safe: false keeps the crate out of plugin dependencies. default_features: required value of the dependency's default-features switch (omit for no requirement). required_features and forbidden_features constrain the enabled feature list. A crate missing from Cargo.lock is added only by the imports stream on a porter's request, after a wasm32 build passes.",
+  "ilium-plugin-sdk": {"versions": ["0.1.1"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Workspace crate; the only way a plugin reaches the host."},
+  "serde": {"versions": ["1.0.228"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Serialisation."},
+  "serde_json": {"versions": ["1.0.151"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "JSON values."},
+  "thiserror": {"versions": ["2.0.18"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Error enums."},
+  "unicode-width": {"versions": ["0.2.2"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Cell widths."},
+  "url": {"versions": ["2.5.8"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "URL parsing."},
+  "chrono": {"versions": ["0.4.45"], "wasm_safe": true, "default_features": false, "required_features": ["alloc"], "forbidden_features": ["clock", "wasmbind"], "note": "Calendar arithmetic only; the clock comes from the `clock` import, never from the system."},
+  "handlebars": {"versions": ["6.4.2"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Prompt templates of the compaction plugin; pure Rust, already in use."},
+  "regex": {"versions": ["1.13.0"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Pattern matching."},
+  "globset": {"versions": ["0.4.20"], "wasm_safe": true, "required_features": [], "forbidden_features": [], "note": "Glob matching without file access."},
+  "image": {"versions": ["0.25.10"], "wasm_safe": true, "default_features": false, "required_features": ["png"], "forbidden_features": [], "note": "Decode and encode through an explicit codec list; allowed after a wasm32 Clippy job proves it."},
+  "png": {"versions": ["0.18.1"], "wasm_safe": true, "default_features": false, "required_features": [], "forbidden_features": [], "note": "PNG codec; allowed after a wasm32 Clippy job proves it."},
+  "syntect": {"versions": [], "wasm_safe": true, "default_features": false, "required_features": ["default-fancy"], "forbidden_features": [], "note": "Needs default-features = false plus default-fancy; not locked yet."},
+  "walkdir": {"versions": ["2.5.0"], "wasm_safe": false, "required_features": [], "forbidden_features": [], "note": "use the `fs` import walk"},
+  "ignore": {"versions": ["0.4.33"], "wasm_safe": false, "required_features": [], "forbidden_features": [], "note": "use the `fs` import walk"},
+  "ureq": {"versions": ["3.3.0"], "wasm_safe": false, "required_features": [], "forbidden_features": [], "note": "Host side only (the http import); a plugin uses the `http` import."},
+  "reqwest": {"versions": ["0.12.28"], "wasm_safe": false, "required_features": [], "forbidden_features": [], "note": "Host side only; a plugin uses the `http` import."}
+}

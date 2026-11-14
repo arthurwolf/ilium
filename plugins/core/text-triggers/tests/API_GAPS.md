@@ -32,5 +32,5 @@ Not moved: `preview.rs`, `rows.rs` (client dialog and tab rows: G2 and G8, text 
 
 - G3: the server side cannot submit input, so `Tracker::evaluate` results are not yet delivered.
 - G4: `ilium.core.terminal/screen-changed` and the terminal `transfer` service are same-side only for now, so the screen cannot be read.
-- G10: the delay timer needs the wave-two clock import.
+- G10 (closed): the `clock` and `timers` imports are equipped for every instance, so a rule's delay runs on `timers.set`; a durable delay would use `timers.at`, which now survives a restart.
 - G2/G8: the rules list is shown read-only.

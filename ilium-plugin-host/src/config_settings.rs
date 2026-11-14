@@ -254,9 +254,240 @@ impl KernelSettings for ConfigFileSettings {
     }
 }
 
+/// Why a write of plugin settings did not happen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginSettingsError {
+    /// The patch breaks the schema; the text names the value and the rule, for the row.
+    Invalid(String),
+    /// The file could not be read, locked or written.
+    Store(FacadeError),
+}
+
+impl From<FacadeError> for PluginSettingsError {
+    fn from(error: FacadeError) -> Self {
+        Self::Store(error)
+    }
+}
+
+/// The values plugins store, in `[plugins."<plugin-id>"]` of `config.toml` (manual:
+/// `api-settings.md`, "Where values live").
+///
+/// The Settings screen, the client's plugin rows and a server-side plugin all write through
+/// this one store, under the lock every writer of `config.toml` holds, so two sides never
+/// interleave a read and a write.
+pub struct PluginSettingsStore {
+    file: ConfigFileSettings,
+}
+
+impl PluginSettingsStore {
+    /// The store of the user's own `config.toml` (honours `ILIUM_CONFIG_DIR`).
+    pub fn of_user() -> Self {
+        Self {
+            file: ConfigFileSettings::of_user(),
+        }
+    }
+
+    /// The store of a given file, for tests and isolated runs.
+    pub fn at(path: PathBuf) -> Self {
+        Self {
+            file: ConfigFileSettings::at(path),
+        }
+    }
+
+    /// Counts the writes this store made; a reader compares it to know its copy is stale.
+    pub fn revision(&self) -> u64 {
+        self.file.revision.load(Ordering::Acquire)
+    }
+
+    /// The stored values of a plugin; empty when it stored nothing.
+    pub fn read(
+        &self,
+        plugin: &str,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, FacadeError> {
+        let Some(path) = self.file.path.as_deref() else {
+            return Ok(serde_json::Map::new());
+        };
+        let document = ConfigFileSettings::read_document(path)?;
+        Ok(stored_values(&document, plugin))
+    }
+
+    /// Stores one value of a plugin without checking it; `null` removes the stored value.
+    pub fn write(
+        &self,
+        plugin: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), FacadeError> {
+        let mut patch = serde_json::Map::new();
+        patch.insert(key.to_owned(), value.clone());
+        self.update(plugin, |_stored| Ok(patch))
+            .map(|_| ())
+            .map_err(|error| match error {
+                PluginSettingsError::Store(error) => error,
+                PluginSettingsError::Invalid(message) => {
+                    FacadeError::new(ErrorCode::InvalidArgument, message)
+                }
+            })
+    }
+
+    /// Applies a merge patch against a schema, all or nothing, and returns the keys whose
+    /// value changed (empty when the patch changes nothing, in which case nothing is written).
+    ///
+    /// `null` resets a key to its default. The candidate that is checked is the defaults of the
+    /// schema, then the stored values, then the patch, so a key outside the schema, a value of
+    /// the wrong type and a value out of its range are all refused before anything is stored.
+    pub fn apply_patch(
+        &self,
+        plugin: &str,
+        schema_json: &str,
+        patch: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Vec<String>, PluginSettingsError> {
+        let defaults = schema_defaults(schema_json);
+        self.update(plugin, |stored| {
+            let mut candidate = defaults.clone();
+            candidate.extend(stored.clone());
+            for (key, value) in patch {
+                if value.is_null() {
+                    match defaults.get(key) {
+                        Some(default) => candidate.insert(key.clone(), default.clone()),
+                        None => candidate.remove(key),
+                    };
+                } else {
+                    candidate.insert(key.clone(), value.clone());
+                }
+            }
+            let text = serde_json::Value::Object(candidate).to_string();
+            crate::settings::validate_settings(schema_json, &text).map_err(|findings| {
+                PluginSettingsError::Invalid(
+                    findings
+                        .iter()
+                        .map(|finding| {
+                            if finding.pointer.is_empty() {
+                                finding.message.clone()
+                            } else {
+                                format!("{}: {}", finding.pointer, finding.message)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                )
+            })?;
+            Ok(patch.clone())
+        })
+    }
+
+    /// Reads, changes and writes the plugin's table under the shared lock. `plan` sees the
+    /// stored values and returns the patch to store (`null` removes); the keys it changes are
+    /// returned.
+    fn update(
+        &self,
+        plugin: &str,
+        plan: impl FnOnce(
+            &serde_json::Map<String, serde_json::Value>,
+        )
+            -> Result<serde_json::Map<String, serde_json::Value>, PluginSettingsError>,
+    ) -> Result<Vec<String>, PluginSettingsError> {
+        let path = self.file.path.as_deref().ok_or_else(|| {
+            FacadeError::new(ErrorCode::Unsupported, "no configuration directory")
+        })?;
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|error| {
+            FacadeError::new(
+                ErrorCode::Internal,
+                format!("the configuration directory is not writable: {error}"),
+            )
+        })?;
+        let _lock =
+            ExclusiveFileLock::acquire(&parent.join(CONFIG_LOCK_FILE)).map_err(|error| {
+                FacadeError::new(
+                    ErrorCode::Internal,
+                    format!("config.toml is not lockable: {error}"),
+                )
+            })?;
+        let mut document = ConfigFileSettings::read_document(path)?;
+        let stored = stored_values(&document, plugin);
+        let patch = plan(&stored)?;
+        let mut changed = Vec::new();
+        let mut table = stored.clone();
+        for (key, value) in patch {
+            if value.is_null() {
+                if table.remove(&key).is_some() {
+                    changed.push(key);
+                }
+            } else if table.get(&key) != Some(&value) {
+                table.insert(key.clone(), value);
+                changed.push(key);
+            }
+        }
+        if changed.is_empty() {
+            return Ok(changed);
+        }
+        let mut values = toml::Table::new();
+        for (key, value) in &table {
+            let value = json_to_toml(value).ok_or_else(|| {
+                PluginSettingsError::Invalid(format!("{key}: the value has no config.toml form"))
+            })?;
+            values.insert(key.clone(), value);
+        }
+        let plugins = document
+            .entry("plugins".to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        let toml::Value::Table(plugins) = plugins else {
+            return Err(FacadeError::new(
+                ErrorCode::Internal,
+                "[plugins] of config.toml is not a table",
+            )
+            .into());
+        };
+        plugins.insert(plugin.to_owned(), toml::Value::Table(values));
+        ConfigFileSettings::write_document(path, &document)?;
+        self.file.revision.fetch_add(1, Ordering::AcqRel);
+        Ok(changed)
+    }
+}
+
+/// The stored values of a plugin in a parsed `config.toml`.
+fn stored_values(
+    document: &toml::Table,
+    plugin: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    document
+        .get("plugins")
+        .and_then(toml::Value::as_table)
+        .and_then(|plugins| plugins.get(plugin))
+        .and_then(toml::Value::as_table)
+        .and_then(|values| serde_json::to_value(values).ok())
+        .and_then(|value| match value {
+            serde_json::Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The `default` of every property of an object schema, as one JSON object.
+pub fn schema_defaults(schema_json: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut defaults = serde_json::Map::new();
+    let Ok(schema) = serde_json::from_str::<serde_json::Value>(schema_json) else {
+        return defaults;
+    };
+    if let Some(properties) = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (key, property) in properties {
+            if let Some(default) = property.get("default") {
+                defaults.insert(key.clone(), default.clone());
+            }
+        }
+    }
+    defaults
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{kernel_tab_ids, table_of_tab, ConfigFileSettings};
+    use super::{
+        kernel_tab_ids, table_of_tab, ConfigFileSettings, PluginSettingsError, PluginSettingsStore,
+    };
     use ilium_plugin_api::generated::types::ErrorCode;
     use ilium_plugin_api::kernel::KernelSettings;
 
@@ -297,5 +528,122 @@ mod tests {
         let null = settings.set("terminal.key", "null").expect_err("null");
         assert_eq!(null.code, ErrorCode::InvalidArgument);
         assert_eq!(settings.revision(), 0);
+    }
+
+    const SCHEMA: &str = r#"{"type":"object","properties":{
+        "volume":{"type":"integer","minimum":0,"maximum":10,"default":5},
+        "name":{"type":"string","maxLength":8,"default":"ilium"},
+        "loud":{"type":"boolean","default":false}}}"#;
+
+    fn patch(json: &str) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::from_str(json).expect("patch JSON") {
+            serde_json::Value::Object(map) => map,
+            other => panic!("not an object: {other}"),
+        }
+    }
+
+    #[test]
+    fn a_plugin_reads_nothing_until_it_stores_a_value() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = PluginSettingsStore::at(directory.path().join("config.toml"));
+        assert!(store.read("acme.demo").expect("read").is_empty());
+        assert_eq!(store.revision(), 0);
+    }
+
+    #[test]
+    fn a_stored_value_is_read_back_from_the_plugin_table_of_the_file() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[terminal]\nscrollback = 1000\n").expect("config written");
+        let store = PluginSettingsStore::at(path.clone());
+        let changed = store
+            .apply_patch("acme.demo", SCHEMA, &patch(r#"{"volume":7}"#))
+            .expect("the patch is accepted");
+        assert_eq!(changed, vec!["volume".to_owned()]);
+        assert_eq!(store.read("acme.demo").expect("read")["volume"], 7);
+        assert_eq!(store.revision(), 1);
+        let text = std::fs::read_to_string(&path).expect("file");
+        assert!(text.contains("[plugins.\"acme.demo\"]"), "{text}");
+        assert!(text.contains("scrollback = 1000"), "{text}");
+        // Another plugin has its own table.
+        assert!(store.read("acme.other").expect("read").is_empty());
+    }
+
+    #[test]
+    fn an_unknown_key_a_wrong_type_and_an_out_of_range_value_are_refused_and_store_nothing() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        let store = PluginSettingsStore::at(path.clone());
+        for bad in [
+            r#"{"nope":1}"#,
+            r#"{"volume":"loud"}"#,
+            r#"{"volume":11}"#,
+            r#"{"name":"far too long"}"#,
+            r#"{"volume":3,"loud":"yes"}"#,
+        ] {
+            let refused = store
+                .apply_patch("acme.demo", SCHEMA, &patch(bad))
+                .expect_err(bad);
+            assert!(matches!(refused, PluginSettingsError::Invalid(_)), "{bad}");
+        }
+        assert!(!path.exists(), "a refused patch must not create the file");
+        assert_eq!(store.revision(), 0);
+    }
+
+    #[test]
+    fn the_refusal_names_the_value_and_the_rule() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = PluginSettingsStore::at(directory.path().join("config.toml"));
+        let Err(PluginSettingsError::Invalid(text)) =
+            store.apply_patch("acme.demo", SCHEMA, &patch(r#"{"volume":11}"#))
+        else {
+            panic!("a value out of range must be refused");
+        };
+        assert!(text.contains("/volume"), "{text}");
+    }
+
+    #[test]
+    fn null_resets_a_key_and_a_patch_that_changes_nothing_writes_nothing() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = PluginSettingsStore::at(directory.path().join("config.toml"));
+        store
+            .apply_patch("acme.demo", SCHEMA, &patch(r#"{"volume":9,"loud":true}"#))
+            .expect("stored");
+        assert_eq!(store.revision(), 1);
+        let same = store
+            .apply_patch("acme.demo", SCHEMA, &patch(r#"{"volume":9}"#))
+            .expect("accepted");
+        assert!(same.is_empty());
+        assert_eq!(store.revision(), 1);
+        let reset = store
+            .apply_patch("acme.demo", SCHEMA, &patch(r#"{"volume":null}"#))
+            .expect("reset");
+        assert_eq!(reset, vec!["volume".to_owned()]);
+        let stored = store.read("acme.demo").expect("read");
+        assert!(!stored.contains_key("volume"));
+        assert_eq!(stored["loud"], true);
+    }
+
+    #[test]
+    fn a_single_unchecked_write_stores_and_removes_a_value() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = PluginSettingsStore::at(directory.path().join("config.toml"));
+        store
+            .write("acme.demo", "note", &serde_json::json!("hi"))
+            .expect("write");
+        assert_eq!(store.read("acme.demo").expect("read")["note"], "hi");
+        store
+            .write("acme.demo", "note", &serde_json::Value::Null)
+            .expect("remove");
+        assert!(store.read("acme.demo").expect("read").is_empty());
+    }
+
+    #[test]
+    fn schema_defaults_lists_the_default_of_each_property() {
+        let defaults = super::schema_defaults(SCHEMA);
+        assert_eq!(defaults["volume"], 5);
+        assert_eq!(defaults["name"], "ilium");
+        assert_eq!(defaults["loud"], false);
+        assert!(super::schema_defaults("not json").is_empty());
     }
 }

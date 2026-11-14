@@ -45,6 +45,7 @@ use ilium_plugin_host::contributions::Entry;
 use ilium_plugin_host::engine::{EngineConfig, PluginEngine};
 use ilium_plugin_host::imports::backed::LogSink;
 use ilium_plugin_host::lifecycle::StartMode;
+use ilium_plugin_host::runtime::cross_side::{RemoteMessage, REMOTE_ENVELOPE_PLUGIN};
 use ilium_plugin_host::runtime::{
     CataloguePlugin, HostRuntime, RuntimeConfig, RuntimeError, RuntimeThread,
 };
@@ -350,6 +351,9 @@ struct Shared {
     disabled: Mutex<std::collections::BTreeSet<String>>,
     /// The kernel settings tables: the user's `config.toml` (contract section 20.3).
     settings: ilium_plugin_host::config_settings::ConfigFileSettings,
+    /// This record itself, so a job posted to the runtime can send what the runtime wants
+    /// the server to hear (cross-side topics and service calls, gap G4) when it ends.
+    me: std::sync::Weak<Shared>,
 }
 
 impl Shared {
@@ -390,10 +394,55 @@ impl Shared {
     }
 
     fn post(&self, job: impl FnOnce(&mut HostRuntime) + Send + 'static) -> bool {
-        self.runtime
-            .lock()
-            .ok()
-            .is_some_and(|slot| slot.as_ref().is_some_and(|thread| thread.post(job)))
+        let me = self.me.clone();
+        self.runtime.lock().ok().is_some_and(|slot| {
+            slot.as_ref().is_some_and(|thread| {
+                thread.post(move |runtime| {
+                    job(runtime);
+                    if let Some(shared) = me.upgrade() {
+                        shared.forward_remote(runtime);
+                    }
+                })
+            })
+        })
+    }
+
+    /// Carries out an intent a server plugin forwarded: opens or closes one of its views.
+    /// Returns whether the screen changed.
+    fn apply_forwarded(&self, plugin: &str, intent: Intent) -> bool {
+        match intent {
+            Intent::OpenView(OpenViewSpec {
+                view: ViewTarget::Popup(popup),
+                ..
+            }) => {
+                self.open_popup(plugin, popup);
+                true
+            }
+            Intent::CloseView(ViewTarget::Popup(popup)) => self.close_popup(plugin, &popup),
+            Intent::OpenView(OpenViewSpec { view, focus })
+                if !matches!(view, ViewTarget::Pane(_)) =>
+            {
+                self.open_view(plugin, view, focus);
+                true
+            }
+            Intent::CloseView(view) if !matches!(view, ViewTarget::Pane(_)) => {
+                self.close_view(plugin, &view)
+            }
+            other => {
+                tracing::debug!("a forwarded plugin intent is not a view intent: {other:?}");
+                false
+            }
+        }
+    }
+
+    /// Sends what the client runtime wants the server runtime to hear: topic messages of its
+    /// plugins and service calls for providers that live on the server (gap G4).
+    fn forward_remote(&self, runtime: &mut HostRuntime) {
+        for message in runtime.take_remote_outbound() {
+            let body = super::remote::body_of(message.to_wire());
+            let (_, request) = self.envelope(REMOTE_ENVELOPE_PLUGIN, body);
+            self.push(Output::Request(request));
+        }
     }
 
     /// Records the popup a plugin opened and tells the event loop.
@@ -1217,7 +1266,8 @@ impl ClientPlugins {
                 return None;
             }
         };
-        let shared = Arc::new(Shared {
+        let shared = Arc::new_cyclic(|me| Shared {
+            me: me.clone(),
             nodes: Mutex::new(Vec::new()),
             focused: Mutex::new(None),
             epoch: AtomicU64::new(1),
@@ -1397,6 +1447,34 @@ impl ClientPlugins {
                     // The plugin may have timed out already; its receiver is then gone.
                     let _ = waiter.send(outcome);
                 }
+                false
+            }
+            EnvelopeBody::ForwardedIntent(forwarded) => {
+                // An intent a server plugin cannot carry out itself (gap G3).
+                match serde_json::from_slice::<Intent>(&forwarded.intent_json) {
+                    Ok(intent) => self.shared.apply_forwarded(&forwarded.plugin, intent),
+                    Err(error) => {
+                        tracing::debug!("a forwarded plugin intent is malformed: {error}");
+                        false
+                    }
+                }
+            }
+            body @ (EnvelopeBody::Event(_)
+            | EnvelopeBody::ClientRequest(_)
+            | EnvelopeBody::ClientReply(_))
+                if plugin == REMOTE_ENVELOPE_PLUGIN =>
+            {
+                // A topic message or service traffic of the server runtime (gap G4).
+                let Some(message) =
+                    super::remote::wire_of(body).and_then(|wire| RemoteMessage::from_wire(&wire))
+                else {
+                    tracing::debug!("malformed cross-side envelope from the server dropped");
+                    return false;
+                };
+                self.shared.post(move |runtime| {
+                    runtime.deliver_remote(vec![message]);
+                    log_errors("pump", runtime.pump());
+                });
                 false
             }
             EnvelopeBody::Message(message) => {
