@@ -14,16 +14,14 @@ use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+
+use super::env::RequestIds;
 
 /// Largest payload of a service call or reply: 64 KiB, as for command arguments.
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 /// Most calls waiting for delivery, deferred calls and unread replies kept at once.
 const BROKER_CAPACITY: usize = 4096;
-
-static NEXT_SERVICE_REQUEST: AtomicU64 = AtomicU64::new(1 << 40);
-static NEXT_SERVICE_CALL: AtomicU64 = AtomicU64::new(1);
 
 /// A call a plugin made that the runtime has not delivered yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +66,8 @@ pub struct ServiceBrokerState {
     deferred: BTreeMap<u64, DeferredCall>,
     replies: BTreeMap<(String, u64), String>,
     finished: VecDeque<FinishedServiceCall>,
+    /// The request and call ids of this runtime; shared with every other import.
+    ids: RequestIds,
 }
 
 /// The services of one runtime, shared by the imports of its instances and its pump.
@@ -80,6 +80,14 @@ fn lock(broker: &ServiceBroker) -> MutexGuard<'_, ServiceBrokerState> {
 }
 
 impl ServiceBrokerState {
+    /// A broker whose request and call ids come from `ids`, the allocator of the runtime.
+    pub fn with_ids(ids: RequestIds) -> Self {
+        Self {
+            ids,
+            ..Self::default()
+        }
+    }
+
     /// The calls waiting for delivery, removed from the queue.
     pub fn take_pending(&mut self) -> Vec<PendingServiceCall> {
         self.pending.drain(..).collect()
@@ -116,11 +124,8 @@ impl ServiceBrokerState {
 
     /// A fresh request id and call id for a call the runtime makes on behalf of the other
     /// side.
-    pub fn fresh_ids() -> (RequestId, u64) {
-        (
-            RequestId(NEXT_SERVICE_REQUEST.fetch_add(1, Ordering::Relaxed)),
-            NEXT_SERVICE_CALL.fetch_add(1, Ordering::Relaxed),
-        )
+    pub fn fresh_ids(&self) -> (RequestId, u64) {
+        (self.ids.next_request(), self.ids.next_call())
     }
 
     /// Records the reply of a delivered call.
@@ -264,9 +269,9 @@ impl HostServices for BrokeredServices {
                 "too many service calls are waiting",
             ));
         }
-        let request = RequestId(NEXT_SERVICE_REQUEST.fetch_add(1, Ordering::Relaxed));
+        let (request, call) = broker.fresh_ids();
         broker.pending.push_back(PendingServiceCall {
-            call: NEXT_SERVICE_CALL.fetch_add(1, Ordering::Relaxed),
+            call,
             request,
             caller: self.plugin.clone(),
             service,

@@ -30,6 +30,8 @@ use crate::runtime::{
 };
 use crate::storage::{StorageContext, BUCKET_MAX_BYTES};
 
+pub mod wave_two;
+
 /// The shared cache ceiling of one plugin (reference-errors-and-limits.md, storage).
 const SHARED_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -214,6 +216,8 @@ pub struct ProcessImports {
     pub basic: Option<Arc<dyn BasicBackend>>,
     /// Where storage refusals are logged.
     pub log: Arc<dyn LogSink>,
+    /// The folders the process, fs and http imports work in.
+    pub backends: wave_two::Backends,
 }
 
 impl std::fmt::Debug for ProcessImports {
@@ -318,6 +322,7 @@ pub fn import_provider(imports: ProcessImports) -> ImportProvider {
                 plugin: context.plugin.clone(),
             }));
         }
+        wave_two::equip(&imports.backends, context, set);
     })
 }
 

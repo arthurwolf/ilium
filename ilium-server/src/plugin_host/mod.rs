@@ -310,6 +310,10 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         },
         basic: Some(Arc::clone(&facade) as Arc<dyn BasicBackend>),
         log: Arc::clone(&log),
+        backends: wiring::wave_two::Backends::new(
+            state.session_cwd.clone(),
+            start.data_dir.clone(),
+        ),
     });
     // A plugin that holds an `http-api.route` grant answers its requests through the server's
     // open-call table; the runtime removes the import again for an instance without the grant.

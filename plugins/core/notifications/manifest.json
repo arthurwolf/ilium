@@ -20,7 +20,9 @@
       "notify.desktop",
       "agent.read",
       "tree.read",
-      "tree.attention"
+      "tree.attention",
+      "topics.subscribe:ilium.core.progress/changed",
+      "panes.read"
     ],
     "client": [
       "notify.toast",

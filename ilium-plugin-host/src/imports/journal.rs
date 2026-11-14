@@ -1,13 +1,14 @@
 //! Host implementation of `ilium:host/journal`.
 //!
-//! One process-wide bounded in-memory journal. Writes are limited to 20 per second per event
-//! kind (the import has no plugin identity yet) and payloads to 4 KiB.
+//! One bounded in-memory journal per runtime ([`JournalBook`]), shared by the imports of its
+//! plugins. Writes are limited to 20 per second per plugin and event kind, and payloads to
+//! 4 KiB. Two runtimes in one process keep two journals.
 
 use ilium_plugin_api::generated::host::journal::{HostJournal, JournalEntry};
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{EpochMs, NodeId};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const PAYLOAD_LIMIT_BYTES: usize = 4 * 1024;
@@ -19,11 +20,51 @@ const RATE_WINDOW_MILLIS: u64 = 1_000;
 #[derive(Default)]
 struct JournalState {
     entries: VecDeque<JournalEntry>,
-    /// Per kind: window start and number of accepted writes in it.
-    windows: HashMap<String, (Instant, u32)>,
+    /// Per (plugin, kind): window start and number of accepted writes in it.
+    windows: HashMap<(String, String), (Instant, u32)>,
 }
 
-static JOURNAL: Mutex<Option<JournalState>> = Mutex::new(None);
+/// The journal of one runtime. Cloning shares the entries.
+#[derive(Debug, Clone, Default)]
+pub struct JournalBook {
+    state: Arc<Mutex<JournalState>>,
+}
+
+impl std::fmt::Debug for JournalState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JournalState")
+            .field("entries", &self.entries.len())
+            .finish()
+    }
+}
+
+impl JournalBook {
+    /// An empty journal.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, JournalState> {
+        // Every writer pushes one entry, so the journal is consistent after a panic.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// How many entries the journal holds.
+    pub fn len(&self) -> usize {
+        self.lock().entries.len()
+    }
+
+    /// Whether the journal holds no entry.
+    pub fn is_empty(&self) -> bool {
+        self.lock().entries.is_empty()
+    }
+
+    /// Drops the rate windows of a plugin that stopped; its entries stay in the journal.
+    pub fn forget_plugin(&self, plugin: &str) {
+        self.lock().windows.retain(|(owner, _), _| owner != plugin);
+    }
+}
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -32,9 +73,28 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// Host side of the `journal` interface.
-#[derive(Debug)]
-pub struct JournalImport;
+/// Host side of the `journal` interface of one plugin. Cloning shares the journal.
+#[derive(Debug, Clone)]
+pub struct JournalImport {
+    book: JournalBook,
+    plugin: String,
+}
+
+impl Default for JournalImport {
+    fn default() -> Self {
+        Self::new(JournalBook::new(), "ilium.host.standalone")
+    }
+}
+
+impl JournalImport {
+    /// The import of `plugin` over the runtime's journal.
+    pub fn new(book: JournalBook, plugin: &str) -> Self {
+        Self {
+            book,
+            plugin: plugin.to_owned(),
+        }
+    }
+}
 
 impl HostJournal for JournalImport {
     fn log_event(
@@ -50,10 +110,12 @@ impl HostJournal for JournalImport {
                 retry_after_ms: None,
             });
         }
-        let mut guard = JOURNAL.lock().unwrap_or_else(PoisonError::into_inner);
-        let state = guard.get_or_insert_with(JournalState::default);
+        let mut state = self.book.lock();
         let now = Instant::now();
-        let window = state.windows.entry(kind.clone()).or_insert((now, 0));
+        let window = state
+            .windows
+            .entry((self.plugin.clone(), kind.clone()))
+            .or_insert((now, 0));
         let elapsed_millis = u64::try_from(now.duration_since(window.0).as_millis()).unwrap_or(u64::MAX);
         if elapsed_millis >= RATE_WINDOW_MILLIS {
             *window = (now, 0);
@@ -82,10 +144,7 @@ impl HostJournal for JournalImport {
 
     fn read(&mut self, pane: Option<NodeId>, since: EpochMs, limit: u32) -> Vec<JournalEntry> {
         let wanted = (limit as usize).min(READ_CAP_ENTRIES);
-        let guard = JOURNAL.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(state) = guard.as_ref() else {
-            return Vec::new();
-        };
+        let state = self.book.lock();
         let mut newest_first: Vec<JournalEntry> = state
             .entries
             .iter()
@@ -112,13 +171,13 @@ mod tests {
     /// Largest number of entries one `read` call returns (`journal.read` limit clamp).
     const READ_CAP_ENTRIES: usize = 1_000;
 
-    /// Calls `log-event` on a fresh import, as the plugin side does.
+    /// Calls `log-event` on a fresh import with its own journal, as the plugin side does.
     fn log_event(pane: Option<NodeId>, kind: &str, payload_json: &str) -> Result<(), PluginError> {
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
         journal.log_event(pane, kind.to_string(), payload_json.to_string())
     }
 
-    /// Returns a kind string unique to one test, so entries written by parallel tests can be told apart.
+    /// Returns a kind string for one test.
     fn unique_kind(label: &str) -> String {
         format!("test.journal.{label}")
     }
@@ -187,7 +246,7 @@ mod tests {
     #[test]
     fn log_event_burst_beyond_twenty_per_second_is_rate_limited_with_retry_after() {
         let kind = unique_kind("burst");
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
         let mut accepted_count = 0usize;
         let mut rate_limited_retry_after: Option<u32> = None;
         let mut saw_rate_limited = false;
@@ -225,8 +284,10 @@ mod tests {
     fn read_returns_own_entry_with_same_kind_pane_and_payload() {
         let kind = unique_kind("round-trip");
         let pane = NodeId(7);
-        log_event(Some(pane), &kind, "{\"key\":\"abc\"}").expect("log-event must be accepted");
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
+        journal
+            .log_event(Some(pane), kind.clone(), "{\"key\":\"abc\"}".to_string())
+            .expect("log-event must be accepted");
         let entries: Vec<JournalEntry> = journal.read(Some(pane), EpochMs(0), 1_000);
         let matching: Vec<&JournalEntry> =
             entries.iter().filter(|entry| entry.kind == kind).collect();
@@ -244,9 +305,13 @@ mod tests {
     fn read_lists_entries_newest_last() {
         let first_kind = unique_kind("order-first");
         let second_kind = unique_kind("order-second");
-        log_event(None, &first_kind, "{}").expect("first log-event must be accepted");
-        log_event(None, &second_kind, "{}").expect("second log-event must be accepted");
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
+        journal
+            .log_event(None, first_kind.clone(), "{}".to_string())
+            .expect("first log-event must be accepted");
+        journal
+            .log_event(None, second_kind.clone(), "{}".to_string())
+            .expect("second log-event must be accepted");
         let entries: Vec<JournalEntry> = journal.read(None, EpochMs(0), 1_000);
         let first_index = entries.iter().rposition(|entry| entry.kind == first_kind);
         let second_index = entries.iter().rposition(|entry| entry.kind == second_kind);
@@ -259,7 +324,7 @@ mod tests {
     /// REQ: CAP-011
     #[test]
     fn read_since_in_the_far_future_returns_no_entries() {
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
         let entries: Vec<JournalEntry> = journal.read(None, EpochMs(u64::MAX), 1_000);
         assert!(
             entries.is_empty(),
@@ -270,7 +335,7 @@ mod tests {
     /// REQ: API-060
     #[test]
     fn read_limit_above_cap_returns_at_most_one_thousand_entries() {
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
         let entries: Vec<JournalEntry> = journal.read(None, EpochMs(0), u32::MAX);
         assert!(
             entries.len() <= READ_CAP_ENTRIES,
@@ -282,9 +347,40 @@ mod tests {
     /// REQ: CAP-011
     #[test]
     fn read_with_no_matching_pane_entries_returns_empty_list() {
-        let mut journal = JournalImport;
+        let mut journal = JournalImport::default();
         let entries: Vec<JournalEntry> =
             journal.read(Some(NodeId(u64::MAX)), EpochMs(u64::MAX), 10);
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn two_journals_do_not_see_each_other() {
+        let mut first = JournalImport::default();
+        let mut second = JournalImport::default();
+        first
+            .log_event(None, unique_kind("separate"), "{}".to_string())
+            .expect("accepted");
+        assert_eq!(first.read(None, EpochMs(0), 10).len(), 1);
+        assert!(second.read(None, EpochMs(0), 10).is_empty());
+    }
+
+    #[test]
+    fn the_rate_limit_is_kept_per_plugin() {
+        let book = super::JournalBook::new();
+        let mut busy = JournalImport::new(book.clone(), "a.busy");
+        let mut quiet = JournalImport::new(book.clone(), "a.quiet");
+        let kind = unique_kind("per-plugin");
+        for _ in 0..20 {
+            busy.log_event(None, kind.clone(), "{}".to_string())
+                .expect("within the rate");
+        }
+        let refused = busy
+            .log_event(None, kind.clone(), "{}".to_string())
+            .expect_err("the busy plugin is limited");
+        assert_eq!(refused.code, ErrorCode::RateLimited);
+        quiet
+            .log_event(None, kind, "{}".to_string())
+            .expect("another plugin has its own window");
+        assert_eq!(book.len(), 21);
     }
 }

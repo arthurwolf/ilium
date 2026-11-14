@@ -6,8 +6,10 @@ use ilium_plugin_api::generated::host::inference::{Completion, CompletionRequest
 use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::RequestId;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use super::env::RequestIds;
 
 use ilium_plugin_api::generated::types::errors::ErrorCode;
 
@@ -33,13 +35,7 @@ enum Held {
 
 #[derive(Debug, Default)]
 struct InferenceState {
-    next_request: u64,
     held: HashMap<u64, Held>,
-}
-
-thread_local! {
-    /// Per-thread because `InferenceImport` is a stateless handle.
-    static INFERENCE_STATE: RefCell<InferenceState> = RefCell::new(InferenceState::default());
 }
 
 fn error(code: ErrorCode, message: &str) -> PluginError {
@@ -50,23 +46,40 @@ fn error(code: ErrorCode, message: &str) -> PluginError {
     }
 }
 
-/// Records a new pending entry, or `busy` at the 64-request limit.
-fn hold_pending(entry: Held) -> Result<RequestId, PluginError> {
-    INFERENCE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
+/// Host side of the `inference` interface of one plugin instance: its pending requests are its
+/// own and go away with it. Cloning shares them (a test harness keeps one instance and hands out
+/// clones).
+#[derive(Debug, Clone, Default)]
+pub struct InferenceImport {
+    state: Arc<Mutex<InferenceState>>,
+    ids: RequestIds,
+}
+
+impl InferenceImport {
+    /// An import drawing request ids from `ids`, the allocator of the runtime.
+    pub fn new(ids: RequestIds) -> Self {
+        Self {
+            state: Arc::default(),
+            ids,
+        }
+    }
+
+    fn state(&self) -> MutexGuard<'_, InferenceState> {
+        // Every writer does one insert or remove, so the state is consistent after a panic.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Records a new pending entry, or `busy` at the 64-request limit.
+    fn hold_pending(&self, entry: Held) -> Result<RequestId, PluginError> {
+        let mut state = self.state();
         if state.held.len() >= PENDING_REQUEST_LIMIT {
             return Err(error(ErrorCode::Busy, "64 inference requests are already pending"));
         }
-        state.next_request += 1;
-        let id = state.next_request;
-        state.held.insert(id, entry);
-        Ok(RequestId(id))
-    })
+        let id = self.ids.next_request();
+        state.held.insert(id.0, entry);
+        Ok(id)
+    }
 }
-
-/// Host side of the `inference` interface.
-#[derive(Debug)]
-pub struct InferenceImport;
 
 impl HostInference for InferenceImport {
     fn complete(&mut self, request: CompletionRequest) -> Result<RequestId, PluginError> {
@@ -85,37 +98,33 @@ impl HostInference for InferenceImport {
                 return Err(error(ErrorCode::InvalidArgument, "json schema is not valid JSON"));
             }
         }
-        hold_pending(Held::PendingCompletion)
+        self.hold_pending(Held::PendingCompletion)
     }
 
     fn take_completion(&mut self, request: RequestId) -> Option<Completion> {
-        INFERENCE_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            match state.held.get(&request.0) {
-                Some(Held::Completed(_)) => match state.held.remove(&request.0) {
-                    Some(Held::Completed(completion)) => Some(completion),
-                    _ => None,
-                },
+        let mut state = self.state();
+        match state.held.get(&request.0) {
+            Some(Held::Completed(_)) => match state.held.remove(&request.0) {
+                Some(Held::Completed(completion)) => Some(completion),
                 _ => None,
-            }
-        })
+            },
+            _ => None,
+        }
     }
 
     fn models(&mut self) -> Result<RequestId, PluginError> {
-        hold_pending(Held::PendingModels)
+        self.hold_pending(Held::PendingModels)
     }
 
     fn take_models(&mut self, request: RequestId) -> Option<Vec<String>> {
-        INFERENCE_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            match state.held.get(&request.0) {
-                Some(Held::ModelsListed(_)) => match state.held.remove(&request.0) {
-                    Some(Held::ModelsListed(models)) => Some(models),
-                    _ => None,
-                },
+        let mut state = self.state();
+        match state.held.get(&request.0) {
+            Some(Held::ModelsListed(_)) => match state.held.remove(&request.0) {
+                Some(Held::ModelsListed(models)) => Some(models),
                 _ => None,
-            }
-        })
+            },
+            _ => None,
+        }
     }
 
     /// No provider call is open on a bare import, so a well-formed reply names an unknown call.
@@ -206,7 +215,7 @@ mod tests {
     /// REQ: API-005
     #[test]
     fn complete_returns_request_id_for_valid_request() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let result = import.complete(simple_request(None));
         assert!(
             result.is_ok(),
@@ -217,7 +226,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn complete_rejects_empty_messages_with_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let result = import.complete(request_with(Vec::new(), None));
         expect_error(result, ErrorCode::InvalidArgument);
     }
@@ -225,7 +234,7 @@ mod tests {
     /// REQ: API-062
     #[test]
     fn complete_rejects_messages_over_4_mib_with_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let messages = vec![
             user_message("a".repeat(MAX_MESSAGE_BYTES)),
             user_message("b".to_string()),
@@ -237,7 +246,7 @@ mod tests {
     /// REQ: API-062
     #[test]
     fn complete_accepts_messages_at_exactly_4_mib() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let messages = vec![user_message("a".repeat(MAX_MESSAGE_BYTES))];
         let result = import.complete(request_with(messages, None));
         expect_not_invalid_argument(result);
@@ -246,7 +255,7 @@ mod tests {
     /// REQ: API-062
     #[test]
     fn complete_rejects_json_schema_over_64_kib_with_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let schema = json_schema_of_exact_length(MAX_JSON_SCHEMA_BYTES + 1);
         let result = import.complete(simple_request(Some(schema)));
         expect_error(result, ErrorCode::InvalidArgument);
@@ -255,7 +264,7 @@ mod tests {
     /// REQ: API-062
     #[test]
     fn complete_accepts_json_schema_at_exactly_64_kib() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let schema = json_schema_of_exact_length(MAX_JSON_SCHEMA_BYTES);
         let result = import.complete(simple_request(Some(schema)));
         expect_not_invalid_argument(result);
@@ -264,7 +273,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn complete_rejects_json_schema_that_is_not_json_with_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let result = import.complete(simple_request(Some("{not json".to_string())));
         expect_error(result, ErrorCode::InvalidArgument);
     }
@@ -272,7 +281,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn complete_accepts_valid_json_schema() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let schema = r#"{"type":"object","properties":{"tags":{"type":"array"}}}"#.to_string();
         let result = import.complete(simple_request(Some(schema)));
         expect_not_invalid_argument(result);
@@ -281,7 +290,7 @@ mod tests {
     /// REQ: API-073
     #[test]
     fn complete_returns_busy_for_65th_pending_request() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         for accepted_index in 0..64 {
             let result = import.complete(simple_request(None));
             assert!(
@@ -295,35 +304,35 @@ mod tests {
     /// REQ: API-005
     #[test]
     fn take_completion_returns_none_for_unknown_request() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         assert_eq!(import.take_completion(RequestId(0)), None);
     }
 
     /// REQ: API-005
     #[test]
     fn take_completion_returns_none_for_largest_request_id() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         assert_eq!(import.take_completion(RequestId(u64::MAX)), None);
     }
 
     /// REQ: API-005
     #[test]
     fn models_returns_request_id_without_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         expect_not_invalid_argument(import.models());
     }
 
     /// REQ: API-005
     #[test]
     fn take_models_returns_none_for_unknown_request() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         assert_eq!(import.take_models(RequestId(0)), None);
     }
 
     /// REQ: API-002
     #[test]
     fn provider_reply_returns_not_found_for_unknown_call() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let outcome = Err(PluginError {
             code: ErrorCode::Network,
             message: "provider unreachable".to_string(),
@@ -339,7 +348,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn provider_reply_returns_not_found_for_call_zero_with_completion() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let result = import.provider_reply(0, Ok(reply_with_text("ok".to_string())));
         match result {
             Ok(()) => panic!("unknown call must not be accepted"),
@@ -350,7 +359,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn provider_reply_rejects_reply_text_over_4_mib_with_invalid_argument() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let oversized_text = "a".repeat(MAX_MESSAGE_BYTES + 1);
         let result = import.provider_reply(1, Ok(reply_with_text(oversized_text)));
         match result {
@@ -362,7 +371,7 @@ mod tests {
     /// REQ: API-062
     #[test]
     fn provider_reply_accepts_reply_text_at_exactly_4_mib() {
-        let mut import = InferenceImport;
+        let mut import = InferenceImport::default();
         let text = "a".repeat(MAX_MESSAGE_BYTES);
         let result = import.provider_reply(1, Ok(reply_with_text(text)));
         if let Err(error) = result {

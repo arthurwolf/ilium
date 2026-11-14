@@ -8,7 +8,6 @@
 //! of them touches a PTY: terminal access goes through the facade to the pane's owner.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ilium_plugin_api::generated::host::commands::HostCommands;
@@ -41,13 +40,13 @@ use ilium_plugin_api::Side;
 
 use crate::contributions::ContributionRegistry;
 
+use super::env::RequestIds;
+
 /// Largest `arguments-json` accepted by `commands.invoke`: 64 KiB.
 const MAX_ARGUMENTS_JSON_BYTES: usize = 64 * 1024;
 /// Most request results or command invocations kept for one runtime before the oldest
 /// are dropped; a plugin that never reads its events cannot grow the host without bound.
 const QUEUE_CAPACITY: usize = 4096;
-
-static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     // A poisoned queue still holds consistent data: every writer pushes or pops one item.
@@ -565,6 +564,7 @@ pub struct KernelIntents {
     origin: Origin,
     plugin: String,
     results: ResultQueue,
+    ids: RequestIds,
 }
 
 impl KernelIntents {
@@ -585,7 +585,15 @@ impl KernelIntents {
             },
             plugin: plugin.to_owned(),
             results,
+            ids: RequestIds::new(),
         }
+    }
+
+    /// The same import drawing its request ids from the runtime's allocator.
+    #[must_use]
+    pub fn with_ids(mut self, ids: RequestIds) -> Self {
+        self.ids = ids;
+        self
     }
 }
 
@@ -610,7 +618,7 @@ impl HostIntentsHost for KernelIntents {
                 "dedup key must be 1 to 128 characters of A-Z a-z 0-9 . _ : / -",
             ));
         }
-        let request = RequestId(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed));
+        let request = self.ids.next_request();
         let outcome = self.kernel.apply_intent(&self.origin, submission.intent);
         push_bounded(
             &self.results,
@@ -648,6 +656,7 @@ pub struct RegistryCommands {
     plugin: String,
     side: Side,
     queue: CommandQueue,
+    ids: RequestIds,
 }
 
 impl RegistryCommands {
@@ -663,7 +672,15 @@ impl RegistryCommands {
             plugin: plugin.to_owned(),
             side,
             queue,
+            ids: RequestIds::new(),
         }
+    }
+
+    /// The same import drawing its request ids from the runtime's allocator.
+    #[must_use]
+    pub fn with_ids(mut self, ids: RequestIds) -> Self {
+        self.ids = ids;
+        self
     }
 }
 
@@ -728,7 +745,7 @@ impl HostCommands for RegistryCommands {
         {
             return Err(unknown_command(&command));
         }
-        let request = RequestId(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed));
+        let request = self.ids.next_request();
         push_bounded(
             &self.queue,
             PendingCommand {
@@ -873,7 +890,7 @@ impl KernelAgent {
     pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
         Self {
             kernel,
-            rest: super::agent::AgentImport,
+            rest: super::agent::AgentImport::default(),
             reads_agents: holds(granted, "agent.read"),
         }
     }

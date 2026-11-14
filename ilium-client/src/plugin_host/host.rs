@@ -1312,6 +1312,10 @@ impl ClientPlugins {
             // Basic panes are a server primitive; the client links no backend for them.
             basic: None,
             log: Arc::clone(&log),
+            backends: wiring::wave_two::Backends::new(
+                session_cwd.to_path_buf(),
+                start.data_dir.clone(),
+            ),
         });
         let runtime = HostRuntime::new(
             engine,

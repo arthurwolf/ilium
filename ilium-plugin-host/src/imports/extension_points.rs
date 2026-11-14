@@ -10,7 +10,6 @@
 //! stores the folded reply with [`ExtensionBook::finish`]; `take-reply` returns it.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -21,6 +20,8 @@ use ilium_plugin_api::generated::types::ids::{PluginId, RequestId};
 use serde_json::Value;
 
 use crate::contributions::ContributionRegistry;
+
+use super::env::RequestIds;
 
 /// Largest payload of a hook chain in bytes (EXT-023).
 const PAYLOAD_CAP_BYTES: usize = 64 * 1024;
@@ -44,10 +45,6 @@ const HANDLER_DEADLINE_RANGE_MS: (u64, u64) = (5, 50);
 const HANDLERS_DEFAULT_MAX: usize = 8;
 /// `run-hook` calls one point accepts per second (EXT-048).
 const RUN_HOOK_PER_SECOND: usize = 200;
-
-/// Request ids of hook chains. Commands count from 1 and services from `1 << 40`, so the
-/// three kinds of `request-completed` never carry the same id for one plugin.
-static NEXT_HOOK_REQUEST: AtomicU64 = AtomicU64::new(1 << 41);
 
 /// A `run-hook` call that waits for its handler chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +75,8 @@ pub struct BookState {
     replies: HashMap<(String, u64), Option<String>>,
     /// When `run-hook` calls on each point were accepted in the last second.
     accepted: HashMap<String, VecDeque<Instant>>,
+    /// The request ids of the runtime; hook requests share them with every other request kind.
+    ids: RequestIds,
 }
 
 /// The book of run-time extension entries, shared by the plugins of one runtime.
@@ -85,6 +84,14 @@ pub struct BookState {
 pub struct ExtensionBook(Arc<Mutex<BookState>>);
 
 impl ExtensionBook {
+    /// A book whose hook request ids come from `ids`, the allocator of the runtime.
+    pub fn with_ids(ids: RequestIds) -> Self {
+        Self(Arc::new(Mutex::new(BookState {
+            ids,
+            ..BookState::default()
+        })))
+    }
+
     fn state(&self) -> MutexGuard<'_, BookState> {
         // Every writer does one insert or remove, so the data is consistent after a panic.
         self.0.lock().unwrap_or_else(|poison| poison.into_inner())
@@ -319,7 +326,7 @@ impl HostExtensions for PluginExtensions {
             return Err(ExtensionError::CapExceeded);
         }
         window.push_back(now);
-        let request = NEXT_HOOK_REQUEST.fetch_add(1, Ordering::Relaxed);
+        let request = state.ids.next_request().0;
         let stack = state.stack.clone();
         state.queue.push_back(PendingHook {
             caller: self.plugin.clone(),

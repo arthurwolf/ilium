@@ -7,5 +7,6 @@ mod extension_points;
 mod kernel_tab;
 mod manifest;
 mod semantic;
+mod set_setting;
 mod settings_rows;
 mod views;

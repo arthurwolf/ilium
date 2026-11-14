@@ -371,17 +371,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 }),
             ),
             (
-                "split-members-empty",
-                ilium_client::app::Mode::CreateSplitMembers(
-                    ilium_client::app::CreateSplitMembersState {
-                        parent_group: ilium_core::ROOT_ID,
-                        orientation: ilium_core::SplitOrientation::Horizontal,
-                        choices: Vec::new(),
-                        selected_index: 0,
-                    },
-                ),
-            ),
-            (
                 "board-card-prompt",
                 ilium_client::app::Mode::BoardCardPrompt(
                     ilium_core::ROOT_ID,
@@ -432,22 +421,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             (
                 "board-create-markdown",
                 synthetic_board(ilium_client::app::BoardStorageKind::MarkdownFile),
-            ),
-            (
-                "split-horizontal",
-                ilium_client::app::Mode::CreateSplitOrientation(
-                    ilium_client::app::CreateSplitOrientationState {
-                        orientation: ilium_core::SplitOrientation::Horizontal,
-                    },
-                ),
-            ),
-            (
-                "split-vertical",
-                ilium_client::app::Mode::CreateSplitOrientation(
-                    ilium_client::app::CreateSplitOrientationState {
-                        orientation: ilium_core::SplitOrientation::Vertical,
-                    },
-                ),
             ),
             (
                 "worktrees-loading",

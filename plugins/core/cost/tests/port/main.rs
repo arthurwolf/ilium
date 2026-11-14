@@ -3,6 +3,7 @@
 
 mod app;
 mod ascii_chart;
+mod cache_refresh;
 mod common;
 mod cost_history;
 mod cost_model;

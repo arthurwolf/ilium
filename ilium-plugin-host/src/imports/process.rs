@@ -1,26 +1,39 @@
 //! Host implementation of `ilium:host/process` (api-process-control.md).
 //!
-//! One-shot runs execute on a worker thread; the exit is held until the host's next event tick
-//! (`EXIT_DELIVERY_DELAY`) and then handed out once by `take-exit`. Long-lived children are kept
-//! per plugin instance (two at most). Grants (`process.run:<program>`, `process.long-lived`) are
-//! checked by the dispatch layer that knows the manifest; this import owns argument validation,
-//! the pending-request cap, the child quota and the process work itself.
+//! One-shot runs execute on a worker thread of the import; the exit is held until the host's next
+//! event tick (`EXIT_DELIVERY_DELAY`), then `request-completed` is queued for the plugin and the
+//! exit is handed out once by `take-exit`. Long-lived children are supervised by one thread each:
+//! it queues `child-output` for every chunk (or line) and `child-exited` at the end. Grants
+//! (`process.run:<program>`, `process.long-lived`) are checked here against the instance's grants.
 //!
-//! State is thread-local: one plugin instance is driven from one host thread, so its quotas
-//! never leak into another instance.
+//! Everything belongs to the import value, which is owned by one plugin instance: its quotas never
+//! leak into another instance, and dropping it (the instance stops) cancels the pending runs and
+//! sends SIGTERM, then SIGKILL after 2 s, to the children. At most 16 processes run per session
+//! (`SessionCounters`), shared by `run` and `spawn`.
 
+use ilium_platform::process_control::{
+    lower_background_child_priority, prepare_process_tree, terminate, ProcessTreeGuard,
+};
 use ilium_plugin_api::generated::host::process::{
     ChildHandle, HostProcess, ProcessExit, ProcessSpec, SpawnSpec,
 };
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use ilium_plugin_api::generated::types::events::OutputStream;
+use ilium_plugin_api::generated::types::events::{ChildExitedEvent, ChildOutputEvent, Event};
 use ilium_plugin_api::generated::types::ids::{ChildId, RequestId};
+use ilium_plugin_api::generated::types::paths::FsPath;
 use ilium_plugin_api::generated::types::Outcome;
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+use super::env::{completion_event, ImportEnv, SessionSlot};
+use crate::runtime::pending_events::EventSink;
 
 /// Stdin and combined output cap, 4 MiB.
 const FOUR_MIB: usize = 4 * 1024 * 1024;
@@ -34,8 +47,21 @@ const MAX_ENVIRONMENT_PAIRS: usize = 64;
 const PENDING_REQUESTS_PER_PLUGIN: usize = 64;
 /// Long-lived children per plugin.
 const CHILDREN_PER_PLUGIN: usize = 2;
+/// Processes (one-shot and long-lived) one session runs at once.
+pub const SESSION_PROCESSES: usize = 16;
 /// An exit becomes visible to `take-exit` only after the host's next event tick.
 const EXIT_DELIVERY_DELAY: Duration = Duration::from_millis(50);
+/// One `child-output` event carries at most this many bytes; a longer chunk or line is split.
+const OUTPUT_CHUNK_BYTES: usize = 1024 * 1024;
+/// Bytes read from a child pipe per call outside line mode.
+const READ_BUFFER_BYTES: usize = 64 * 1024;
+/// The reader stops reading a pipe while this many events wait, so a slow plugin slows the child
+/// down instead of losing output.
+const OUTPUT_BACKLOG_EVENTS: usize = 2_048;
+/// How long a child gets between SIGTERM and SIGKILL when its plugin stops.
+const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+/// Most exited children whose handles the import keeps.
+const KEPT_DEAD_CHILDREN: usize = 64;
 /// Environment keys a plugin may not set (SEC-033).
 const RESERVED_ENVIRONMENT_KEYS: &[&str] = &[
     "PATH",
@@ -49,25 +75,67 @@ const RESERVED_ENVIRONMENT_KEYS: &[&str] = &[
     "ENV",
 ];
 
-/// Host side of the `process` interface.
-#[derive(Debug)]
-pub struct ProcessImport;
-
 /// A finished run waiting for `take-exit`.
 type ExitSlot = Arc<Mutex<Option<(Instant, ProcessExit, Option<ErrorCode>)>>>;
+
+/// One one-shot run of the plugin that `take-exit` has not collected.
+struct PendingRun {
+    slot: ExitSlot,
+    /// Set when the import drops: the worker kills the program and queues nothing.
+    cancel: Arc<AtomicBool>,
+}
+
+/// What the import tells the supervisor of a long-lived child.
+#[derive(Default)]
+struct ChildControl {
+    /// Set when the plugin stopped: SIGTERM now, SIGKILL after the grace period.
+    stop: AtomicBool,
+    /// Set by `signal("kill")`: SIGKILL the process group now.
+    kill: AtomicBool,
+    /// Set by the supervisor once the child was reaped.
+    exited: AtomicBool,
+}
 
 /// One long-lived child.
 struct ChildEntry {
     id: ChildId,
-    child: Child,
+    pid: u32,
     stdin: Option<ChildStdin>,
+    control: Arc<ChildControl>,
+    supervisor: Option<JoinHandle<()>>,
 }
 
-thread_local! {
-    static NEXT_REQUEST: Cell<u64> = const { Cell::new(1) };
-    static NEXT_CHILD: Cell<u32> = const { Cell::new(1) };
-    static PENDING: RefCell<HashMap<u64, ExitSlot>> = RefCell::new(HashMap::new());
-    static CHILDREN: RefCell<HashMap<u32, ChildEntry>> = RefCell::new(HashMap::new());
+impl ChildEntry {
+    fn is_live(&self) -> bool {
+        !self.control.exited.load(Ordering::Acquire)
+    }
+}
+
+/// Host side of the `process` interface of one plugin instance.
+pub struct ProcessImport {
+    env: ImportEnv,
+    next_child: u32,
+    pending: HashMap<u64, PendingRun>,
+    children: HashMap<u32, ChildEntry>,
+    /// Folders behind the scopes a `cwd` may name (`project`, `data`, `cache`, `package`).
+    scope_roots: HashMap<String, PathBuf>,
+}
+
+impl std::fmt::Debug for ProcessImport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProcessImport")
+            .field("plugin", &self.env.plugin())
+            .field("pending", &self.pending.len())
+            .field("children", &self.children.len())
+            .finish()
+    }
+}
+
+impl Default for ProcessImport {
+    fn default() -> Self {
+        Self::new(ImportEnv::unrestricted())
+    }
 }
 
 fn error(code: ErrorCode, message: impl Into<String>) -> PluginError {
@@ -96,7 +164,11 @@ fn validate_spec(spec: &ProcessSpec, check_timeout: bool) -> Result<(), PluginEr
     if spec.environment.len() > MAX_ENVIRONMENT_PAIRS {
         return Err(invalid("more than 64 environment pairs"));
     }
-    if spec.stdin.as_ref().is_some_and(|bytes| bytes.len() > FOUR_MIB) {
+    if spec
+        .stdin
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > FOUR_MIB)
+    {
         return Err(invalid("stdin is larger than 4 MiB"));
     }
     for (key, _) in &spec.environment {
@@ -112,13 +184,29 @@ fn validate_spec(spec: &ProcessSpec, check_timeout: bool) -> Result<(), PluginEr
     Ok(())
 }
 
-/// Builds the command of a spec with the given stdio wiring.
-fn command_of(spec: &ProcessSpec) -> Command {
+/// Builds the command of a spec: a clean environment (`PATH`, `HOME`, `LANG` and the plugin's
+/// extras), the folder it runs in, and its own process group, so killing the group ends its
+/// descendants too.
+fn command_of(spec: &ProcessSpec, working_folder: Option<&Path>) -> Command {
     let mut command = Command::new(&spec.program);
     command.args(&spec.arguments);
+    command.env_clear();
+    for name in ["PATH", "HOME"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command.env(
+        "LANG",
+        std::env::var_os("LANG").unwrap_or_else(|| "C".into()),
+    );
     for (key, value) in &spec.environment {
         command.env(key, value);
     }
+    if let Some(folder) = working_folder {
+        command.current_dir(folder);
+    }
+    prepare_process_tree(&mut command);
     command
 }
 
@@ -140,9 +228,29 @@ fn read_capped(mut pipe: impl Read, limit: usize) -> (Vec<u8>, bool) {
     }
 }
 
-/// Runs one spec to completion or timeout; never panics, a failure to start is a non-zero exit.
-fn execute_one_shot(spec: &ProcessSpec) -> (ProcessExit, Option<ErrorCode>) {
-    let mut command = command_of(spec);
+/// The refusal code of a program that could not start.
+fn spawn_failure_code(spawn_error: &std::io::Error) -> ErrorCode {
+    if spawn_error.kind() == std::io::ErrorKind::NotFound {
+        ErrorCode::NotFound
+    } else {
+        ErrorCode::Io
+    }
+}
+
+/// A one-shot program that started, with the guard of its process tree.
+struct Started {
+    child: Child,
+    tree: Option<ProcessTreeGuard>,
+}
+
+/// Starts a one-shot program; a program that cannot start is a finished run with exit 127 and the
+/// failure code of the completion (api-process-control.md: the call is accepted, the completion
+/// is `failed(not-found)`).
+fn start_one_shot(
+    spec: &ProcessSpec,
+    working_folder: Option<&Path>,
+) -> Result<Started, (ProcessExit, ErrorCode)> {
+    let mut command = command_of(spec, working_folder);
     command
         .stdin(if spec.stdin.is_some() {
             Stdio::piped()
@@ -151,25 +259,33 @@ fn execute_one_shot(spec: &ProcessSpec) -> (ProcessExit, Option<ErrorCode>) {
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(spawn_error) => {
-            let code = if spawn_error.kind() == std::io::ErrorKind::NotFound {
-                ErrorCode::NotFound
-            } else {
-                ErrorCode::Io
-            };
-            return (
-                ProcessExit {
-                    status: Some(127),
-                    signal: None,
-                    stdout: Vec::new(),
-                    stderr: spawn_error.to_string().into_bytes(),
-                },
-                Some(code),
-            );
+    match command.spawn() {
+        Ok(child) => {
+            let tree = ProcessTreeGuard::attach(child.id()).ok();
+            Ok(Started { child, tree })
         }
-    };
+        Err(spawn_error) => Err((
+            ProcessExit {
+                status: Some(127),
+                signal: None,
+                stdout: Vec::new(),
+                stderr: spawn_error.to_string().into_bytes(),
+            },
+            spawn_failure_code(&spawn_error),
+        )),
+    }
+}
+
+/// Runs a started one-shot program to completion, timeout or cancellation.
+fn finish_one_shot(
+    started: Started,
+    spec: &ProcessSpec,
+    cancel: &AtomicBool,
+) -> (ProcessExit, Option<ErrorCode>) {
+    let Started {
+        mut child,
+        mut tree,
+    } = started;
     if let (Some(bytes), Some(mut stdin)) = (spec.stdin.clone(), child.stdin.take()) {
         std::thread::spawn(move || {
             // The program may exit without reading; a broken pipe is not a failure.
@@ -189,9 +305,13 @@ fn execute_one_shot(spec: &ProcessSpec) -> (ProcessExit, Option<ErrorCode>) {
     let exit_status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
+            Ok(None) if cancel.load(Ordering::Acquire) => {
+                kill_tree(&mut child, tree.as_mut());
+                break child.wait().ok();
+            }
             Ok(None) if Instant::now() >= deadline => {
                 timed_out = true;
-                let _ = child.kill();
+                kill_tree(&mut child, tree.as_mut());
                 break child.wait().ok();
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(2)),
@@ -227,27 +347,21 @@ fn execute_one_shot(spec: &ProcessSpec) -> (ProcessExit, Option<ErrorCode>) {
     )
 }
 
-/// Waits up to `budget` for a one-shot request to finish and maps it to its completion outcome
-/// (`ok`, or `failed(code)` per api-process-control.md); `None` when the request is unknown here
-/// or still running after the budget. The exit stays available for `take-exit`.
-pub fn await_outcome(request: RequestId, budget: Duration) -> Option<Outcome> {
-    let slot = PENDING.with(|pending| pending.borrow().get(&request.0).cloned())?;
-    let deadline = Instant::now() + budget;
-    loop {
-        let finished = slot
-            .lock()
-            .ok()
-            .and_then(|held| held.as_ref().map(|(_, _, failure)| *failure));
-        if let Some(failure) = finished {
-            return Some(match failure {
-                None => Outcome::Ok,
-                Some(code) => Outcome::Failed(error(code, "the process request failed")),
-            });
-        }
-        if Instant::now() >= deadline {
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(2));
+/// Kills the program and everything it started: the whole process group when the guard exists,
+/// the program alone otherwise.
+fn kill_tree(child: &mut Child, tree: Option<&mut ProcessTreeGuard>) {
+    let group_killed = tree.is_some_and(|guard| guard.terminate().is_ok());
+    if !group_killed {
+        let _ = child.kill();
+    }
+}
+
+/// The completion outcome of a finished one-shot run (`ok`, or `failed(code)` per
+/// api-process-control.md).
+fn outcome_of_failure(failure: Option<ErrorCode>) -> Outcome {
+    match failure {
+        None => Outcome::Ok,
+        Some(code) => Outcome::Failed(error(code, "the process request failed")),
     }
 }
 
@@ -271,98 +385,411 @@ fn signal_name_of(_status: &std::process::ExitStatus) -> Option<String> {
     None
 }
 
+/// Splits `bytes` into events of at most `OUTPUT_CHUNK_BYTES` and queues them, waiting while the
+/// plugin's queue is backed up.
+fn send_output(sink: &EventSink, child: ChildId, stream: OutputStream, bytes: &[u8]) {
+    for chunk in bytes.chunks(OUTPUT_CHUNK_BYTES) {
+        while sink.backlog() >= OUTPUT_BACKLOG_EVENTS {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        sink.send(Event::ChildOutput(ChildOutputEvent {
+            child,
+            stream,
+            bytes: chunk.to_vec(),
+        }));
+    }
+}
+
+/// Reads one pipe of a child to its end and queues what it prints, line by line in line mode.
+fn pump_pipe(
+    pipe: impl Read,
+    sink: &EventSink,
+    child: ChildId,
+    stream: OutputStream,
+    line_mode: bool,
+) {
+    if line_mode {
+        let mut reader = BufReader::new(pipe);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => return,
+                Ok(_) => send_output(sink, child, stream, &line),
+            }
+        }
+    }
+    let mut pipe = pipe;
+    let mut buffer = vec![0u8; READ_BUFFER_BYTES];
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) | Err(_) => return,
+            Ok(count) => send_output(sink, child, stream, &buffer[..count]),
+        }
+    }
+}
+
+/// The supervisor of one long-lived child: it pumps the child's output, honours stop and kill
+/// requests, reaps the child and queues `child-exited` once all output is queued.
+fn supervise(
+    mut child: Child,
+    mut tree: Option<ProcessTreeGuard>,
+    control: &ChildControl,
+    sink: &EventSink,
+    id: ChildId,
+    line_mode: bool,
+) {
+    let readers: Vec<JoinHandle<()>> = [
+        child
+            .stdout
+            .take()
+            .map(|pipe| (Box::new(pipe) as Box<dyn Read + Send>, OutputStream::Stdout)),
+        child
+            .stderr
+            .take()
+            .map(|pipe| (Box::new(pipe) as Box<dyn Read + Send>, OutputStream::Stderr)),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|(pipe, stream)| {
+        let reader_sink = sink.clone();
+        std::thread::spawn(move || pump_pipe(pipe, &reader_sink, id, stream, line_mode))
+    })
+    .collect();
+    let mut terminated_at: Option<Instant> = None;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {}
+            Err(_) => break None,
+        }
+        if control.kill.load(Ordering::Acquire) {
+            kill_tree(&mut child, tree.as_mut());
+        } else if control.stop.load(Ordering::Acquire) {
+            match terminated_at {
+                None => {
+                    let _ = terminate(child.id());
+                    terminated_at = Some(Instant::now());
+                }
+                Some(at) if at.elapsed() >= TERMINATE_GRACE => {
+                    kill_tree(&mut child, tree.as_mut());
+                }
+                Some(_) => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // A descendant that outlives the child can keep a pipe open; the group kill ends it.
+    if let Some(guard) = tree.as_mut() {
+        let _ = guard.terminate();
+    }
+    for reader in readers {
+        let _ = reader.join();
+    }
+    control.exited.store(true, Ordering::Release);
+    if !control.stop.load(Ordering::Acquire) {
+        sink.send(Event::ChildExited(ChildExitedEvent {
+            child: id,
+            status: status.as_ref().and_then(|status| status.code()),
+            signal: status.as_ref().and_then(signal_name_of),
+        }));
+    }
+}
+
+impl ProcessImport {
+    /// The import of the instance `env` describes.
+    pub fn new(env: ImportEnv) -> Self {
+        Self {
+            env,
+            next_child: 1,
+            pending: HashMap::new(),
+            children: HashMap::new(),
+            scope_roots: HashMap::new(),
+        }
+    }
+
+    /// Lets `cwd` name `scope`, a folder on disk. A `cwd` still needs `fs.read` for the scope
+    /// unless the scope is `data`, `cache` or `package`, which are always readable.
+    pub fn set_scope_root(&mut self, scope: &str, root: PathBuf) {
+        self.scope_roots.insert(
+            scope.to_owned(),
+            std::fs::canonicalize(&root).unwrap_or(root),
+        );
+    }
+
+    /// The real folder a `cwd` names, after the scope and path checks.
+    fn working_folder(&self, cwd: &FsPath) -> Result<PathBuf, PluginError> {
+        let always_readable = matches!(cwd.scope.as_str(), "data" | "cache" | "package");
+        if !always_readable && !self.env.holds(&format!("fs.read:{}", cwd.scope)) {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the cwd lies outside a scope the plugin can read",
+            ));
+        }
+        let root = self.scope_roots.get(&cwd.scope).ok_or_else(|| {
+            error(
+                ErrorCode::NotPermitted,
+                "the cwd lies outside a scope the plugin can read",
+            )
+        })?;
+        if cwd.path.starts_with('/') || cwd.path.contains('\\') || cwd.path.contains('\0') {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the cwd must be relative to its scope",
+            ));
+        }
+        let mut folder = root.clone();
+        for part in cwd.path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => return Err(error(ErrorCode::NotPermitted, "the cwd leaves its scope")),
+                name => folder.push(name),
+            }
+        }
+        let canonical = std::fs::canonicalize(&folder)
+            .map_err(|_| error(ErrorCode::NotFound, "the cwd does not exist"))?;
+        if !canonical.starts_with(root) {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the cwd leaves its scope through a link",
+            ));
+        }
+        Ok(canonical)
+    }
+
+    /// The grant check of one program: `process.run:<program>`.
+    fn require_run_grant(&self, program: &str) -> Result<(), PluginError> {
+        if self.env.holds(&format!("process.run:{program}")) {
+            Ok(())
+        } else {
+            Err(error(
+                ErrorCode::NotPermitted,
+                "the plugin holds no process.run grant for this program",
+            ))
+        }
+    }
+
+    fn live_children(&self) -> usize {
+        self.children
+            .values()
+            .filter(|entry| entry.is_live())
+            .count()
+    }
+
+    /// Waits up to `budget` for a one-shot request to finish and maps it to its completion
+    /// outcome (`ok`, or `failed(code)` per api-process-control.md); `None` when the request is
+    /// unknown here or still running after the budget. The exit stays available for `take-exit`.
+    pub fn await_outcome(&self, request: RequestId, budget: Duration) -> Option<Outcome> {
+        let slot = Arc::clone(&self.pending.get(&request.0)?.slot);
+        let deadline = Instant::now() + budget;
+        loop {
+            // Answer only once `take-exit` can hand the exit out.
+            let finished = slot.lock().ok().and_then(|held| {
+                held.as_ref().and_then(|(finished_at, _, failure)| {
+                    (finished_at.elapsed() >= EXIT_DELIVERY_DELAY).then_some(*failure)
+                })
+            });
+            if let Some(failure) = finished {
+                return Some(outcome_of_failure(failure));
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Drops what no handle can reach any more: exited children beyond the kept few.
+    fn prune_dead_children(&mut self) {
+        let dead: Vec<u32> = self
+            .children
+            .iter()
+            .filter(|(_, entry)| !entry.is_live())
+            .map(|(handle, _)| *handle)
+            .collect();
+        if dead.len() <= KEPT_DEAD_CHILDREN {
+            return;
+        }
+        let mut oldest_first = dead;
+        oldest_first.sort_unstable();
+        for handle in oldest_first.into_iter().take_while({
+            let mut excess = self
+                .children
+                .values()
+                .filter(|entry| !entry.is_live())
+                .count();
+            move |_| {
+                let drop_this = excess > KEPT_DEAD_CHILDREN;
+                excess = excess.saturating_sub(1);
+                drop_this
+            }
+        }) {
+            if let Some(mut entry) = self.children.remove(&handle) {
+                if let Some(supervisor) = entry.supervisor.take() {
+                    let _ = supervisor.join();
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ProcessImport {
+    fn drop(&mut self) {
+        for run in self.pending.values() {
+            run.cancel.store(true, Ordering::Release);
+        }
+        // The supervisors own the SIGTERM, grace period and SIGKILL; they are not joined here, so
+        // a stopping instance never waits two seconds.
+        for entry in self.children.values() {
+            entry.control.stop.store(true, Ordering::Release);
+        }
+    }
+}
+
 impl HostProcess for ProcessImport {
     fn run(&mut self, spec: ProcessSpec) -> Result<RequestId, PluginError> {
         validate_spec(&spec, true)?;
-        let pending_count = PENDING.with(|pending| pending.borrow().len());
-        if pending_count >= PENDING_REQUESTS_PER_PLUGIN {
-            return Err(error(ErrorCode::Busy, "64 process requests are already pending"));
+        self.require_run_grant(&spec.program)?;
+        let working_folder = match &spec.cwd {
+            Some(cwd) => Some(self.working_folder(cwd)?),
+            None => None,
+        };
+        if self.pending.len() >= PENDING_REQUESTS_PER_PLUGIN {
+            return Err(error(
+                ErrorCode::Busy,
+                "64 process requests are already pending",
+            ));
         }
-        let request_number = NEXT_REQUEST.with(|next| {
-            let number = next.get();
-            next.set(number + 1);
-            number
-        });
+        let Some(session_slot) = self.env.session().try_acquire_process(SESSION_PROCESSES) else {
+            return Err(error(
+                ErrorCode::Busy,
+                "the session already runs 16 processes",
+            ));
+        };
+        let request = self.env.next_request();
         let slot: ExitSlot = Arc::new(Mutex::new(None));
+        let cancel = Arc::new(AtomicBool::new(false));
+        // The program starts in this call, so the session cap counts real running programs and a
+        // burst of calls is paced by the cost of starting them.
+        let started = start_one_shot(&spec, working_folder.as_deref());
         let worker_slot = Arc::clone(&slot);
+        let worker_cancel = Arc::clone(&cancel);
+        let sink = self.env.sink();
+        let worker = sink.worker();
         std::thread::spawn(move || {
-            let (exit, failure) = execute_one_shot(&spec);
+            let _worker = worker;
+            let (exit, failure) = match started {
+                Ok(started) => finish_one_shot(started, &spec, &worker_cancel),
+                Err((exit, code)) => (exit, Some(code)),
+            };
+            // The process is gone: its slot frees now, not after the delivery delay.
+            drop(session_slot);
             if let Ok(mut held) = worker_slot.lock() {
                 *held = Some((Instant::now(), exit, failure));
             }
+            // `take-exit` answers only after the host's next event tick; the completion waits
+            // for the same moment so the plugin never sees it before the exit is collectable.
+            std::thread::sleep(EXIT_DELIVERY_DELAY);
+            if !worker_cancel.load(Ordering::Acquire) {
+                sink.send(completion_event(request, outcome_of_failure(failure)));
+            }
         });
-        PENDING.with(|pending| pending.borrow_mut().insert(request_number, slot));
-        Ok(RequestId(request_number))
+        self.pending.insert(request.0, PendingRun { slot, cancel });
+        Ok(request)
     }
 
     fn take_exit(&mut self, request: RequestId) -> Option<ProcessExit> {
-        PENDING.with(|pending| {
-            let mut pending = pending.borrow_mut();
-            let slot = pending.get(&request.0)?;
-            let ready = {
-                let held = slot.lock().ok()?;
-                held.as_ref()
-                    .is_some_and(|(finished_at, _, _)| finished_at.elapsed() >= EXIT_DELIVERY_DELAY)
-            };
-            if !ready {
-                return None;
-            }
-            let slot = pending.remove(&request.0)?;
-            let exit = slot.lock().ok()?.take();
-            exit.map(|(_, exit, _)| exit)
-        })
+        let run = self.pending.get(&request.0)?;
+        let ready = {
+            let held = run.slot.lock().ok()?;
+            held.as_ref()
+                .is_some_and(|(finished_at, _, _)| finished_at.elapsed() >= EXIT_DELIVERY_DELAY)
+        };
+        if !ready {
+            return None;
+        }
+        let run = self.pending.remove(&request.0)?;
+        let exit = run.slot.lock().ok()?.take();
+        exit.map(|(_, exit, _)| exit)
     }
 
     fn spawn(&mut self, spec: SpawnSpec) -> Result<ChildHandle, PluginError> {
         // Children have no timeout: the one-shot timeout is ignored.
         validate_spec(&spec.process, false)?;
-        if CHILDREN.with(|children| children.borrow().len()) >= CHILDREN_PER_PLUGIN {
+        if !self.env.holds("process.long-lived") {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "the plugin holds no process.long-lived grant",
+            ));
+        }
+        self.require_run_grant(&spec.process.program)?;
+        self.prune_dead_children();
+        if self.live_children() >= CHILDREN_PER_PLUGIN {
             return Err(error(
                 ErrorCode::QuotaExceeded,
                 "a plugin may run 2 long-lived children",
             ));
         }
-        let mut command = command_of(&spec.process);
+        let Some(session_slot) = self.env.session().try_acquire_process(SESSION_PROCESSES) else {
+            return Err(error(
+                ErrorCode::QuotaExceeded,
+                "the session already runs 16 processes",
+            ));
+        };
+        let working_folder = match &spec.process.cwd {
+            Some(cwd) => Some(self.working_folder(cwd)?),
+            None => None,
+        };
+        let mut command = command_of(&spec.process, working_folder.as_deref());
         command
             .stdin(if spec.stdin_open {
                 Stdio::piped()
             } else {
                 Stdio::null()
             })
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        lower_background_child_priority(&mut command);
         let mut child = command.spawn().map_err(|spawn_error| {
             error(
-                ErrorCode::NotFound,
+                spawn_failure_code(&spawn_error),
                 format!("cannot start the program: {spawn_error}"),
             )
         })?;
+        let tree = ProcessTreeGuard::attach(child.id()).ok();
         let stdin = child.stdin.take();
-        let handle_number = NEXT_CHILD.with(|next| {
-            let number = next.get();
-            next.set(number + 1);
-            number
+        let handle_number = self.next_child;
+        self.next_child += 1;
+        let id = ChildId(u64::from(handle_number));
+        let pid = child.id();
+        let control = Arc::new(ChildControl::default());
+        let supervisor_control = Arc::clone(&control);
+        let sink = self.env.sink();
+        let worker = sink.worker();
+        let line_mode = spec.line_mode;
+        let supervisor = std::thread::spawn(move || {
+            let _worker = worker;
+            let _session_slot: SessionSlot = session_slot;
+            supervise(child, tree, &supervisor_control, &sink, id, line_mode);
         });
-        CHILDREN.with(|children| {
-            children.borrow_mut().insert(
-                handle_number,
-                ChildEntry {
-                    id: ChildId(u64::from(handle_number)),
-                    child,
-                    stdin,
-                },
-            );
-        });
+        self.children.insert(
+            handle_number,
+            ChildEntry {
+                id,
+                pid,
+                stdin,
+                control,
+                supervisor: Some(supervisor),
+            },
+        );
         Ok(ChildHandle(handle_number))
     }
 
     fn child_pid_hint(&mut self, handle: ChildHandle) -> u32 {
-        CHILDREN.with(|children| {
-            children
-                .borrow()
-                .get(&handle.0)
-                .map_or(0, |entry| entry.child.id())
-        })
+        self.children
+            .get(&handle.0)
+            .filter(|entry| entry.is_live())
+            .map_or(0, |entry| entry.pid)
     }
 
     fn child_write_stdin(
@@ -370,30 +797,29 @@ impl HostProcess for ProcessImport {
         handle: ChildHandle,
         bytes: Vec<u8>,
     ) -> Result<(), PluginError> {
-        CHILDREN.with(|children| {
-            let mut children = children.borrow_mut();
-            let entry = children
-                .get_mut(&handle.0)
-                .ok_or_else(|| error(ErrorCode::NotFound, "the child handle is not live"))?;
-            let stdin = entry
-                .stdin
-                .as_mut()
-                .ok_or_else(|| error(ErrorCode::Conflict, "stdin is closed"))?;
-            stdin
-                .write_all(&bytes)
-                .and_then(|()| stdin.flush())
-                .map_err(|write_error| {
-                    error(ErrorCode::Conflict, format!("stdin write failed: {write_error}"))
-                })
-        })
+        let entry = self
+            .children
+            .get_mut(&handle.0)
+            .ok_or_else(|| error(ErrorCode::NotFound, "the child handle is not live"))?;
+        let stdin = entry
+            .stdin
+            .as_mut()
+            .ok_or_else(|| error(ErrorCode::Conflict, "stdin is closed"))?;
+        stdin
+            .write_all(&bytes)
+            .and_then(|()| stdin.flush())
+            .map_err(|write_error| {
+                error(
+                    ErrorCode::Conflict,
+                    format!("stdin write failed: {write_error}"),
+                )
+            })
     }
 
     fn child_close_stdin(&mut self, handle: ChildHandle) {
-        CHILDREN.with(|children| {
-            if let Some(entry) = children.borrow_mut().get_mut(&handle.0) {
-                entry.stdin = None;
-            }
-        });
+        if let Some(entry) = self.children.get_mut(&handle.0) {
+            entry.stdin = None;
+        }
     }
 
     fn child_signal(&mut self, handle: ChildHandle, signal: String) -> Result<(), PluginError> {
@@ -408,39 +834,48 @@ impl HostProcess for ProcessImport {
                 ))
             }
         };
-        CHILDREN.with(|children| {
-            let mut children = children.borrow_mut();
-            let entry = children
-                .get_mut(&handle.0)
-                .ok_or_else(|| error(ErrorCode::NotFound, "the child handle is not live"))?;
-            if signal_flag == "KILL" {
-                // An already exited child is not an error for a kill.
-                let _ = entry.child.kill();
-                return Ok(());
+        let entry = self
+            .children
+            .get_mut(&handle.0)
+            .ok_or_else(|| error(ErrorCode::NotFound, "the child handle is not live"))?;
+        if !entry.is_live() {
+            // A signal to a child that already exited is not an error: the outcome it asks for
+            // already holds.
+            return Ok(());
+        }
+        match signal_flag {
+            "KILL" => {
+                entry.control.kill.store(true, Ordering::Release);
+                Ok(())
             }
-            let delivered = Command::new("kill")
-                .arg(format!("-{signal_flag}"))
-                .arg(entry.child.id().to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            match delivered {
-                Ok(_) => Ok(()),
-                Err(kill_error) => Err(error(
+            "TERM" => terminate(entry.pid).map_err(|terminate_error| {
+                error(
                     ErrorCode::Unsupported,
-                    format!("cannot deliver the signal: {kill_error}"),
-                )),
+                    format!("cannot deliver the signal: {terminate_error}"),
+                )
+            }),
+            _ => {
+                let delivered = Command::new("kill")
+                    .arg(format!("-{signal_flag}"))
+                    .arg(entry.pid.to_string())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                match delivered {
+                    Ok(_) => Ok(()),
+                    Err(kill_error) => Err(error(
+                        ErrorCode::Unsupported,
+                        format!("cannot deliver the signal: {kill_error}"),
+                    )),
+                }
             }
-        })
+        }
     }
 
     fn child_id(&mut self, handle: ChildHandle) -> ChildId {
-        CHILDREN.with(|children| {
-            children
-                .borrow()
-                .get(&handle.0)
-                .map_or(ChildId(u64::from(handle.0)), |entry| entry.id)
-        })
+        self.children
+            .get(&handle.0)
+            .map_or(ChildId(u64::from(handle.0)), |entry| entry.id)
     }
 }
 
@@ -555,7 +990,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_rejects_a_zero_timeout_with_invalid_argument() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.timeout_millis = 0;
         let error = error_of(HostProcess::run(&mut import, spec));
@@ -565,7 +1000,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_the_minimum_timeout_of_one_millisecond() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.timeout_millis = 1;
         let result = HostProcess::run(&mut import, spec);
@@ -578,7 +1013,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_the_maximum_timeout_of_600000_millis() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.timeout_millis = MAX_TIMEOUT_MILLIS;
         let result = HostProcess::run(&mut import, spec);
@@ -588,7 +1023,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_rejects_a_timeout_one_above_the_maximum() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.timeout_millis = MAX_TIMEOUT_MILLIS + 1;
         let error = error_of(HostProcess::run(&mut import, spec));
@@ -598,7 +1033,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_empty_arguments_environment_and_stdin() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let spec = process_spec("echo");
         assert!(spec.arguments.is_empty());
         assert!(spec.environment.is_empty());
@@ -610,7 +1045,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_an_empty_stdin_buffer() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("cat");
         spec.stdin = Some(Vec::new());
         let result = HostProcess::run(&mut import, spec);
@@ -620,7 +1055,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_stdin_of_exactly_four_mib() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("cat");
         spec.stdin = Some(vec![0u8; FOUR_MIB]);
         let result = HostProcess::run(&mut import, spec);
@@ -633,7 +1068,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_rejects_stdin_one_byte_above_four_mib() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("cat");
         spec.stdin = Some(vec![0u8; FOUR_MIB + 1]);
         let error = error_of(HostProcess::run(&mut import, spec));
@@ -643,7 +1078,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_exactly_1024_arguments() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.arguments = vec!["x".to_owned(); MAX_ARGUMENTS];
         let result = HostProcess::run(&mut import, spec);
@@ -656,7 +1091,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_rejects_1025_arguments_with_invalid_argument() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.arguments = vec!["x".to_owned(); MAX_ARGUMENTS + 1];
         let error = error_of(HostProcess::run(&mut import, spec));
@@ -666,7 +1101,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_accepts_exactly_64_environment_pairs() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.environment = harmless_environment(MAX_ENVIRONMENT_PAIRS);
         let result = HostProcess::run(&mut import, spec);
@@ -676,7 +1111,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.run
     #[test]
     fn run_rejects_65_environment_pairs_with_invalid_argument() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let mut spec = process_spec("echo");
         spec.environment = harmless_environment(MAX_ENVIRONMENT_PAIRS + 1);
         let error = error_of(HostProcess::run(&mut import, spec));
@@ -696,7 +1131,7 @@ mod tests {
             "BASH_ENV",
         ];
         for reserved_key in reserved_keys {
-            let mut import = ProcessImport;
+            let mut import = ProcessImport::default();
             let mut spec = process_spec("echo");
             spec.environment = vec![(reserved_key.to_owned(), "/tmp".to_owned())];
             let error = error_of(HostProcess::run(&mut import, spec));
@@ -751,7 +1186,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.take-exit
     #[test]
     fn take_exit_of_an_unknown_request_is_none() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let exit = HostProcess::take_exit(&mut import, RequestId(999));
         assert!(exit.is_none());
     }
@@ -759,7 +1194,7 @@ mod tests {
     /// REQ: WIT:ilium:host/process.take-exit
     #[test]
     fn take_exit_of_request_zero_is_none() {
-        let mut import = ProcessImport;
+        let mut import = ProcessImport::default();
         let exit = HostProcess::take_exit(&mut import, RequestId(0));
         assert!(exit.is_none());
     }

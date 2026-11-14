@@ -384,7 +384,7 @@ impl CrossSideState {
                     method,
                     payload_json,
                 } => {
-                    let (request, local_call) = ServiceBrokerState::fresh_ids();
+                    let (request, local_call) = broker.fresh_ids();
                     let local_caller = format!("{REMOTE_CALLER_PREFIX}{caller}");
                     let pending = PendingServiceCall {
                         call: local_call,

@@ -1,18 +1,35 @@
 //! Always-available wall and monotonic clocks (api-clock-and-timers.md).
-use std::{
-    sync::OnceLock,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ilium_plugin_api::generated::host::clock::HostClock;
 
-// One fixed origin per host process, lazily established by the first monotonic
-// read. Constructing/reloading a plugin never resets the host's duration clock.
-static MONOTONIC_ORIGIN: OnceLock<Instant> = OnceLock::new();
-
 /// Host side of the grant-free `clock` interface on every plugin side.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ClockImport;
+///
+/// The monotonic origin belongs to the runtime that builds the import, not to the process: the
+/// runtime captures it once and gives it to every instance it activates, so reloading a plugin
+/// never resets the duration clock. A bare import counts from its own construction.
+#[derive(Debug, Clone, Copy)]
+pub struct ClockImport {
+    origin: Instant,
+}
+
+impl Default for ClockImport {
+    fn default() -> Self {
+        Self::with_origin(Instant::now())
+    }
+}
+
+impl ClockImport {
+    /// A clock whose monotonic readings count from `origin`.
+    pub fn with_origin(origin: Instant) -> Self {
+        Self { origin }
+    }
+
+    /// The instant the monotonic readings count from.
+    pub fn origin(&self) -> Instant {
+        self.origin
+    }
+}
 
 /// Convert a wall-clock observation to the unsigned ABI representation.
 /// Dates before the epoch clamp to zero; unrepresentable millisecond counts
@@ -35,7 +52,7 @@ impl HostClock for ClockImport {
     }
 
     fn monotonic_millis(&mut self) -> u64 {
-        duration_millis(MONOTONIC_ORIGIN.get_or_init(Instant::now).elapsed())
+        duration_millis(self.origin.elapsed())
     }
 }
 
@@ -62,7 +79,7 @@ mod tests {
 
     #[test]
     fn now_unix_millis_matches_system_clock_in_milliseconds() {
-        let mut clock = ClockImport;
+        let mut clock = ClockImport::default();
         let host_reading = clock.now_unix_millis();
         let system_reading = system_unix_millis();
         let difference = host_reading.abs_diff(system_reading);
@@ -74,7 +91,7 @@ mod tests {
 
     #[test]
     fn now_unix_millis_is_after_the_unix_epoch_in_millisecond_scale() {
-        let mut clock = ClockImport;
+        let mut clock = ClockImport::default();
         let host_reading = clock.now_unix_millis();
         // 2020-01-01 00:00:00 UTC in milliseconds; a value in seconds or microseconds would fall outside.
         let year_2020_unix_millis: u64 = 1_577_836_800_000;
@@ -87,7 +104,7 @@ mod tests {
     /// REQ: AUT-007
     #[test]
     fn monotonic_millis_never_goes_backwards_across_repeated_reads() {
-        let mut clock = ClockImport;
+        let mut clock = ClockImport::default();
         let mut previous = clock.monotonic_millis();
         for read_index in 0..READ_COUNT {
             let current = clock.monotonic_millis();
@@ -102,7 +119,7 @@ mod tests {
     /// REQ: AUT-104
     #[test]
     fn monotonic_millis_advances_by_at_least_the_slept_duration() {
-        let mut clock = ClockImport;
+        let mut clock = ClockImport::default();
         let sleep_millis: u64 = 20;
         let started = clock.monotonic_millis();
         thread::sleep(Duration::from_millis(sleep_millis));
@@ -117,7 +134,7 @@ mod tests {
     /// REQ: SEC-347
     #[test]
     fn repeated_monotonic_reads_step_by_at_least_one_millisecond() {
-        let mut clock = ClockImport;
+        let mut clock = ClockImport::default();
         let mut previous = clock.monotonic_millis();
         for read_index in 0..READ_COUNT {
             let current = clock.monotonic_millis();
@@ -133,9 +150,9 @@ mod tests {
     }
 
     #[test]
-    fn monotonic_origin_is_shared_by_separate_import_instances() {
-        let mut first_instance = ClockImport;
-        let mut second_instance = ClockImport;
+    fn monotonic_origin_is_shared_by_instances_built_from_the_same_origin() {
+        let mut first_instance = ClockImport::default();
+        let mut second_instance = ClockImport::with_origin(first_instance.origin());
         let first_reading = first_instance.monotonic_millis();
         let second_reading = second_instance.monotonic_millis();
         assert!(

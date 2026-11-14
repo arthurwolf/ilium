@@ -1353,6 +1353,6 @@ mod tests {
         let RequestId(request) = import
             .run_hook(POINT.to_owned(), "{}".to_owned())
             .expect("queued");
-        assert!(request >= 1 << 41);
+        assert!(request >= 1);
     }
 }

@@ -1517,10 +1517,10 @@ pub enum ContextMenuAction {
     SetBookmark {
         is_bookmarked: bool,
     },
-    /// Locks or unlocks a project, group, or folder row's closed state --
-    /// see `App::request_set_node_locked_closed`. The desired state is
-    /// captured while the menu opens, the same idempotent-value pattern as
-    /// `SetBookmark`.
+    /// Locks or unlocks a project, group, or folder row's closed state; the
+    /// `ilium.core.tree/set-locked-closed` plugin command applies it. The
+    /// desired state is captured while the menu opens, the same
+    /// idempotent-value pattern as `SetBookmark`.
     SetNodeLockedClosed {
         locked_closed: bool,
     },
@@ -14044,19 +14044,6 @@ impl App {
         }
     }
 
-    /// Requests the server lock or unlock a project, group, or folder
-    /// row's closed state -- see `ilium_core::Tree::set_node_locked_closed`.
-    /// The right-click "Lock closed"/"Unlock" menu is the explicit UI for
-    /// this setting; tree double-clicks are reserved for Rename. Unlocking
-    /// always re-opens the entry because the server-side method forces
-    /// `expanded = true`.
-    pub(crate) fn request_set_node_locked_closed(&mut self, node_id: NodeId, locked_closed: bool) {
-        self.queue_request(ClientRequest::SetNodeLockedClosed {
-            node_id,
-            locked_closed,
-        });
-    }
-
     /// Applies persisted group expansion to the widget state after a server
     /// snapshot replaces the local tree. The domain tree owns the persisted
     /// preference; `TreeState` owns the widget's visible-row bookkeeping.
@@ -14550,15 +14537,6 @@ impl App {
         }
         self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::MoveNode { node_id, direction })
-    }
-
-    /// Queues an idempotent bookmark assignment. The server remains the
-    /// authority and updates every attached client through its tree snapshot.
-    pub fn request_set_node_bookmarked(&mut self, node_id: NodeId, is_bookmarked: bool) {
-        self.queue_request(ClientRequest::SetNodeBookmarked {
-            node_id,
-            is_bookmarked,
-        });
     }
 
     /// Queues a `ReparentNode` request -- an arbitrary move to `new_parent`
@@ -17746,7 +17724,11 @@ impl App {
             }
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::SetBookmark { is_bookmarked } => {
-                self.request_set_node_bookmarked(target, is_bookmarked);
+                self.invoke_plugin_command(
+                    "ilium.core.tree/set-bookmark",
+                    serde_json::json!({ "node": target.0, "on": is_bookmarked }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::Menu,
+                );
                 self.status_message = Some(if is_bookmarked {
                     "Bookmark added".to_string()
                 } else {
@@ -17754,7 +17736,11 @@ impl App {
                 });
             }
             ContextMenuAction::SetNodeLockedClosed { locked_closed } => {
-                self.request_set_node_locked_closed(target, locked_closed);
+                self.invoke_plugin_command(
+                    "ilium.core.tree/set-locked-closed",
+                    serde_json::json!({ "node": target.0, "on": locked_closed }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::Menu,
+                );
                 self.status_message = Some(if locked_closed {
                     "Locked closed".to_string()
                 } else {
@@ -17763,10 +17749,18 @@ impl App {
             }
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
-                self.request_move(target, ilium_core::TreeMoveDirection::Up);
+                self.invoke_plugin_command(
+                    "ilium.core.tree/move-up",
+                    serde_json::json!({ "node": target.0 }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::Menu,
+                );
             }
             ContextMenuAction::MoveDown => {
-                self.request_move(target, ilium_core::TreeMoveDirection::Down);
+                self.invoke_plugin_command(
+                    "ilium.core.tree/move-down",
+                    serde_json::json!({ "node": target.0 }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::Menu,
+                );
             }
             ContextMenuAction::Close => self.action_close(target),
             ContextMenuAction::ManageWorktrees => self.open_worktree_manager(target),

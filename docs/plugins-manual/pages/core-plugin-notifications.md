@@ -95,7 +95,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.attention",
       "extensions.provide:ilium.core.notifications/before-notify",
       "extensions.provide:ilium.core.notifications/channels",
-      "settings.write-kernel:sound"
+      "settings.write-kernel:sound",
+      "topics.subscribe:ilium.core.progress/changed",
+      "panes.read"
     ],
     "client": [
       "notify.toast"

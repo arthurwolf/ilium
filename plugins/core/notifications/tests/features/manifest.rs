@@ -70,7 +70,7 @@ fn manifest_050_the_server_side_uses_the_base_server_world() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_server_grants_are_the_five_alert_grants_in_order() {
+fn manifest_050_server_grants_are_the_five_alert_grants_then_the_two_feed_grants_in_order() {
     assert_eq!(
         server_grants(),
         [
@@ -78,7 +78,9 @@ fn manifest_050_server_grants_are_the_five_alert_grants_in_order() {
             "notify.desktop",
             "agent.read",
             "tree.read",
-            "tree.attention"
+            "tree.attention",
+            "topics.subscribe:ilium.core.progress/changed",
+            "panes.read"
         ]
     );
 }

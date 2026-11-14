@@ -6,17 +6,18 @@ use super::fake_kernel::FakeKernel;
 use crate::imports::{
     basic::BasicImport,
     codec::CodecImport,
+    env::ImportEnv,
     log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
 use crate::imports::{
-    clock::ClockImport, fs::FsImport, http::HttpImport, jobs::JobsImport,
+    clock::ClockImport, env::ImportEnv, fs::FsImport, http::HttpImport, jobs::JobsImport,
     journal::JournalImport, panes::PanesImport, process::ProcessImport, settings::SettingsImport,
     timers::TimersImport, tree::TreeImport,
 };
 use crate::storage::StorageContext;
-use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
 use crate::telemetry::{LogConfig, LogLevel, PluginLogInstanceBudget, Refusal};
+use crate::testing::harness::{HarnessHandle, HostHarness, NullGuest};
 use ilium_plugin_api::{grants::Grant, ids::parse_plugin_id, ProcessKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -316,8 +317,16 @@ impl ImportsFixtureBuilder {
                 .ok_or("invalid fixture data version")?,
         };
         let grants = Arc::new(Mutex::new(grants));
-        crate::imports::fs::configure_project_scope(project.clone(), grants.clone())
+        let import_env = ImportEnv::unrestricted()
+            .with_identity(&plugin, 1)
+            .with_grants(self.grants.clone());
+        let mut fs_import = FsImport::new(import_env.clone());
+        fs_import
+            .configure_project_scope(project.clone(), grants.clone())
             .map_err(|error| error.message)?;
+        let mut process_import = ProcessImport::new(import_env.clone());
+        process_import.set_scope_root("project", project.clone());
+        let http_import = HttpImport::new(import_env);
         let scope = StorageContext {
             project: Some(project),
             session: Some("imports-fixture".into()),
@@ -431,12 +440,12 @@ impl ImportsFixtureBuilder {
             validate_latency: self.validate_latency,
             harness,
             codec_import: CodecImport,
-            fs_import: FsImport,
-            http_import: HttpImport,
+            fs_import,
+            http_import,
             jobs_import: jobs,
-            journal_import: JournalImport,
+            journal_import: JournalImport::default(),
             panes_import: PanesImport,
-            process_import: ProcessImport,
+            process_import,
             settings_import: SettingsImport,
             timers_import: TimersImport::default(),
             tree_import: TreeImport,
@@ -841,7 +850,7 @@ impl ImportsFixture {
     /// Starts a job instance of a kind.
     pub fn job_instance(&mut self, _kind: &str, _input: &[u8]) -> JobInstance {
         JobInstance {
-            jobs_import: JobsImport,
+            jobs_import: JobsImport::default(),
             settings_import: SettingsImport,
             clock_import: ClockImport,
             log_import: LogImport::new(
@@ -884,7 +893,7 @@ impl ImportsFixture {
     /// Keeps async requests pending.
     pub fn hold_async_completions(&mut self, on: bool) {
         // The kernel hook holds only the next request; releasing clears that hold.
-        crate::imports::fs::hold_completions(on);
+        self.fs_import.hold_completions(on);
         if on {
             self.harness.kernel().hold_next_request();
         } else {
@@ -897,13 +906,13 @@ impl ImportsFixture {
         if let Some(outcome) = self.jobs_import.outcome_of(request) {
             return Some(outcome);
         }
-        if let Some(outcome) = crate::imports::fs::completed_outcome(request) {
+        if let Some(outcome) = self.fs_import.completed_outcome(request) {
             return Some(outcome);
         }
-        if let Some(outcome) = crate::imports::process::await_outcome(request, timeout) {
+        if let Some(outcome) = self.process_import.await_outcome(request, timeout) {
             return Some(outcome);
         }
-        if let Some(outcome) = crate::imports::http::await_outcome(request, timeout) {
+        if let Some(outcome) = self.http_import.await_outcome(request, timeout) {
             return Some(outcome);
         }
         self.harness.advance_clock(timeout);
@@ -1735,7 +1744,7 @@ impl FixtureJobs {
             })
             .unwrap_or_default();
         FixtureJobs {
-            inner: JobsImport,
+            inner: JobsImport::default(),
             kinds,
             runner,
             next: FIXTURE_JOB_ID_BASE,

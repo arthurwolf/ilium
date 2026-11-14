@@ -840,6 +840,7 @@ impl HostHarness {
             ui: Mutex::new(super::ui_world::UiWorld::new()),
             world: Mutex::new(world),
             second: Mutex::new(None),
+            imports: HarnessImports::default(),
         };
         let activation = Activation {
             plugin,
@@ -902,7 +903,22 @@ pub struct HarnessHandle {
     ui: Mutex<super::ui_world::UiWorld>,
     world: Mutex<SecurityWorld>,
     second: Mutex<Option<Box<HarnessHandle>>>,
+    /// The stateful imports of this instance; every accessor hands out a clone that shares the
+    /// state, so a grab or a stream opened through one call is seen by the next.
+    imports: HarnessImports,
 }
+
+/// The stateful imports of one harness instance. Each lives and dies with its handle; no state is
+/// shared with another handle or another test.
+#[derive(Default)]
+struct HarnessImports {
+    agent: AgentImport,
+    audio: AudioImport,
+    inference: InferenceImport,
+    keys: KeysImport,
+    sessions: SessionsImport,
+}
+
 impl std::fmt::Debug for HarnessHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HarnessHandle")
@@ -2097,7 +2113,7 @@ impl HarnessHandle {
 
     /// The `ilium:primitives/agent` interface as the plugin sees it.
     pub fn agent(&self) -> impl HostAgent {
-        AgentImport
+        self.imports.agent.clone()
     }
 
     /// The `ilium:primitives/editor` interface as the plugin sees it.
@@ -2123,7 +2139,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/audio` interface as the plugin sees it.
     pub fn audio(&self) -> impl HostAudio {
-        AudioImport
+        self.imports.audio.clone()
     }
 
     /// The `ilium:host/catalogs` interface as the plugin sees it.
@@ -2168,7 +2184,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/inference` interface as the plugin sees it.
     pub fn inference(&self) -> impl HostInference {
-        InferenceImport
+        self.imports.inference.clone()
     }
 
     /// The `ilium:host/kernel-settings` interface as the plugin sees it.
@@ -2183,7 +2199,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/keys` interface as the plugin sees it.
     pub fn keys(&self) -> impl HostKeys {
-        KeysImport
+        self.imports.keys.clone()
     }
 
     /// The `ilium:host/location` interface as the plugin sees it.
@@ -2203,7 +2219,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/sessions` interface as the plugin sees it.
     pub fn sessions(&self) -> impl HostSessions {
-        SessionsImport
+        self.imports.sessions.clone()
     }
 
     /// The `ilium:host/sounds` interface as the plugin sees it.

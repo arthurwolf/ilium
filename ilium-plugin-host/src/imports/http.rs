@@ -1,22 +1,35 @@
-//! Host implementation of `ilium:host/http` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/http` (api-http.md, api-http-streams.md).
 //!
-//! Written once by the skeleton lane from the generated `HostHttp` trait; hand-owned afterwards.
+//! `fetch` and `open-stream` run on worker threads of the import. Plain `http` goes to loopback
+//! only and is spoken here over a TCP socket; `https` is spoken by `ureq` (rustls). The host a
+//! plugin may reach is the `http:<host-pattern>` grants of its instance. When a request ends,
+//! `request-completed` is queued for the plugin; a stream queues `http-stream-data` for every
+//! chunk and `http-stream-closed` at its end. All state belongs to the import of one plugin
+//! instance: dropping it cancels its workers.
 
-use ilium_plugin_api::generated::host::http::{HostHttp, HttpRequest, HttpResponse, StreamRequest};
+use ilium_plugin_api::generated::host::http::{
+    HostHttp, HttpRequest, HttpResponse, StreamFraming, StreamRequest,
+};
 use ilium_plugin_api::generated::types::errors::PluginError;
+use ilium_plugin_api::generated::types::events::{
+    Event, HttpStreamClosedEvent, HttpStreamDataEvent, StreamOutcome,
+};
 use ilium_plugin_api::generated::types::ids::{RequestId, StreamId};
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ilium_plugin_api::generated::types::Header;
 use ilium_plugin_api::generated::types::errors::ErrorCode;
+use ilium_plugin_api::generated::types::Header;
 use ilium_plugin_api::generated::types::Outcome;
+
+use super::env::{completion_event, ImportEnv};
+use crate::runtime::pending_events::EventSink;
 
 /// Longest URL, in bytes.
 const MAX_URL_BYTES: usize = 8 * 1024;
@@ -37,22 +50,30 @@ const MAX_CHUNK_BYTES: u32 = 64 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 /// How long `take_response` waits for an in-flight request before reporting nothing.
 const TAKE_RESPONSE_PATIENCE: Duration = Duration::from_secs(2);
+/// How often a blocked socket read looks at the cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(100);
+/// A stream worker pauses reading while this many events wait for the plugin, so a slow plugin
+/// slows the socket down instead of losing chunks.
+const STREAM_BACKLOG_EVENTS: usize = 1_024;
 /// Request headers a plugin may not set (SEC-079).
-const FORBIDDEN_HEADERS: [&str; 5] = ["host", "content-length", "connection", "transfer-encoding", "upgrade"];
+const FORBIDDEN_HEADERS: [&str; 5] = [
+    "host",
+    "content-length",
+    "connection",
+    "transfer-encoding",
+    "upgrade",
+];
 
 /// Completion slot shared between a request thread and `take_response`.
 type ResponseSlot = Arc<(Mutex<Option<Result<HttpResponse, PluginError>>>, Condvar)>;
 
-#[derive(Default)]
-struct HttpState {
-    next_id: u64,
-    requests: HashMap<u64, ResponseSlot>,
-    streams: HashSet<u64>,
-}
-
-thread_local! {
-    /// Per-thread because `HttpImport` is a stateless handle.
-    static HTTP_STATE: RefCell<HttpState> = RefCell::new(HttpState::default());
+/// What the import tells the worker of one request or stream.
+#[derive(Debug, Default)]
+struct WorkerControl {
+    /// Set when the plugin closed the stream or the import dropped.
+    cancel: AtomicBool,
+    /// Set by the worker once it queued its last event.
+    done: AtomicBool,
 }
 
 fn error(code: ErrorCode, message: &str) -> PluginError {
@@ -74,7 +95,10 @@ struct ParsedUrl {
 impl ParsedUrl {
     /// True for the loopback hosts that may use plain `http` (SEC-077).
     fn is_loopback(&self) -> bool {
-        matches!(self.host.as_str(), "127.0.0.1" | "localhost" | "[::1]" | "::1")
+        matches!(
+            self.host.as_str(),
+            "127.0.0.1" | "localhost" | "[::1]" | "::1"
+        )
     }
 }
 
@@ -84,10 +108,15 @@ fn parse_url(url: &str, allowed_schemes: &[&str]) -> Result<ParsedUrl, PluginErr
     if url.is_empty() || url.len() > MAX_URL_BYTES {
         return Err(bad("url must be 1 to 8192 bytes"));
     }
-    if url.chars().any(|character| character.is_whitespace() || character.is_control()) {
+    if url
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
         return Err(bad("url holds whitespace or control characters"));
     }
-    let (scheme, rest) = url.split_once("://").ok_or_else(|| bad("url has no scheme"))?;
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| bad("url has no scheme"))?;
     let scheme = scheme.to_ascii_lowercase();
     if !allowed_schemes.contains(&scheme.as_str()) {
         return Err(bad("url scheme is not allowed here"));
@@ -100,10 +129,16 @@ fn parse_url(url: &str, allowed_schemes: &[&str]) -> Result<ParsedUrl, PluginErr
     if authority.is_empty() || authority.contains('@') {
         return Err(bad("url host is missing or carries credentials"));
     }
-    let default_port = if scheme == "https" || scheme == "wss" { 443 } else { 80 };
+    let default_port = if scheme == "https" || scheme == "wss" {
+        443
+    } else {
+        80
+    };
     let (host, port) = match authority.rsplit_once(':') {
         Some((host, port)) if !port.contains(']') => {
-            let port = port.parse::<u16>().map_err(|_| bad("url port is invalid"))?;
+            let port = port
+                .parse::<u16>()
+                .map_err(|_| bad("url port is invalid"))?;
             (host, port)
         }
         _ => (authority, default_port),
@@ -119,89 +154,90 @@ fn parse_url(url: &str, allowed_schemes: &[&str]) -> Result<ParsedUrl, PluginErr
     })
 }
 
-/// Checks the request shape and destination; returns the parsed URL.
-///
-/// Grants are not visible to this stateless handle, so only loopback destinations are
-/// reachable; every other destination is `not-permitted` until the kernel injects grants.
-fn check_request(request: &HttpRequest) -> Result<ParsedUrl, PluginError> {
+/// The grant string that names a destination: `http:<host>` on the default port of the scheme,
+/// `http:<host>:<port>` otherwise.
+fn grant_of(parsed: &ParsedUrl) -> String {
+    let default_port = if parsed.scheme == "https" { 443 } else { 80 };
+    if parsed.port == default_port {
+        format!("http:{}", parsed.host)
+    } else {
+        format!("http:{}:{}", parsed.host, parsed.port)
+    }
+}
+
+/// Checks the request shape and destination; returns the parsed URL. The destination must be
+/// covered by one of the plugin's `http:` grants.
+fn check_request(request: &HttpRequest, env: &ImportEnv) -> Result<ParsedUrl, PluginError> {
     let parsed = parse_url(&request.url, &["http", "https"])?;
     if request.headers.len() > MAX_HEADERS {
         return Err(error(ErrorCode::InvalidArgument, "at most 64 headers"));
     }
-    let forbidden = request
-        .headers
-        .iter()
-        .any(|header: &Header| FORBIDDEN_HEADERS.contains(&header.name.to_ascii_lowercase().as_str()));
+    let forbidden = request.headers.iter().any(|header: &Header| {
+        FORBIDDEN_HEADERS.contains(&header.name.to_ascii_lowercase().as_str())
+    });
     if forbidden {
-        return Err(error(ErrorCode::InvalidArgument, "header name is not settable by a plugin"));
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "header name is not settable by a plugin",
+        ));
     }
-    if request.body.as_ref().is_some_and(|body| body.len() > MAX_BODY_BYTES) {
-        return Err(error(ErrorCode::InvalidArgument, "request body exceeds 8 MiB"));
+    if request
+        .body
+        .as_ref()
+        .is_some_and(|body| body.len() > MAX_BODY_BYTES)
+    {
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "request body exceeds 8 MiB",
+        ));
     }
     if !(MIN_TIMEOUT_MILLIS..=MAX_TIMEOUT_MILLIS).contains(&request.timeout_millis) {
-        return Err(error(ErrorCode::InvalidArgument, "timeout must be 1 to 300000 ms"));
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "timeout must be 1 to 300000 ms",
+        ));
     }
     if request.method.is_empty() || !request.method.chars().all(|c| c.is_ascii_alphabetic()) {
-        return Err(error(ErrorCode::InvalidArgument, "method must be an HTTP token"));
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "method must be an HTTP token",
+        ));
     }
     if parsed.scheme == "http" && !parsed.is_loopback() {
-        return Err(error(ErrorCode::InvalidArgument, "plain http is only allowed to loopback"));
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "plain http is only allowed to loopback",
+        ));
     }
-    if !parsed.is_loopback() {
-        return Err(error(ErrorCode::NotPermitted, "no http grant covers this host"));
+    if !env.holds(&grant_of(&parsed)) {
+        return Err(error(
+            ErrorCode::NotPermitted,
+            "no http grant covers this host",
+        ));
     }
     Ok(parsed)
 }
 
-/// Performs one plain-HTTP/1.1 exchange with `Connection: close`.
-fn perform(parsed: &ParsedUrl, request: &HttpRequest) -> Result<HttpResponse, PluginError> {
-    let timeout = Duration::from_millis(u64::from(request.timeout_millis));
-    let deadline = Instant::now() + timeout;
-    if parsed.scheme != "http" {
-        return Err(error(ErrorCode::Unsupported, "https transport is provided by the kernel"));
-    }
-    let address = (parsed.host.trim_matches(['[', ']']), parsed.port)
-        .to_socket_addrs()
-        .map_err(|_| error(ErrorCode::Network, "host did not resolve"))?
-        .next()
-        .ok_or_else(|| error(ErrorCode::Network, "host did not resolve"))?;
-    let mut stream = TcpStream::connect_timeout(&address, timeout)
-        .map_err(|_| error(ErrorCode::Network, "connection failed"))?;
-    let remaining = |deadline: Instant| deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
-    let io_error = |failure: std::io::Error| match failure.kind() {
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => error(ErrorCode::TimedOut, "request timed out"),
-        _ => error(ErrorCode::Network, "connection failed"),
-    };
-    stream.set_write_timeout(Some(remaining(deadline))).map_err(io_error)?;
-    let body = request.body.clone().unwrap_or_default();
-    let mut head = format!(
-        "{} {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\nContent-Length: {}\r\n",
-        request.method.to_ascii_uppercase(),
-        parsed.path_and_query,
-        parsed.host,
-        parsed.port,
-        body.len()
-    );
-    for header in &request.headers {
-        head.push_str(&format!("{}: {}\r\n", header.name, header.value));
-    }
-    head.push_str("\r\n");
-    stream.write_all(head.as_bytes()).map_err(io_error)?;
-    stream.write_all(&body).map_err(io_error)?;
-    stream.set_read_timeout(Some(remaining(deadline))).map_err(io_error)?;
-    let mut raw = Vec::new();
-    stream
-        .take(MAX_RESPONSE_BYTES)
-        .read_to_end(&mut raw)
-        .map_err(io_error)?;
-    parse_response(&raw)
+/// The status line, headers and body reader of an answered request.
+struct Opened {
+    status: u16,
+    headers: Vec<Header>,
+    body: Box<dyn Read + Send>,
 }
 
-/// Parses a raw HTTP/1.1 response (identity or `Content-Length` bodies).
-fn parse_response(raw: &[u8]) -> Result<HttpResponse, PluginError> {
+fn io_failure(failure: &std::io::Error) -> PluginError {
+    match failure.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            error(ErrorCode::TimedOut, "request timed out")
+        }
+        _ => error(ErrorCode::Network, "connection failed"),
+    }
+}
+
+/// Splits a response head into its status and headers.
+fn parse_head(head: &[u8]) -> Result<(u16, Vec<Header>), PluginError> {
     let malformed = || error(ErrorCode::Network, "malformed http response");
-    let split = raw.windows(4).position(|window| window == b"\r\n\r\n").ok_or_else(malformed)?;
-    let head = std::str::from_utf8(&raw[..split]).map_err(|_| malformed())?;
+    let head = std::str::from_utf8(head).map_err(|_| malformed())?;
     let mut lines = head.split("\r\n");
     let status = lines
         .next()
@@ -215,98 +251,563 @@ fn parse_response(raw: &[u8]) -> Result<HttpResponse, PluginError> {
             value: value.trim().to_owned(),
         })
         .collect();
-    let mut body = raw[split + 4..].to_vec();
-    let declared = headers
+    Ok((status, headers))
+}
+
+/// A body reader that gives up when the cancel flag is set and bounds the whole exchange by a
+/// deadline; the socket reads in short slices so it notices both.
+struct SocketBody {
+    stream: TcpStream,
+    leftover: std::io::Cursor<Vec<u8>>,
+    control: Arc<WorkerControl>,
+    deadline: Option<Instant>,
+}
+
+impl Read for SocketBody {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let from_leftover = self.leftover.read(buffer)?;
+        if from_leftover > 0 {
+            return Ok(from_leftover);
+        }
+        loop {
+            if self.control.cancel.load(Ordering::Acquire) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "cancelled",
+                ));
+            }
+            if self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "timed out",
+                ));
+            }
+            match self.stream.read(buffer) {
+                Err(failure)
+                    if matches!(
+                        failure.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                other => return other,
+            }
+        }
+    }
+}
+
+/// Speaks plain HTTP/1.1 (`Connection: close`) to a loopback server and returns once the response
+/// head has arrived.
+fn open_plain(
+    parsed: &ParsedUrl,
+    request: &HttpRequest,
+    control: &Arc<WorkerControl>,
+    whole_exchange_deadline: bool,
+) -> Result<Opened, PluginError> {
+    let timeout = Duration::from_millis(u64::from(request.timeout_millis));
+    let deadline = Instant::now() + timeout;
+    let address = (parsed.host.trim_matches(['[', ']']), parsed.port)
+        .to_socket_addrs()
+        .map_err(|_| error(ErrorCode::Network, "host did not resolve"))?
+        .next()
+        .ok_or_else(|| error(ErrorCode::Network, "host did not resolve"))?;
+    let mut stream = TcpStream::connect_timeout(&address, timeout)
+        .map_err(|_| error(ErrorCode::Network, "connection failed"))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|failure| io_failure(&failure))?;
+    let body = request.body.clone().unwrap_or_default();
+    let mut head = format!(
+        "{} {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\nContent-Length: {}\r\n",
+        request.method.to_ascii_uppercase(),
+        parsed.path_and_query,
+        parsed.host,
+        parsed.port,
+        body.len()
+    );
+    for header in &request.headers {
+        head.push_str(&format!("{}: {}\r\n", header.name, header.value));
+    }
+    head.push_str("\r\n");
+    stream
+        .write_all(head.as_bytes())
+        .and_then(|()| stream.write_all(&body))
+        .map_err(|failure| io_failure(&failure))?;
+    stream
+        .set_read_timeout(Some(CANCEL_POLL))
+        .map_err(|failure| io_failure(&failure))?;
+    let mut reader = SocketBody {
+        stream,
+        leftover: std::io::Cursor::new(Vec::new()),
+        control: Arc::clone(control),
+        deadline: Some(deadline),
+    };
+    let mut raw = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let split = loop {
+        if let Some(position) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+        if raw.len() > 64 * 1024 {
+            return Err(error(ErrorCode::Network, "malformed http response"));
+        }
+        match reader.read(&mut chunk) {
+            Ok(0) => return Err(error(ErrorCode::Network, "malformed http response")),
+            Ok(count) => raw.extend_from_slice(&chunk[..count]),
+            Err(failure) => return Err(io_failure(&failure)),
+        }
+    };
+    let (status, headers) = parse_head(&raw[..split])?;
+    reader.leftover = std::io::Cursor::new(raw[split + 4..].to_vec());
+    if !whole_exchange_deadline {
+        reader.deadline = None;
+    }
+    Ok(Opened {
+        status,
+        headers,
+        body: Box::new(reader),
+    })
+}
+
+/// Speaks `https` through `ureq` and returns once the response head has arrived. Redirects are
+/// not followed and an HTTP error status is a normal response.
+fn open_secure(
+    request: &HttpRequest,
+    whole_exchange_deadline: bool,
+) -> Result<Opened, PluginError> {
+    let timeout = Duration::from_millis(u64::from(request.timeout_millis));
+    let mut configuration = ureq::Agent::config_builder();
+    configuration = configuration
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .timeout_connect(Some(timeout));
+    if whole_exchange_deadline {
+        configuration = configuration.timeout_global(Some(timeout));
+    }
+    let agent = ureq::Agent::new_with_config(configuration.build());
+    let mut builder = ureq::http::Request::builder()
+        .method(request.method.to_ascii_uppercase().as_str())
+        .uri(request.url.as_str());
+    for header in &request.headers {
+        builder = builder.header(header.name.as_str(), header.value.as_str());
+    }
+    let invalid_request = |_| error(ErrorCode::InvalidArgument, "the request cannot be built");
+    let outcome = match request.body.as_deref().filter(|body| !body.is_empty()) {
+        None => agent.run(builder.body(()).map_err(invalid_request)?),
+        Some(body) => agent.run(builder.body(body.to_vec()).map_err(invalid_request)?),
+    };
+    let response = outcome.map_err(|failure| match failure {
+        ureq::Error::Timeout(_) => error(ErrorCode::TimedOut, "request timed out"),
+        _ => error(ErrorCode::Network, "connection failed"),
+    })?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| Header {
+            name: name.as_str().to_owned(),
+            value: String::from_utf8_lossy(value.as_bytes()).into_owned(),
+        })
+        .collect();
+    let reader = response.into_body().into_reader();
+    Ok(Opened {
+        status,
+        headers,
+        body: Box::new(reader),
+    })
+}
+
+/// Opens a request on the transport its scheme needs.
+fn open_request(
+    parsed: &ParsedUrl,
+    request: &HttpRequest,
+    control: &Arc<WorkerControl>,
+    whole_exchange_deadline: bool,
+) -> Result<Opened, PluginError> {
+    if parsed.scheme == "https" {
+        open_secure(request, whole_exchange_deadline)
+    } else {
+        open_plain(parsed, request, control, whole_exchange_deadline)
+    }
+}
+
+/// Performs one exchange and reads the whole body (at most 8 MiB).
+fn perform(
+    parsed: &ParsedUrl,
+    request: &HttpRequest,
+    control: &Arc<WorkerControl>,
+) -> Result<HttpResponse, PluginError> {
+    let opened = open_request(parsed, request, control, true)?;
+    let mut body = Vec::new();
+    opened
+        .body
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut body)
+        .map_err(|failure| io_failure(&failure))?;
+    let declared = opened
+        .headers
         .iter()
         .find(|header| header.name.eq_ignore_ascii_case("content-length"))
         .and_then(|header| header.value.parse::<usize>().ok());
     if let Some(length) = declared {
         body.truncate(length);
     }
-    Ok(HttpResponse { status, headers, body })
+    Ok(HttpResponse {
+        status: opened.status,
+        headers: opened.headers,
+        body,
+    })
 }
 
-/// Host side of the `http` interface.
-#[derive(Debug)]
-pub struct HttpImport;
+/// Cuts a byte stream into the chunks one framing delivers.
+struct Framer {
+    framing: StreamFraming,
+    max_chunk_bytes: usize,
+    pending: Vec<u8>,
+    /// `data:` lines of the server-sent event being read.
+    event_data: Vec<Vec<u8>>,
+}
 
-/// Waits up to `budget` for a fetch to finish and maps it to its completion outcome (`ok` for
-/// any HTTP status, `failed(code)` for a transport failure); `None` when the request is unknown
-/// here or still running after the budget. The response stays available for `take-response`.
-pub fn await_outcome(request: RequestId, budget: Duration) -> Option<Outcome> {
-    let slot = HTTP_STATE.with(|state| state.borrow().requests.get(&request.0).cloned())?;
-    let (lock, ready) = &*slot;
-    let guard = lock.lock().ok()?;
-    let (guard, _) = ready
-        .wait_timeout_while(guard, budget, |held| held.is_none())
-        .ok()?;
-    match guard.as_ref()? {
-        Ok(_) => Some(Outcome::Ok),
-        Err(failure) => Some(Outcome::Failed(failure.clone())),
+impl Framer {
+    fn new(framing: StreamFraming, max_chunk_bytes: u32) -> Self {
+        Self {
+            framing,
+            max_chunk_bytes: max_chunk_bytes as usize,
+            pending: Vec::new(),
+            event_data: Vec::new(),
+        }
+    }
+
+    fn split_long(&self, record: Vec<u8>, out: &mut Vec<Vec<u8>>) {
+        if record.len() <= self.max_chunk_bytes {
+            out.push(record);
+        } else {
+            out.extend(record.chunks(self.max_chunk_bytes).map(<[u8]>::to_vec));
+        }
+    }
+
+    /// Feeds bytes that arrived; returns the chunks they complete.
+    fn push(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        if bytes.is_empty() {
+            return out;
+        }
+        if matches!(self.framing, StreamFraming::Raw) {
+            self.split_long(bytes.to_vec(), &mut out);
+            return out;
+        }
+        self.pending.extend_from_slice(bytes);
+        while let Some(position) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let mut line: Vec<u8> = self.pending.drain(..=position).collect();
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            self.line(line, &mut out);
+        }
+        out
+    }
+
+    /// Ends the stream; returns what is left over.
+    fn finish(&mut self) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        if !self.pending.is_empty() {
+            let mut line = std::mem::take(&mut self.pending);
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            self.line(line, &mut out);
+        }
+        if matches!(self.framing, StreamFraming::ServerSentEvents) && !self.event_data.is_empty() {
+            let record = self.event_data.drain(..).collect::<Vec<_>>().join(&b'\n');
+            self.split_long(record, &mut out);
+        }
+        out
+    }
+
+    fn line(&mut self, line: Vec<u8>, out: &mut Vec<Vec<u8>>) {
+        match self.framing {
+            StreamFraming::Lines => self.split_long(line, out),
+            StreamFraming::Ndjson => {
+                if !line.iter().all(u8::is_ascii_whitespace) {
+                    self.split_long(line, out);
+                }
+            }
+            StreamFraming::ServerSentEvents => {
+                if line.is_empty() {
+                    if !self.event_data.is_empty() {
+                        let record = self.event_data.drain(..).collect::<Vec<_>>().join(&b'\n');
+                        self.split_long(record, out);
+                    }
+                } else if let Some(data) = line.strip_prefix(b"data:") {
+                    self.event_data
+                        .push(data.strip_prefix(b" ").unwrap_or(data).to_vec());
+                }
+            }
+            StreamFraming::Raw => {}
+        }
+    }
+}
+
+/// One open stream of the plugin.
+#[derive(Debug)]
+struct StreamEntry {
+    control: Arc<WorkerControl>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl StreamEntry {
+    fn is_open(&self) -> bool {
+        !self.control.done.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for StreamEntry {
+    fn drop(&mut self) {
+        self.control.cancel.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// The worker of one stream: connect, deliver the chunks, close.
+fn run_stream(
+    parsed: ParsedUrl,
+    request: StreamRequest,
+    stream: StreamId,
+    control: Arc<WorkerControl>,
+    sink: EventSink,
+) {
+    let closed = |outcome: StreamOutcome| {
+        sink.send(Event::HttpStreamClosed(HttpStreamClosedEvent {
+            stream,
+            outcome,
+        }));
+    };
+    let opened = match open_request(&parsed, &request.request, &control, false) {
+        Ok(opened) => opened,
+        Err(failure) => {
+            if !control.cancel.load(Ordering::Acquire) {
+                closed(StreamOutcome::Failed(failure));
+            }
+            control.done.store(true, Ordering::Release);
+            return;
+        }
+    };
+    let Opened {
+        status,
+        headers,
+        mut body,
+    } = opened;
+    let mut framer = Framer::new(request.framing, request.max_chunk_bytes);
+    let mut first = Some((status, headers));
+    let send_chunk = |chunk: Vec<u8>, first: &mut Option<(u16, Vec<Header>)>| {
+        let (status, headers) = match first.take() {
+            Some((status, headers)) => (Some(status), Some(headers)),
+            None => (None, None),
+        };
+        while sink.backlog() >= STREAM_BACKLOG_EVENTS && !control.cancel.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        sink.send(Event::HttpStreamData(HttpStreamDataEvent {
+            stream,
+            status,
+            headers,
+            chunk,
+        }));
+    };
+    let mut buffer = vec![0u8; 16 * 1024];
+    let outcome = loop {
+        if control.cancel.load(Ordering::Acquire) {
+            break StreamOutcome::Cancelled;
+        }
+        match body.read(&mut buffer) {
+            Ok(0) => {
+                for chunk in framer.finish() {
+                    send_chunk(chunk, &mut first);
+                }
+                // A stream with no body still reports its status and headers once.
+                if first.is_some() {
+                    send_chunk(Vec::new(), &mut first);
+                }
+                break StreamOutcome::Ended;
+            }
+            Ok(count) => {
+                let chunks = framer.push(&buffer[..count]);
+                for chunk in chunks {
+                    send_chunk(chunk, &mut first);
+                }
+            }
+            Err(failure) if failure.kind() == std::io::ErrorKind::Interrupted => {
+                break StreamOutcome::Cancelled;
+            }
+            Err(failure) => break StreamOutcome::Failed(io_failure(&failure)),
+        }
+    };
+    // A cancelled stream was closed by the plugin (or its instance ended); nobody waits for it.
+    if !matches!(outcome, StreamOutcome::Cancelled) {
+        closed(outcome);
+    }
+    control.done.store(true, Ordering::Release);
+}
+
+/// Host side of the `http` interface of one plugin instance.
+#[derive(Debug)]
+pub struct HttpImport {
+    env: ImportEnv,
+    requests: HashMap<u64, ResponseSlot>,
+    request_controls: Vec<Arc<WorkerControl>>,
+    streams: HashMap<u64, StreamEntry>,
+    next_stream: u64,
+}
+
+impl Default for HttpImport {
+    fn default() -> Self {
+        Self::new(ImportEnv::unrestricted())
+    }
+}
+
+impl Drop for HttpImport {
+    fn drop(&mut self) {
+        for control in &self.request_controls {
+            control.cancel.store(true, Ordering::Release);
+        }
+        // Stream entries cancel and join their workers when dropped.
+    }
+}
+
+impl HttpImport {
+    /// The import of the instance `env` describes.
+    pub fn new(env: ImportEnv) -> Self {
+        Self {
+            env,
+            requests: HashMap::new(),
+            request_controls: Vec::new(),
+            streams: HashMap::new(),
+            next_stream: 0,
+        }
+    }
+
+    /// How many streams are open (not yet ended or closed).
+    pub fn open_streams(&self) -> usize {
+        self.streams
+            .values()
+            .filter(|entry| entry.is_open())
+            .count()
+    }
+
+    /// Waits up to `budget` for a fetch to finish and maps it to its completion outcome (`ok` for
+    /// any HTTP status, `failed(code)` for a transport failure); `None` when the request is
+    /// unknown here or still running after the budget. The response stays available for
+    /// `take-response`.
+    pub fn await_outcome(&self, request: RequestId, budget: Duration) -> Option<Outcome> {
+        let slot = self.requests.get(&request.0).cloned()?;
+        let (lock, ready) = &*slot;
+        let guard = lock.lock().ok()?;
+        let (guard, _) = ready
+            .wait_timeout_while(guard, budget, |held| held.is_none())
+            .ok()?;
+        match guard.as_ref()? {
+            Ok(_) => Some(Outcome::Ok),
+            Err(failure) => Some(Outcome::Failed(failure.clone())),
+        }
     }
 }
 
 impl HostHttp for HttpImport {
     fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {
-        let parsed = check_request(&request)?;
+        let parsed = check_request(&request, &self.env)?;
+        if self.requests.len() >= PENDING_REQUEST_LIMIT {
+            return Err(error(
+                ErrorCode::Busy,
+                "64 http requests are already pending",
+            ));
+        }
+        let id = self.env.next_request();
         let slot: ResponseSlot = Arc::new((Mutex::new(None), Condvar::new()));
-        let id = HTTP_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if state.requests.len() >= PENDING_REQUEST_LIMIT {
-                return Err(error(ErrorCode::Busy, "64 http requests are already pending"));
-            }
-            state.next_id += 1;
-            let id = state.next_id;
-            state.requests.insert(id, slot.clone());
-            Ok(id)
-        })?;
-        let worker_slot = slot;
-        // The worker owns only its slot; it ends by itself when the exchange finishes or times out.
+        self.requests.insert(id.0, Arc::clone(&slot));
+        let control = Arc::new(WorkerControl::default());
+        self.request_controls
+            .retain(|held| !held.done.load(Ordering::Acquire));
+        self.request_controls.push(Arc::clone(&control));
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        // The worker owns its slot and control; it ends by itself when the exchange finishes,
+        // times out or is cancelled.
         thread::spawn(move || {
-            let outcome = perform(&parsed, &request);
-            let (lock, ready) = &*worker_slot;
+            let _guard = guard;
+            let outcome = perform(&parsed, &request, &control);
+            let completion = match &outcome {
+                Ok(_) => Outcome::Ok,
+                Err(failure) => Outcome::Failed(failure.clone()),
+            };
+            let (lock, ready) = &*slot;
             if let Ok(mut held) = lock.lock() {
                 *held = Some(outcome);
                 ready.notify_all();
             }
+            control.done.store(true, Ordering::Release);
+            if !control.cancel.load(Ordering::Acquire) {
+                sink.send(completion_event(id, completion));
+            }
         });
-        Ok(RequestId(id))
+        Ok(id)
     }
 
     /// A request that is still in flight is waited for up to two seconds, then reported as not ready.
     fn take_response(&mut self, request: RequestId) -> Option<HttpResponse> {
-        let slot = HTTP_STATE.with(|state| state.borrow().requests.get(&request.0).cloned())?;
+        let slot = self.requests.get(&request.0).cloned()?;
         let (lock, ready) = &*slot;
         let guard = lock.lock().ok()?;
         let (mut guard, _) = ready
             .wait_timeout_while(guard, TAKE_RESPONSE_PATIENCE, |held| held.is_none())
             .ok()?;
         let outcome = guard.take()?;
-        HTTP_STATE.with(|state| state.borrow_mut().requests.remove(&request.0));
+        drop(guard);
+        self.requests.remove(&request.0);
         outcome.ok()
     }
 
     fn open_stream(&mut self, request: StreamRequest) -> Result<StreamId, PluginError> {
         if request.max_chunk_bytes == 0 || request.max_chunk_bytes > MAX_CHUNK_BYTES {
-            return Err(error(ErrorCode::InvalidArgument, "max chunk must be 1 to 65536 bytes"));
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "max chunk must be 1 to 65536 bytes",
+            ));
         }
-        check_request(&request.request)?;
-        HTTP_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if state.streams.len() >= STREAMS_PER_PLUGIN_LIMIT {
-                return Err(error(ErrorCode::QuotaExceeded, "4 streams are already open"));
-            }
-            state.next_id += 1;
-            let id = state.next_id;
-            state.streams.insert(id);
-            Ok(StreamId(id))
-        })
+        let parsed = check_request(&request.request, &self.env)?;
+        if self.open_streams() >= STREAMS_PER_PLUGIN_LIMIT {
+            return Err(error(
+                ErrorCode::QuotaExceeded,
+                "4 streams are already open",
+            ));
+        }
+        self.streams.retain(|_, entry| entry.is_open());
+        self.next_stream += 1;
+        let stream = StreamId(self.next_stream);
+        let control = Arc::new(WorkerControl::default());
+        let worker_control = Arc::clone(&control);
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        let worker = thread::spawn(move || {
+            let _guard = guard;
+            run_stream(parsed, request, stream, worker_control, sink);
+        });
+        self.streams.insert(
+            stream.0,
+            StreamEntry {
+                control,
+                worker: Some(worker),
+            },
+        );
+        Ok(stream)
     }
 
     fn close_stream(&mut self, stream: StreamId) {
-        HTTP_STATE.with(|state| {
-            state.borrow_mut().streams.remove(&stream.0);
-        });
+        // Dropping the entry cancels the worker and waits for it; an unknown id is ignored.
+        self.streams.remove(&stream.0);
     }
 
     /// The `websocket` feature is unstable and off unless the kernel enables it.
@@ -316,11 +817,17 @@ impl HostHttp for HttpImport {
         _protocols: Vec<String>,
     ) -> Result<StreamId, PluginError> {
         parse_url(&url, &["ws", "wss"])?;
-        Err(error(ErrorCode::Unsupported, "feature websocket is not enabled"))
+        Err(error(
+            ErrorCode::Unsupported,
+            "feature websocket is not enabled",
+        ))
     }
 
     fn send_websocket(&mut self, stream: StreamId, _text: String) -> Result<(), PluginError> {
-        let is_open = HTTP_STATE.with(|state| state.borrow().streams.contains(&stream.0));
+        let is_open = self
+            .streams
+            .get(&stream.0)
+            .is_some_and(StreamEntry::is_open);
         if is_open {
             Err(error(ErrorCode::Unsupported, "stream is not a websocket"))
         } else {

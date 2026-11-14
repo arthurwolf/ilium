@@ -863,3 +863,15 @@ A provider prompt cache expires when an agent waits too long between two request
 
 - **[PRM-516]** The system must derive the wait evidence of a provider cache only from the verified transcript of the live agent process, without keeping prompts or command bodies, and must discard it when the identity of that process changes.
 - **[PRM-517]** A cache refresh request must produce no output tokens and must reuse the account, the endpoint, the headers and the exact cached prefix of the original request. The system must send it only when the original request is known to have created a cache, must never store, log or show the captured request, and must drop the capture when the invocation, the account, the endpoint, the cache prefix or the transport changes.
+
+### How the plugin builds a refresh request
+
+The plugin builds the refresh from a capture the agent transport hands it, and sends nothing itself:
+
+1. A capture holds the endpoint, the headers, the request body, the time the cache is known to expire, the shortest verified cache lifetime and the size of the cached prefix observed before. It never travels on a service, a topic or a message, and it is never logged; the text the plugin writes about a capture names no endpoint, header or body.
+2. The plugin refuses to prepare a refresh while another request on the same capture is in flight (`busy`), after the cache expired (`expired`), when no cached prefix was observed or no lifetime is known, and when the original body asked for extended thinking, structured output, a forced tool or compaction (`unsupported`).
+3. A prepared refresh keeps every top-level field of the body with its original order, escapes and white space, drops `stream` and `max_tokens`, and ends with `"max_tokens":0`. It keeps every header except the framing ones (`content-length`, `host`, `transfer-encoding`, `connection`), which the transport regenerates.
+4. The transport sends the prepared request and gives the status and the answer back. A status outside 200 to 299 is `rejected`, an answer over 1 MiB or without usage figures is `unknown`, a cache read of fewer tokens than observed before is `cache-miss`, and a read of at least that many is `cache-read`.
+5. Only a `cache-read` extends the expiry, from the start of the request and not from the end of the answer.
+
+When the cost plugin is disabled, no refresh request is prepared.

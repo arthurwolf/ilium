@@ -11,6 +11,8 @@ publish = false
 [dependencies]
 subtle = "2.6.1"
 unicode-normalization = "0.1"
+# https for `ilium:host/http` (rustls); redirects and body limits are the host's own.
+ureq = "3.2.0"
 serde_json_canonicalizer = "0.3.2"
 ed25519-dalek = "2"
 base64 = "0.22.1"

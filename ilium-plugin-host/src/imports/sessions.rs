@@ -7,8 +7,10 @@
 use ilium_plugin_api::generated::host::sessions::{CrossRequest, HostSessions, LiveSession};
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use super::env::RequestIds;
 
 /// The session name a bare `ilium` owns.
 const DEFAULT_SESSION_NAME: &str = "default";
@@ -16,14 +18,35 @@ const DEFAULT_SESSION_NAME: &str = "default";
 /// Cross-session commands the host accepts. A command outside this set is not declared.
 const CROSS_SESSION_COMMANDS: &[&str] = &["pane-count", "list-panes", "focus-pane", "open-pane"];
 
-/// Host side of the `sessions` interface.
-#[derive(Debug)]
-pub struct SessionsImport;
-
-thread_local! {
-    static NEXT_REQUEST: Cell<u64> = const { Cell::new(1) };
+/// Host side of the `sessions` interface of one plugin instance. Its request ids come from the
+/// runtime's allocator and its replies are its own. Cloning shares the replies (a test harness
+/// keeps one instance and hands out clones).
+#[derive(Debug, Clone, Default)]
+pub struct SessionsImport {
+    ids: RequestIds,
     /// Replies that arrived for accepted requests; empty until a target answers.
-    static REPLIES: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
+    replies: Arc<Mutex<HashMap<u64, String>>>,
+}
+
+impl SessionsImport {
+    /// An import drawing request ids from `ids`, the allocator of the runtime.
+    pub fn new(ids: RequestIds) -> Self {
+        Self {
+            ids,
+            replies: Arc::default(),
+        }
+    }
+
+    fn replies(&self) -> MutexGuard<'_, HashMap<u64, String>> {
+        // Every writer does one insert or remove, so the map is consistent after a panic.
+        self.replies.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Records the reply of the target session to an accepted request; the plugin fetches it
+    /// once with `take-reply`. The layer that owns IPC calls this when the target answers.
+    pub fn deliver_reply(&self, request: RequestId, reply_json: String) {
+        self.replies().insert(request.0, reply_json);
+    }
 }
 
 fn error(code: ErrorCode, message: &str) -> PluginError {
@@ -66,16 +89,11 @@ impl HostSessions for SessionsImport {
                 "arguments-json is not valid JSON",
             ));
         }
-        let id = NEXT_REQUEST.with(|next| {
-            let id = next.get();
-            next.set(id + 1);
-            id
-        });
-        Ok(RequestId(id))
+        Ok(self.ids.next_request())
     }
 
     fn take_reply(&mut self, request: RequestId) -> Option<String> {
-        REPLIES.with(|replies| replies.borrow_mut().remove(&request.0))
+        self.replies().remove(&request.0)
     }
 }
 
@@ -107,7 +125,7 @@ mod tests {
     /// REQ: CAP-018
     #[test]
     fn list_live_marks_exactly_one_entry_as_the_calling_session() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let live: Vec<LiveSession> = sessions.list_live();
         let self_count = live.iter().filter(|session| session.is_self).count();
         assert_eq!(
@@ -119,7 +137,7 @@ mod tests {
     /// REQ: CAP-018
     #[test]
     fn list_live_entries_have_non_empty_name_project_and_socket_id() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         for session in sessions.list_live() {
             assert!(
                 !session.name.is_empty(),
@@ -139,7 +157,7 @@ mod tests {
     /// REQ: EVT-013
     #[test]
     fn send_refuses_an_unknown_session_name_with_not_found() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("no-such-session-name", "pane-count", "{}");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -150,7 +168,7 @@ mod tests {
     /// REQ: EVT-013
     #[test]
     fn send_refuses_an_empty_session_name_with_not_found() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("", "pane-count", "{}");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -161,7 +179,7 @@ mod tests {
     /// REQ: ABI-009
     #[test]
     fn send_refuses_a_command_the_plugin_did_not_declare_with_not_permitted() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("default", "no-such-declared-command", "{}");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -172,7 +190,7 @@ mod tests {
     /// REQ: ABI-009
     #[test]
     fn send_refuses_an_empty_command_id_with_not_permitted() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("default", "", "{}");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -183,7 +201,7 @@ mod tests {
     /// REQ: ABI-009
     #[test]
     fn send_refuses_arguments_that_are_not_json_with_invalid_argument() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("default", "pane-count", "{not json");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -194,7 +212,7 @@ mod tests {
     /// REQ: ABI-009
     #[test]
     fn send_refuses_empty_arguments_text_with_invalid_argument() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("default", "pane-count", "");
         assert_eq!(
             expect_send_error(sessions.send(request)),
@@ -205,7 +223,7 @@ mod tests {
     /// REQ: RQO-002
     #[test]
     fn send_of_a_valid_request_returns_a_request_id_that_take_reply_reports_as_pending() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let request = cross_request("default", "pane-count", "{}");
         let request_id = match sessions.send(request) {
             Ok(request_id) => request_id,
@@ -223,7 +241,7 @@ mod tests {
     /// REQ: RQO-002
     #[test]
     fn each_send_gets_its_own_request_id() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let first = sessions.send(cross_request("default", "pane-count", "{}"));
         let second = sessions.send(cross_request("default", "pane-count", "{}"));
         match (first, second) {
@@ -242,21 +260,21 @@ mod tests {
     /// REQ: RQO-008
     #[test]
     fn take_reply_for_a_request_that_never_existed_returns_none() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         assert_eq!(sessions.take_reply(RequestId(0)), None);
     }
 
     /// REQ: RQO-008
     #[test]
     fn take_reply_at_the_largest_request_id_returns_none() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         assert_eq!(sessions.take_reply(RequestId(u64::MAX)), None);
     }
 
     /// REQ: RQO-008
     #[test]
     fn repeated_take_reply_of_an_unknown_request_keeps_returning_none() {
-        let mut sessions = SessionsImport;
+        let mut sessions = SessionsImport::default();
         let first = sessions.take_reply(RequestId(7));
         let second = sessions.take_reply(RequestId(7));
         assert_eq!(
@@ -267,5 +285,18 @@ mod tests {
             second, None,
             "a second take must not return a reply that was never there"
         );
+    }
+
+    #[test]
+    fn a_reply_is_taken_once_and_only_by_its_instance() {
+        let mut owner = SessionsImport::default();
+        let mut stranger = SessionsImport::default();
+        let request = owner
+            .send(cross_request("default", "pane-count", "{}"))
+            .expect("accepted");
+        owner.deliver_reply(request, "{\"panes\":3}".to_owned());
+        assert_eq!(stranger.take_reply(request), None);
+        assert_eq!(owner.take_reply(request).as_deref(), Some("{\"panes\":3}"));
+        assert_eq!(owner.take_reply(request), None, "a reply is taken once");
     }
 }

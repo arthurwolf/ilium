@@ -19,8 +19,6 @@ mod agent_delivery;
 mod agent_identity_guard;
 mod agent_prompt;
 mod antigravity_statusline_delivery;
-mod cache_refresh_request;
-mod cache_refresh_transport;
 mod cache_wait_evidence;
 mod cache_wait_observation;
 mod chatroom_router;

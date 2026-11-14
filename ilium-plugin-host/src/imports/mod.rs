@@ -15,6 +15,7 @@ mod codec_image;
 mod codec_text;
 pub mod commands;
 pub mod editor;
+pub mod env;
 pub mod extension_points;
 pub mod extensions;
 pub mod fonts;

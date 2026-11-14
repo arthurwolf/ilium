@@ -17,3 +17,9 @@ Items the tests use that the skeleton lacks. Each is written against the manual;
 - ilium-plugin-testkit: `core_stubs::CoreStub` for `keys-and-help` must list extension points `key-hints`, `help-sources` and service `bindings` (short names, as the test expects); F-010.
 
 - Port status: `src/key_reference.rs` ports the cell-width truncation of `help.rs` (one twin) and the row layout of the paged key panel. Not ported: the `keymap` and `plugins` host imports are not wired (G10), so the keys and plugins panels (`keys_panel`, `plugins_panel`), the shortcut-base rules (`keyboard_rows`, 4 twins), the keyboard lesson (`keyboard_lesson`, 6 twins, G12) and the help dialog (`help_dialog`, 8 twins, G2/G8) have no data to build from. The F1 keybinding stays unhonoured (G1).
+
+## Re-check of the foundation against the tree (2026-11-14): what still blocks the moves
+
+- `help.rs` (`Mode::Help`): `Mode::Help` is used as the generic "any modal" in tests of `keys.rs`, `ui.rs`, `background_composition.rs`, `session_stats_popover.rs`, `app_attention_dialog.rs` and `app.rs`; cutting it needs a plugin `keys` panel with a `ScrollView` of the key sections built from the `keymap` import, plus the F1/`?` chord honoured: `ilium-client/src/plugin_host/keybindings.rs` still has only `chord_key` (no `parse_chord`, no modifiers or F-keys, G1).
+- `settings_help/{catalog,dialog}.rs` and `value_keyboard.rs`: kernel Settings rows and the help rail; need the contributed Settings tab (see the tree gaps).
+- `onboarding/keyboard_ui.rs`: needs G12 (see the settings gaps).

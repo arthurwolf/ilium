@@ -2,9 +2,11 @@
 //! crossing state is exercised on its own; two states stand in for the two processes and the
 //! test moves the messages between them the way the envelope channel does.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use ilium_plugin_api::generated::types::ids::RequestId;
 use ilium_plugin_host::imports::services::{PendingServiceCall, ServiceBrokerState};
 use ilium_plugin_host::imports::topics::Published;
 use ilium_plugin_host::runtime::cross_side::{
@@ -12,11 +14,15 @@ use ilium_plugin_host::runtime::cross_side::{
     REMOTE_CALL_TIMEOUT,
 };
 
+/// Request and call numbers of the test calls. Each test process owns its own counter, and every
+/// call gets a number no other call of the test has.
+static NEXT_TEST_CALL: AtomicU64 = AtomicU64::new(1);
+
 fn call(caller: &str) -> PendingServiceCall {
-    let (request, call) = ServiceBrokerState::fresh_ids();
+    let call = NEXT_TEST_CALL.fetch_add(1, Ordering::Relaxed);
     PendingServiceCall {
         call,
-        request,
+        request: RequestId(call),
         caller: caller.to_owned(),
         service: "ilium.core.fleet/status".to_owned(),
         method: "get".to_owned(),

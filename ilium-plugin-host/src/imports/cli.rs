@@ -12,18 +12,15 @@ use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef, RequestResult};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::backed::ResultQueue;
+use super::env::RequestIds;
 
 /// Largest text one output call accepts, in bytes (api-cli "Output forms").
 const OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 /// Total standard input one invocation may read (api-cli "Standard input").
 const STDIN_TOTAL_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
-/// Request ids of `read-stdin`, apart from the command (from 1), service (from 2^40) and hook
-/// (from 2^41) ranges.
-static NEXT_STDIN_REQUEST: AtomicU64 = AtomicU64::new(1 << 42);
 
 /// The output form a manifest entry declares (`output`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,17 +133,26 @@ struct BookState {
 pub struct CliBook {
     state: Mutex<BookState>,
     results: ResultQueue,
+    /// The request ids of `read-stdin` come from the runtime's allocator, so they never meet the
+    /// id of another request of the plugin.
+    ids: RequestIds,
 }
 
 impl CliBook {
     /// An empty book. Completed `read-stdin` requests are queued on `results`.
     pub fn new(results: ResultQueue) -> Arc<Self> {
+        Self::with_ids(results, RequestIds::new())
+    }
+
+    /// An empty book whose `read-stdin` request ids come from `ids`.
+    pub fn with_ids(results: ResultQueue, ids: RequestIds) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(BookState {
                 next_invocation: 1,
                 ..BookState::default()
             }),
             results,
+            ids,
         })
     }
 
@@ -453,7 +459,7 @@ impl HostCli for CliImport {
             None => Vec::new(),
         };
         let request = match &self.book {
-            Some(_) => NEXT_STDIN_REQUEST.fetch_add(1, Ordering::Relaxed),
+            Some(book) => book.ids.next_request().0,
             None => {
                 self.next_request += 1;
                 self.next_request

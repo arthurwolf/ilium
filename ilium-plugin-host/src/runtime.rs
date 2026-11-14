@@ -40,6 +40,7 @@ use crate::calls::{ResolvedLimits, Trap};
 use crate::contributions::{ContributionOp, ContributionRegistry, Entry};
 use crate::engine::{CompiledComponent, PluginEngine};
 use crate::error::HostError;
+use crate::imports::audio::AudioImport;
 use crate::imports::backed::{
     command_result, CommandQueue, KernelAgent, KernelHelp, KernelIntents, KernelKeymap,
     KernelPanes, KernelSessions, KernelSettingsTables, KernelTerminal, KernelTree, LogSink,
@@ -47,15 +48,26 @@ use crate::imports::backed::{
 };
 use crate::imports::cli::{CliBook, CliImport};
 use crate::imports::clock::ClockImport;
+use crate::imports::codec::CodecImport;
+use crate::imports::env::{ImportEnv, RequestIds, SessionCounters};
 use crate::imports::extension_points::{ExtensionBook, PluginExtensions};
+use crate::imports::fonts::FontsImport;
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
-use crate::imports::services::{BrokeredServices, ServiceBroker};
+use crate::imports::inference::InferenceImport;
+use crate::imports::jobs::{JobBook, JobsImport};
+use crate::imports::journal::{JournalBook, JournalImport};
+use crate::imports::keys::{KeyGrabs, KeysImport};
+use crate::imports::services::{BrokeredServices, ServiceBroker, ServiceBrokerState};
 use crate::imports::settings::SettingsImport;
+use crate::imports::sounds::SoundsImport;
 use crate::imports::timers::{self, TimerBook, TimersImport};
 use crate::imports::topics::{self, PluginTopics, TopicOutbox};
 use crate::imports::ui_host::UiHostImport;
+use crate::imports::vector::VectorImport;
+use crate::imports::workspace::{WorkspaceImport, WorkspaceWorld};
 use crate::instance::{ExportCall, ExportReply, PluginInstance};
 use crate::linker::LinkerCache;
+use crate::runtime::pending_events::{PendingEvents, WORKER_POLL_INTERVAL};
 use crate::store_data::GuestIdentity;
 use crate::wasm_guest::WasmGuest;
 
@@ -63,6 +75,8 @@ pub mod cli;
 pub mod cross_side;
 pub mod durable_timers;
 mod hooks;
+mod jobs;
+pub mod pending_events;
 
 /// The plugin API string passed to `activate`.
 const API: &str = "ilium:plugin@0.1.0";
@@ -101,6 +115,16 @@ pub struct InstanceContext {
     pub instance: u64,
     /// The granted capabilities.
     pub granted: Vec<String>,
+    /// The runtime's queue of request results, for backends that finish a request later.
+    pub results: ResultQueue,
+    /// The runtime's queue of background events (child output, stream data, job progress).
+    pub events: PendingEvents,
+    /// The request id allocator every import of this runtime draws from.
+    pub ids: RequestIds,
+    /// What the session runs at once, shared by every instance.
+    pub session: SessionCounters,
+    /// The instant the monotonic clock of this runtime counts from.
+    pub clock_origin: Instant,
 }
 
 /// Adds the imports the embedding process backs itself (storage, basic panes, timers, ...)
@@ -262,6 +286,20 @@ pub struct HostRuntime {
     cross_side: cross_side::CrossSideState,
     /// The running CLI invocations and what they printed.
     cli_book: Arc<CliBook>,
+    /// The key grabs of this session; at most 32 across all plugins.
+    key_grabs: KeyGrabs,
+    /// The journal plugins write to.
+    journal: JournalBook,
+    /// The jobs plugins started, queued here until `pump` starts them.
+    jobs: JobBook,
+    /// Events background workers of the imports queued for plugins.
+    events: PendingEvents,
+    /// The request and call ids every import of this runtime draws from.
+    ids: RequestIds,
+    /// What the session runs at once (processes).
+    session: SessionCounters,
+    /// Where the monotonic clock of every plugin starts counting.
+    clock_origin: Instant,
     next_instance: u64,
     job_panics: u64,
     next_activation: u64,
@@ -281,6 +319,7 @@ impl HostRuntime {
     /// A runtime without plugins.
     pub fn new(engine: Arc<PluginEngine>, config: RuntimeConfig) -> Self {
         let results = ResultQueue::default();
+        let ids = RequestIds::new();
         Self {
             engine,
             linkers: LinkerCache::new(),
@@ -291,16 +330,23 @@ impl HostRuntime {
             disabled: config.disabled,
             plugins: BTreeMap::new(),
             contributions: Arc::new(Mutex::new(ContributionRegistry::new())),
-            cli_book: CliBook::new(Arc::clone(&results)),
+            cli_book: CliBook::with_ids(Arc::clone(&results), ids.clone()),
             results,
             commands: CommandQueue::default(),
             timer_books: Mutex::new(BTreeMap::new()),
             durable_timers: Mutex::new(None),
             topic_outbox: TopicOutbox::default(),
-            extension_book: ExtensionBook::default(),
-            services: ServiceBroker::default(),
+            extension_book: ExtensionBook::with_ids(ids.clone()),
+            services: Arc::new(Mutex::new(ServiceBrokerState::with_ids(ids.clone()))),
             hooks: hooks::HookState::default(),
             cross_side: cross_side::CrossSideState::default(),
+            key_grabs: KeyGrabs::new(),
+            journal: JournalBook::new(),
+            jobs: JobBook::new(),
+            events: PendingEvents::new(),
+            session: SessionCounters::new(),
+            ids,
+            clock_origin: Instant::now(),
             next_instance: 1,
             job_panics: 0,
             next_activation: 1,
@@ -428,6 +474,27 @@ impl HostRuntime {
         lock(&self.contributions).take_ops()
     }
 
+    /// What an import provider and the imports learn about the instance they equip.
+    fn instance_context(
+        &self,
+        plugin: &str,
+        record: &PluginRecord,
+        instance: u64,
+    ) -> InstanceContext {
+        InstanceContext {
+            plugin: plugin.to_owned(),
+            side: self.side,
+            tier: record.tier,
+            instance,
+            granted: record.granted.clone(),
+            results: Arc::clone(&self.results),
+            events: self.events.clone(),
+            ids: self.ids.clone(),
+            session: self.session.clone(),
+            clock_origin: self.clock_origin,
+        }
+    }
+
     fn build_imports(&self, plugin: &str, record: &PluginRecord, instance: u64) -> ImportSet {
         // A new instance starts without ordinary timers: the book of the previous one is
         // replaced. Its durable timers are kept: the previous book is written to the store
@@ -453,7 +520,7 @@ impl HostRuntime {
                 plugin,
                 self.side,
             ))),
-            clock: Some(Box::new(ClockImport)),
+            clock: Some(Box::new(ClockImport::with_origin(self.clock_origin))),
             cli: Some(Box::new(CliImport::with_book(
                 plugin,
                 Arc::clone(&self.cli_book),
@@ -500,18 +567,40 @@ impl HostRuntime {
                 Arc::clone(&self.kernel),
                 &record.granted,
             ))),
-            intents_host: Some(Box::new(KernelIntents::new(
-                Arc::clone(&self.kernel),
-                plugin,
-                self.side,
-                instance,
-                Arc::clone(&self.results),
+            intents_host: Some(Box::new(
+                KernelIntents::new(
+                    Arc::clone(&self.kernel),
+                    plugin,
+                    self.side,
+                    instance,
+                    Arc::clone(&self.results),
+                )
+                .with_ids(self.ids.clone()),
+            )),
+            commands: Some(Box::new(
+                RegistryCommands::new(
+                    Arc::clone(&self.contributions),
+                    plugin,
+                    self.side,
+                    Arc::clone(&self.commands),
+                )
+                .with_ids(self.ids.clone()),
+            )),
+            jobs: Some(Box::new(JobsImport::new(
+                ImportEnv::for_instance(&self.instance_context(plugin, record, instance)),
+                self.jobs.clone(),
+                jobs::declared_jobs(&record.manifest),
             ))),
-            commands: Some(Box::new(RegistryCommands::new(
-                Arc::clone(&self.contributions),
-                plugin,
-                self.side,
-                Arc::clone(&self.commands),
+            keys: Some(Box::new(KeysImport::new(self.key_grabs.clone(), plugin))),
+            journal: Some(Box::new(JournalImport::new(self.journal.clone(), plugin))),
+            audio: Some(Box::new(AudioImport::new(self.ids.clone()))),
+            inference: Some(Box::new(InferenceImport::new(self.ids.clone()))),
+            fonts: Some(Box::new(FontsImport::default())),
+            codec: Some(Box::new(CodecImport)),
+            sounds: Some(Box::new(SoundsImport)),
+            vector: Some(Box::new(VectorImport::default())),
+            workspace: Some(Box::new(WorkspaceImport::with_world(
+                WorkspaceWorld::default(),
             ))),
             ..ImportSet::default()
         };
@@ -525,16 +614,7 @@ impl HostRuntime {
             set.ui_host = Some(Box::new(ui));
         }
         if let Some(provider) = &self.provider {
-            provider(
-                &InstanceContext {
-                    plugin: plugin.to_owned(),
-                    side: self.side,
-                    tier: record.tier,
-                    instance,
-                    granted: record.granted.clone(),
-                },
-                &mut set,
-            );
+            provider(&self.instance_context(plugin, record, instance), &mut set);
         }
         restrict_to_grants(&mut set, &record.granted);
         set
@@ -579,6 +659,7 @@ impl HostRuntime {
         };
         let instance_number = self.next_instance;
         self.next_instance += 1;
+        self.key_grabs.forget_plugin(plugin);
         let imports = self.build_imports(plugin, record, instance_number);
         let host_error = |error: HostError| RuntimeError::Host {
             plugin: plugin.to_owned(),
@@ -650,6 +731,17 @@ impl HostRuntime {
         }
     }
 
+    /// Drops the queued results and background events of a plugin that stopped, so nothing a
+    /// worker of the old instance produced reaches the next one. The instance's imports are
+    /// dropped with the instance, which stops its workers and kills its children.
+    fn forget_background_work(&self, plugin: &str) {
+        lock(&self.results).retain(|(owner, _)| owner != plugin);
+        self.events.forget_plugin(plugin);
+        self.key_grabs.forget_plugin(plugin);
+        self.journal.forget_plugin(plugin);
+        self.jobs.forget_plugin(plugin);
+    }
+
     /// How many jobs of the executor thread panicked since start.
     pub fn job_panics(&self) -> u64 {
         self.job_panics
@@ -668,6 +760,7 @@ impl HostRuntime {
         self.cross_side.forget_plugin(plugin);
         self.extension_book.forget_instance(plugin);
         self.abandon_cli(plugin);
+        self.forget_background_work(plugin);
         RuntimeError::Trapped {
             plugin: plugin.to_owned(),
             code: trap.code.0.to_string(),
@@ -899,7 +992,17 @@ impl HostRuntime {
             .is_some_and(|store| !store.is_empty())
             .then(|| Instant::now() + std::time::Duration::from_secs(1));
         let timers_due = [book_due, stored_due].into_iter().flatten().min();
-        [timers_due, self.cross_side.next_deadline()]
+        // A background worker (a child, a stream, a job, a watch) queues events from its own
+        // thread: the runtime thread looks at the queue while one lives, and at once when an
+        // event already waits.
+        let events_due = if !self.events.is_empty() {
+            Some(Instant::now())
+        } else if self.events.workers() > 0 {
+            Some(Instant::now() + WORKER_POLL_INTERVAL)
+        } else {
+            None
+        };
+        [timers_due, self.cross_side.next_deadline(), events_due]
             .into_iter()
             .flatten()
             .min()
@@ -1066,22 +1169,62 @@ impl HostRuntime {
         self.deliver_published(&topics)
     }
 
+    /// Delivers the events background workers queued, in arrival order, to the plugins and the
+    /// instances they were produced for. An event of a plugin that stopped, was replaced by a new
+    /// instance or is not active any more is dropped. Returns how many events were delivered.
+    fn deliver_pending_events(&mut self, failures: &mut Vec<RuntimeError>) -> usize {
+        let queued = self.events.drain();
+        if queued.is_empty() {
+            return 0;
+        }
+        let mut by_plugin: BTreeMap<String, Vec<Event>> = BTreeMap::new();
+        for entry in queued {
+            let current = self.plugins.get(&entry.plugin).is_some_and(|record| {
+                record.state == PluginState::Active && record.instance_number == entry.instance
+            });
+            if current {
+                by_plugin.entry(entry.plugin).or_default().push(entry.event);
+            }
+        }
+        let mut delivered = 0;
+        for (plugin, events) in by_plugin {
+            for chunk in events.chunks(ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH) {
+                match self.deliver(&plugin, chunk.to_vec()) {
+                    Ok(()) => delivered += chunk.len(),
+                    Err(error) => {
+                        failures.push(error);
+                        break;
+                    }
+                }
+            }
+        }
+        delivered
+    }
+
     /// Fires due timers, routes published topic messages, then delivers the commands plugins
     /// asked for and the queued request results. Returns the failures; a failed plugin is
     /// stopped and the others continue.
     pub fn pump(&mut self) -> Vec<RuntimeError> {
         let mut failures = self.fire_timers();
         for _ in 0..PUMP_ROUNDS {
+            // Jobs plugins started while handling the last round begin now.
+            let started_jobs = self.start_queued_jobs();
             // A plugin may publish while it handles a timer, a command or a result, so the
             // outbox is routed in every round.
             failures.extend(self.route_hooks());
             failures.extend(self.pump_cross_side());
+            let delivered_events = self.deliver_pending_events(&mut failures);
             let had_topics = !lock(&self.topic_outbox).is_empty();
             failures.extend(self.route_topics());
             failures.extend(self.route_services());
             let commands: Vec<_> = lock(&self.commands).drain(..).collect();
             let results: VecDeque<_> = std::mem::take(&mut *lock(&self.results));
-            if commands.is_empty() && results.is_empty() && !had_topics {
+            if commands.is_empty()
+                && results.is_empty()
+                && !had_topics
+                && delivered_events == 0
+                && started_jobs == 0
+            {
                 break;
             }
             for pending in commands {
@@ -1183,6 +1326,7 @@ impl HostRuntime {
             };
         }
         self.abandon_cli(plugin);
+        self.forget_background_work(plugin);
         // Timers armed since the last pump must not be lost with the instance.
         self.sync_durable_timers();
         Ok(())
@@ -1263,6 +1407,7 @@ impl HostRuntime {
             }
             record.state = PluginState::Stopped;
             self.abandon_cli(&id);
+            self.forget_background_work(&id);
         }
         report
     }

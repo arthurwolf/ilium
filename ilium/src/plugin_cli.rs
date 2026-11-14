@@ -634,6 +634,7 @@ fn transient_host(
             },
             basic: None,
             log: Arc::clone(&log),
+            backends: wiring::wave_two::Backends::new(absolute_cwd.clone(), dir.clone()),
         })
     });
     let runtime = HostRuntime::new(

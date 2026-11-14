@@ -4,6 +4,7 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod cache_refresh;
 mod chart;
 mod model;
 mod port;

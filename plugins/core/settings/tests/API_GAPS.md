@@ -17,3 +17,9 @@
 - manual: Forget settings (USR-163), the plugin page tabs and the `[ Open Plugins page ]` link name no view ids or actions; only the page text is tested (F-090).
 
 - Port status: `src/onboarding/state.rs` and `progress.rs` hold the pure wizard navigation and the durable progress record (the in-file tests are the twins of the kernel unit tests; the progress record round-trips through JSON instead of TOML because the plugin has no TOML dependency). `practice.rs` (7 twins), `integration.rs` (18 twins), `value_editor.rs` (2 twins), the `overview` and `appearance` views and the paged tab list are not ported: they need G12 (onboarding), G2 (editable rows), G8 (text input and scrolling) and G10 (`kernel-settings` and `plugins` imports).
+
+## Re-check of the foundation against the tree (2026-11-14): what still blocks the moves
+
+- Onboarding (`onboarding/{state,progress,practice,integration}.rs`): G12 is not built (`ilium-client/src/plugin_host/onboarding_steps.rs` absent); the first-run flow draws kernel steps only. Wanted: `onboarding_steps::ordered(&ClientPlugins) -> Vec<StepRef>` and a `Step::Plugin { plugin, step }` position in `onboarding/state.rs`.
+- `value_editor.rs` is the editor line-display dialog (`begin_editor_line_display_dialog`); the effect needs `Intent::EditorApplyEdits`-style pane options, which are unrouted. Wanted: `Intent::SetEditorOption { pane, option: "line-display", value }` routed to the client editor pane.
+- `settings_help/mod.rs`, `value_settings*.rs`: the kernel Settings view still draws every kernel tab; a contributed `tab` page is not drawn by `settings_ui.rs`.

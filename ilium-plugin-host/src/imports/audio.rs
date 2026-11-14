@@ -3,8 +3,10 @@
 //! Written once by the skeleton lane from the generated `HostAudio` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::audio::{AudioDevice, HostAudio};
-use std::cell::RefCell;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use super::env::RequestIds;
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
@@ -18,16 +20,20 @@ const MAX_OPEN_STREAMS: usize = 2;
 /// Longest playback one `play` call accepts, in seconds.
 const MAX_PLAY_SECONDS: u64 = 30;
 
-/// Open capture streams and the id counters.
+/// Open capture streams and the capture id counter of one instance.
 #[derive(Debug)]
 struct AudioState {
     next_capture: u64,
-    next_request: u64,
     open: HashSet<u64>,
 }
 
-thread_local! {
-    static STATE: RefCell<AudioState> = RefCell::new(AudioState { next_capture: 1, next_request: 1, open: HashSet::new() });
+impl Default for AudioState {
+    fn default() -> Self {
+        Self {
+            next_capture: 1,
+            open: HashSet::new(),
+        }
+    }
 }
 
 /// Builds a refusal with the given code and a plain-text message.
@@ -54,10 +60,32 @@ fn validate_format(sample_rate: u32, channels: u8) -> Result<(), PluginError> {
     }
 }
 
-/// Registers a new open stream, enforcing the stream quota.
-fn open_stream() -> Result<u64, PluginError> {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
+/// Host side of the `audio` interface of one plugin instance: its open streams are its own and go
+/// away with it. Cloning shares the streams (a test harness keeps one instance and hands out
+/// clones).
+#[derive(Debug, Clone, Default)]
+pub struct AudioImport {
+    state: Arc<Mutex<AudioState>>,
+    ids: RequestIds,
+}
+
+impl AudioImport {
+    /// An import drawing request ids from `ids`, the allocator of the runtime.
+    pub fn new(ids: RequestIds) -> Self {
+        Self {
+            state: Arc::default(),
+            ids,
+        }
+    }
+
+    fn state(&self) -> MutexGuard<'_, AudioState> {
+        // Every writer does one insert or remove, so the state is consistent after a panic.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Registers a new open stream, enforcing the stream quota.
+    fn open_stream(&self) -> Result<u64, PluginError> {
+        let mut state = self.state();
         if state.open.len() >= MAX_OPEN_STREAMS {
             return Err(refuse(ErrorCode::QuotaExceeded, "too many open capture streams"));
         }
@@ -65,12 +93,8 @@ fn open_stream() -> Result<u64, PluginError> {
         state.next_capture += 1;
         state.open.insert(id);
         Ok(id)
-    })
+    }
 }
-
-/// Host side of the `audio` interface.
-#[derive(Debug)]
-pub struct AudioImport;
 
 impl HostAudio for AudioImport {
     fn devices(&mut self) -> Vec<AudioDevice> {
@@ -89,18 +113,16 @@ impl HostAudio for AudioImport {
         if device.is_some() {
             return Err(refuse(ErrorCode::NotFound, "device is not in devices()"));
         }
-        open_stream()
+        self.open_stream()
     }
 
     fn open_loopback(&mut self, sample_rate: u32, channels: u8) -> Result<u64, PluginError> {
         validate_format(sample_rate, channels)?;
-        open_stream()
+        self.open_stream()
     }
 
     fn close_capture(&mut self, capture: u64) {
-        STATE.with(|state| {
-            state.borrow_mut().open.remove(&capture);
-        });
+        self.state().open.remove(&capture);
     }
 
     fn play(
@@ -121,13 +143,7 @@ impl HostAudio for AudioImport {
         if frames > MAX_PLAY_SECONDS * u64::from(sample_rate) {
             return Err(refuse(ErrorCode::InvalidArgument, "playback is longer than 30 s"));
         }
-        let id = STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            let id = state.next_request;
-            state.next_request += 1;
-            id
-        });
-        Ok(RequestId(id))
+        Ok(self.ids.next_request())
     }
 }
 
@@ -156,14 +172,14 @@ mod tests {
     /// Source: api-audio.md "Grants" and capability-audio.md "Devices" (no requirement ID).
     #[test]
     fn devices_without_audio_grant_returns_empty_list() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert!(audio.devices().is_empty());
     }
 
     /// Source: api-audio.md "Surface" (open_capture returns a capture id) and "Edge cases" table.
     #[test]
     fn open_capture_default_device_mono_16khz_returns_capture_id() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         let capture = expect_ok(audio.open_capture(None, 16_000, 1));
         assert_ne!(capture, 0, "a capture id must identify the opened stream");
     }
@@ -171,28 +187,28 @@ mod tests {
     /// Source: api-audio.md "Sample format" (stereo is two channels) and "Edge cases" table.
     #[test]
     fn open_capture_default_device_stereo_48khz_is_accepted() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.open_capture(None, 48_000, 2));
     }
 
     /// Source: api-audio.md "Sample format": any rate from 8,000 to 192,000 Hz is accepted (lower boundary).
     #[test]
     fn open_capture_minimum_rate_8000_hz_is_accepted() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.open_capture(None, 8_000, 1));
     }
 
     /// Source: api-audio.md "Sample format": any rate from 8,000 to 192,000 Hz is accepted (upper boundary).
     #[test]
     fn open_capture_maximum_rate_192000_hz_is_accepted() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.open_capture(None, 192_000, 2));
     }
 
     /// Source: api-audio.md "Edge cases" table: rate outside 8,000 to 192,000 Hz gives invalid-argument.
     #[test]
     fn open_capture_rate_one_below_minimum_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_capture(None, 7_999, 1)),
             ErrorCode::InvalidArgument
@@ -202,7 +218,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: rate outside 8,000 to 192,000 Hz gives invalid-argument.
     #[test]
     fn open_capture_rate_one_above_maximum_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_capture(None, 192_001, 1)),
             ErrorCode::InvalidArgument
@@ -212,7 +228,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: zero channels gives invalid-argument.
     #[test]
     fn open_capture_zero_channels_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_capture(None, 16_000, 0)),
             ErrorCode::InvalidArgument
@@ -222,7 +238,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: more than two channels gives unsupported.
     #[test]
     fn open_capture_three_channels_is_unsupported() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_capture(None, 16_000, 3)),
             ErrorCode::Unsupported
@@ -232,7 +248,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: a device id not in devices() gives not-found.
     #[test]
     fn open_capture_unknown_device_id_is_not_found() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_capture(Some("no-such-device".to_string()), 16_000, 1)),
             ErrorCode::NotFound
@@ -242,7 +258,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: too many open streams gives quota-exceeded (default 2).
     #[test]
     fn open_capture_third_concurrent_stream_is_quota_exceeded() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.open_capture(None, 16_000, 1));
         expect_ok(audio.open_capture(None, 16_000, 1));
         assert_eq!(
@@ -254,7 +270,7 @@ mod tests {
     /// Source: api-audio.md "Surface" (open_loopback returns a capture id).
     #[test]
     fn open_loopback_valid_rate_and_channels_returns_capture_id() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         let capture = expect_ok(audio.open_loopback(48_000, 2));
         assert_ne!(
             capture, 0,
@@ -265,7 +281,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: rate outside 8,000 to 192,000 Hz gives invalid-argument (lower boundary).
     #[test]
     fn open_loopback_rate_one_below_minimum_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_loopback(7_999, 1)),
             ErrorCode::InvalidArgument
@@ -275,7 +291,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: rate outside 8,000 to 192,000 Hz gives invalid-argument (upper boundary).
     #[test]
     fn open_loopback_rate_one_above_maximum_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_loopback(192_001, 1)),
             ErrorCode::InvalidArgument
@@ -285,7 +301,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: zero channels gives invalid-argument.
     #[test]
     fn open_loopback_zero_channels_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_loopback(48_000, 0)),
             ErrorCode::InvalidArgument
@@ -295,7 +311,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: more than two channels gives unsupported.
     #[test]
     fn open_loopback_three_channels_is_unsupported() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.open_loopback(48_000, 3)),
             ErrorCode::Unsupported
@@ -305,7 +321,7 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: close-capture of an unknown or closed id does nothing.
     #[test]
     fn close_capture_unknown_id_does_nothing() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         audio.close_capture(0);
         audio.close_capture(u64::MAX);
     }
@@ -313,7 +329,7 @@ mod tests {
     /// Source: api-audio.md "Surface" (close-capture releases the device) and "Edge cases" table (stream quota).
     #[test]
     fn close_capture_releases_stream_slot_for_a_new_capture() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         let first = expect_ok(audio.open_capture(None, 16_000, 1));
         expect_ok(audio.open_capture(None, 16_000, 1));
         audio.close_capture(first);
@@ -323,28 +339,28 @@ mod tests {
     /// Source: api-audio.md "Surface" (play returns on request id) and "Sample format" (interleaved s16, stereo).
     #[test]
     fn play_stereo_interleaved_samples_returns_request_id() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.play(vec![0i16, 0, 1_000, -1_000], 16_000, 2));
     }
 
     /// Source: api-audio.md "Sample format": one event (20 ms) at 16 kHz mono holds 320 samples.
     #[test]
     fn play_one_chunk_mono_samples_returns_request_id() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.play(vec![0i16; 320], 16_000, 1));
     }
 
     /// Source: api-audio.md "Edge cases" table: empty input is a sample count of 0, a multiple of any channel count.
     #[test]
     fn play_empty_samples_is_accepted() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.play(Vec::new(), 16_000, 1));
     }
 
     /// Source: api-audio.md "Edge cases" table: sample count not a multiple of channels gives invalid-argument.
     #[test]
     fn play_sample_count_not_multiple_of_channels_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.play(vec![0i16; 3], 16_000, 2)),
             ErrorCode::InvalidArgument
@@ -354,14 +370,14 @@ mod tests {
     /// Source: api-audio.md "Edge cases" table: playback up to 30 s is accepted (boundary: 480,000 samples at 16 kHz mono).
     #[test]
     fn play_exactly_thirty_seconds_is_accepted() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         expect_ok(audio.play(vec![0i16; 480_000], 16_000, 1));
     }
 
     /// Source: api-audio.md "Edge cases" table: longer than 30 s gives invalid-argument (480,001 samples at 16 kHz mono).
     #[test]
     fn play_just_over_thirty_seconds_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.play(vec![0i16; 480_001], 16_000, 1)),
             ErrorCode::InvalidArgument
@@ -371,10 +387,37 @@ mod tests {
     /// Source: api-audio.md "Sample format": any rate from 8,000 to 192,000 Hz is accepted; out-of-range rate for play is inferred invalid-argument.
     #[test]
     fn play_rate_below_minimum_is_invalid_argument() {
-        let mut audio = AudioImport;
+        let mut audio = AudioImport::default();
         assert_eq!(
             error_code_of(audio.play(vec![0i16; 320], 7_999, 1)),
             ErrorCode::InvalidArgument
         );
+    }
+
+    #[test]
+    fn the_stream_quota_belongs_to_the_instance() {
+        let mut first = AudioImport::default();
+        let mut second = AudioImport::default();
+        first.open_loopback(48_000, 2).expect("first stream");
+        first.open_loopback(48_000, 2).expect("second stream");
+        assert_eq!(
+            error_code_of(first.open_loopback(48_000, 2)),
+            ErrorCode::QuotaExceeded
+        );
+        second
+            .open_loopback(48_000, 2)
+            .expect("another instance has its own quota");
+    }
+
+    #[test]
+    fn closing_a_stream_through_a_clone_frees_the_slot() {
+        let mut audio = AudioImport::default();
+        let mut same_instance = audio.clone();
+        let stream = audio.open_loopback(48_000, 2).expect("stream");
+        audio.open_loopback(48_000, 2).expect("stream");
+        same_instance.close_capture(stream);
+        audio
+            .open_loopback(48_000, 2)
+            .expect("the slot is free again");
     }
 }

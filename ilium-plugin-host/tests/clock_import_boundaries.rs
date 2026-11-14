@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[test]
 fn wall_clock_observation_is_between_actual_host_reads() {
-    let mut clock = ClockImport;
+    let mut clock = ClockImport::default();
     let before = unix_millis_at(SystemTime::now());
     let observed = clock.now_unix_millis();
     let after = unix_millis_at(SystemTime::now());
@@ -15,13 +15,13 @@ fn wall_clock_observation_is_between_actual_host_reads() {
 }
 
 #[test]
-fn monotonic_clock_never_resets_when_an_import_is_constructed() {
-    let mut first = ClockImport;
+fn monotonic_clock_never_resets_when_an_import_is_constructed_from_the_runtime_origin() {
+    let mut first = ClockImport::default();
     let before = first.monotonic_millis();
     std::thread::sleep(Duration::from_millis(5));
     let progressed = first.monotonic_millis();
     assert!(progressed > before);
-    let mut newly_constructed = ClockImport;
+    let mut newly_constructed = ClockImport::with_origin(first.origin());
     assert!(newly_constructed.monotonic_millis() >= progressed);
     for _ in 0..100 {
         let earlier = first.monotonic_millis();

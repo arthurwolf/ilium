@@ -7,24 +7,31 @@ use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::RequestId;
 use ilium_plugin_api::generated::types::intents::Submission;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use ilium_plugin_api::generated::types::errors::ErrorCode;
+
+use super::env::RequestIds;
 
 /// Longest dedup key, in characters.
 const DEDUP_KEY_MAX_CHARS: usize = 128;
-
-/// Process-wide request id counter; ids start at 1 so zero never names a request.
-static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 /// True for the characters a dedup key may hold: A-Z a-z 0-9 . _ : / -.
 fn is_dedup_key_char(character: char) -> bool {
     character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '/' | '-')
 }
 
-/// Host side of the `intents-host` interface.
-#[derive(Debug)]
-pub struct IntentsHostImport;
+/// Host side of the `intents-host` interface. Its request ids come from the allocator of the
+/// runtime that built it (ids start at 1, so zero never names a request).
+#[derive(Debug, Default)]
+pub struct IntentsHostImport {
+    ids: RequestIds,
+}
+
+impl IntentsHostImport {
+    /// An import drawing request ids from `ids`.
+    pub fn new(ids: RequestIds) -> Self {
+        Self { ids }
+    }
+}
 
 impl HostIntentsHost for IntentsHostImport {
     fn submit(&mut self, submission: Submission) -> Result<RequestId, PluginError> {
@@ -39,7 +46,7 @@ impl HostIntentsHost for IntentsHostImport {
                 });
             }
         }
-        Ok(RequestId(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)))
+        Ok(self.ids.next_request())
     }
 }
 
@@ -76,7 +83,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_accepts_submission_without_dedup_key() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(None, 1));
         assert!(result.is_ok(), "a submission without a dedup key is valid");
     }
@@ -84,7 +91,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_accepts_dedup_key_of_one_character() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some("a".to_string()), 1));
         assert!(
             result.is_ok(),
@@ -95,7 +102,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_accepts_dedup_key_of_128_characters() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let key = "k".repeat(DEDUP_KEY_MAX_CHARS);
         let result = import.submit(play_sound_submission(Some(key), 1));
         assert!(
@@ -107,7 +114,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_refuses_dedup_key_of_129_characters_with_invalid_argument() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let key = "k".repeat(DEDUP_KEY_MAX_CHARS + 1);
         let result = import.submit(play_sound_submission(Some(key), 1));
         let error = result.expect_err("a 129-character dedup key is malformed");
@@ -117,7 +124,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_refuses_empty_dedup_key_with_invalid_argument() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some(String::new()), 1));
         let error = result.expect_err("an empty dedup key is malformed (1 to 128 characters)");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
@@ -126,7 +133,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_accepts_dedup_key_with_every_allowed_character() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(
             Some(DEDUP_KEY_ALLOWED_CHARS.to_string()),
             1,
@@ -140,7 +147,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_refuses_dedup_key_containing_space_with_invalid_argument() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some("finish node".to_string()), 1));
         let error = result.expect_err("a space is outside the dedup key character set");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
@@ -149,7 +156,7 @@ mod tests {
     /// REQ: RQO-020
     #[test]
     fn submit_refuses_dedup_key_containing_non_ascii_letter_with_invalid_argument() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some("café".to_string()), 1));
         let error = result.expect_err("non-ASCII letters are outside the dedup key character set");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
@@ -158,7 +165,7 @@ mod tests {
     /// REQ: ABI-011
     #[test]
     fn submit_accepts_correlation_zero() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(None, 0));
         assert!(
             result.is_ok(),
@@ -169,7 +176,7 @@ mod tests {
     /// REQ: ABI-011
     #[test]
     fn submit_accepts_largest_plugin_correlation_below_2_pow_63() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(None, LARGEST_PLUGIN_CORRELATION));
         assert!(
             result.is_ok(),
@@ -180,7 +187,7 @@ mod tests {
     /// REQ: ABI-040
     #[test]
     fn submit_returns_distinct_request_ids_for_successive_calls() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let first = import
             .submit(play_sound_submission(None, 1))
             .expect("first submission is valid");
@@ -193,7 +200,7 @@ mod tests {
     /// REQ: API-005
     #[test]
     fn submit_accepts_well_formed_node_intent_with_valid_key() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let submission = Submission {
             intent: Intent::CloseNode(NodeId(7)),
             correlation: 3,
@@ -209,7 +216,7 @@ mod tests {
     /// REQ: API-003
     #[test]
     fn submit_invalid_argument_error_has_no_retry_after() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some(String::new()), 1));
         let error = result.expect_err("an empty dedup key is malformed");
         assert_eq!(
@@ -221,7 +228,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn submit_error_carries_message_within_256_characters() {
-        let mut import = IntentsHostImport;
+        let mut import = IntentsHostImport::default();
         let result = import.submit(play_sound_submission(Some("k".repeat(129)), 1));
         let error = result.expect_err("a 129-character dedup key is malformed");
         assert!(

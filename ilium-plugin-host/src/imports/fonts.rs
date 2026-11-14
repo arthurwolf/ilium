@@ -2,11 +2,11 @@
 //!
 //! A font handle names a font asset of the plugin package. Rasterising uses the host's built-in
 //! 5x7 bitmap face scaled to `size_px` by nearest-neighbour sampling, so the result is the same on
-//! every machine; characters outside printable ASCII render as a hollow box. The import is a unit
-//! struct, so handles are kept per thread.
+//! every machine; characters outside printable ASCII render as a hollow box. The handles belong to
+//! the import of one plugin instance and are dropped with it.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ilium_plugin_api::generated::anim::fonts::{FontHandle, HostFonts};
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
@@ -64,10 +64,6 @@ struct FontsState {
     assets: HashMap<u32, String>,
 }
 
-thread_local! {
-    static STATE: RefCell<FontsState> = RefCell::new(FontsState::default());
-}
-
 fn glyph_columns(character: char) -> &'static [u8; 5] {
     let code = character as u32;
     if (FACE_FIRST_CHAR..FACE_FIRST_CHAR + FACE.len() as u32).contains(&code) {
@@ -77,19 +73,27 @@ fn glyph_columns(character: char) -> &'static [u8; 5] {
     }
 }
 
-/// Host side of the `fonts` interface.
-#[derive(Debug)]
-pub struct FontsImport;
+/// Host side of the `fonts` interface of one plugin instance. Cloning shares the handles (a test
+/// harness keeps one instance and hands out clones).
+#[derive(Debug, Clone, Default)]
+pub struct FontsImport {
+    state: Arc<Mutex<FontsState>>,
+}
+
+impl FontsImport {
+    fn state(&self) -> MutexGuard<'_, FontsState> {
+        // Every writer does one insert, so the state is consistent after a panic.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
 
 impl HostFonts for FontsImport {
     fn font_new(&mut self, asset: String) -> FontHandle {
-        STATE.with(|cell| {
-            let mut state = cell.borrow_mut();
-            state.next_handle += 1;
-            let handle = state.next_handle;
-            state.assets.insert(handle, asset);
-            FontHandle(handle)
-        })
+        let mut state = self.state();
+        state.next_handle += 1;
+        let handle = state.next_handle;
+        state.assets.insert(handle, asset);
+        FontHandle(handle)
     }
 
     fn font_rasterize(
@@ -98,7 +102,7 @@ impl HostFonts for FontsImport {
         text: String,
         size_px: u16,
     ) -> Result<(u32, u32, Vec<u8>), PluginError> {
-        let is_known = STATE.with(|cell| cell.borrow().assets.contains_key(&handle.0));
+        let is_known = self.state().assets.contains_key(&handle.0);
         if !is_known {
             return Err(PluginError {
                 code: ErrorCode::NotFound,
@@ -160,7 +164,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.constructor
     #[test]
     fn font_new_valid_asset_path_returns_usable_handle() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let result = fonts.font_rasterize(handle, "A".to_string(), 16);
         assert!(
@@ -172,7 +176,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
     #[test]
     fn font_rasterize_returns_width_height_and_gray8_bitmap_of_matching_length() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "Hello".to_string(), 16)
@@ -191,7 +195,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
     #[test]
     fn font_rasterize_visible_glyph_produces_ink() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let (_, _, bitmap) = fonts
             .font_rasterize(handle, "A".to_string(), 16)
@@ -205,7 +209,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
     #[test]
     fn font_rasterize_empty_text_is_ok_with_blank_bitmap_of_matching_length() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, String::new(), 16)
@@ -224,7 +228,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
     #[test]
     fn font_rasterize_smallest_positive_size_is_accepted() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "A".to_string(), 1)
@@ -239,7 +243,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn font_rasterize_zero_size_returns_invalid_argument() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let error = fonts
             .font_rasterize(handle, "A".to_string(), 0)
@@ -250,7 +254,7 @@ mod tests {
     /// REQ: WIT:ilium:anim/fonts.font.rasterize
     #[test]
     fn font_rasterize_multibyte_utf8_text_is_accepted() {
-        let mut fonts = FontsImport;
+        let mut fonts = FontsImport::default();
         let handle = create_font_handle(&mut fonts);
         let (width, height, bitmap) = fonts
             .font_rasterize(handle, "é日".to_string(), 16)
@@ -260,5 +264,16 @@ mod tests {
             width as usize * height as usize,
             "gray8 holds one byte per pixel"
         );
+    }
+
+    #[test]
+    fn a_handle_of_one_instance_is_unknown_to_another() {
+        let mut owner = FontsImport::default();
+        let mut stranger = FontsImport::default();
+        let handle = create_font_handle(&mut owner);
+        let error = stranger
+            .font_rasterize(handle, "A".to_string(), 16)
+            .expect_err("the other instance never opened this handle");
+        assert_eq!(error.code, ErrorCode::NotFound);
     }
 }

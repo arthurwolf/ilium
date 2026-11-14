@@ -1,9 +1,10 @@
 //! Core plugin `ilium.core.ambient` (manual page core-plugin-ambient.md).
 //!
-//! Client side of the Animations tab. The scene, palette, dither and display controls persist
-//! through kernel settings and the look service, which need SDK host calls that are not
-//! implemented yet; until then the client activates cleanly, accepts events and draws the gallery
-//! heading only.
+//! Client side of the Animations tab: the pure row, value, hover, semantic and visibility
+//! rules (`rows`, `values`, ...), and the gallery panel. The server side owns the one write to
+//! the `animations` kernel tab: the service `ilium.core.ambient/set-setting` validates a value
+//! (`set_setting`) and stores it with `kernel-settings.write`. The kernel Settings screen, the
+//! scene host and the per-frame look stay in the kernel (see `tests/API_GAPS_ports.md`).
 
 pub mod control;
 pub mod credit;
@@ -13,10 +14,12 @@ pub mod number;
 pub mod panel;
 pub mod rows;
 pub mod semantic;
+pub mod set_setting;
 pub mod values;
 pub mod visibility;
 
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
+use ilium_plugin_sdk::generated::host::kernel_settings::HostKernelSettings;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
@@ -24,7 +27,7 @@ use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
     Alignment, Area, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, ViewTarget, Widget,
 };
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The client side of `ilium.core.ambient` (core-plugin-ambient.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
@@ -52,7 +55,7 @@ impl Views for AmbientClient {
 /// The server side of `ilium.core.ambient` (core-plugin-ambient.md "Server part", world `ilium:server/base@0.1.0`).
 ///
 /// It owns the one job of writing the `animations` Settings tab: the client sends a changed value through
-/// the service `ilium.core.ambient/set-setting` and this side validates it before the kernel write.
+/// the service `ilium.core.ambient/set-setting`; this side validates it (`set_setting`) and then writes the kernel tab.
 #[ilium_plugin(side = "server", exports = ["service-provider"])]
 #[derive(Default)]
 pub struct AmbientServer;
@@ -71,52 +74,28 @@ impl Handler for AmbientServer {
 
 impl ServiceProvider for AmbientServer {
     fn handle(&mut self, call: ServiceCall) -> ServiceReply {
-        ServiceReply::Done(set_setting_reply(&call.method, &call.payload_json))
+        ServiceReply::Done(set_setting::handle(
+            &call.method,
+            &call.payload_json,
+            write_kernel_setting,
+        ))
     }
 }
 
-/// The scene ids of the manifest `scene` row.
-const SCENES: [&str; 2] = ["stars", "clouds"];
-
-fn error_reply(code: &str, message: &str) -> String {
-    serde_json::json!({ "error": { "code": code, "message": message } }).to_string()
-}
-
-/// Validates one `set` call (`tab`, `key`, `value` strings, schemas/set-setting.json); the kernel write itself
-/// needs the settings host call, which the plugin runtime does not offer yet.
-fn set_setting_reply(method: &str, payload: &str) -> String {
-    if method != "set" {
-        return error_reply("not-found", "unknown method");
-    }
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) else {
-        return error_reply("invalid-argument", "the payload is not JSON");
-    };
-    let text = |name: &str| parsed.get(name).and_then(serde_json::Value::as_str);
-    let (Some(tab), Some(key), Some(value)) = (text("tab"), text("key"), text("value")) else {
-        return error_reply(
-            "invalid-argument",
-            "tab, key and value are required strings",
-        );
-    };
-    if tab != "animations" {
-        return error_reply(
-            "permission-denied",
-            "this plugin owns only the animations tab",
-        );
-    }
-    let valid = match key {
-        "scene" => SCENES.contains(&value),
-        "semantic" => value == "true" || value == "false",
-        "observer" | "saved_places" => serde_json::from_str::<serde_json::Value>(value).is_ok(),
-        _ => return error_reply("invalid-argument", "unknown key"),
-    };
-    if !valid {
-        return error_reply("invalid-argument", "the value is not allowed for this key");
-    }
-    error_reply(
-        "unsupported",
-        "kernel settings cannot be written from the plugin yet",
+/// Stores one validated value in the `animations` kernel tab (grant `settings.write-kernel:animations`).
+/// The kernel's own refusal, for example a missing grant, becomes the reply.
+fn write_kernel_setting(write: &set_setting::Write) -> Result<(), set_setting::Refusal> {
+    let mut api = host();
+    HostKernelSettings::write(
+        &mut *api,
+        set_setting::TAB.to_owned(),
+        write.key.clone(),
+        write.value_json.clone(),
     )
+    .map_err(|error| set_setting::Refusal {
+        code: error.code.as_str().to_owned(),
+        message: error.message,
+    })
 }
 
 /// The gallery panel: a single paragraph naming the tab until the scene list can be read.

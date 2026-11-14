@@ -32,9 +32,10 @@ fn assert_alert_channels_agree(submissions: &[Submission]) -> bool {
         "desktop notice and sound must agree: {submissions:?}"
     );
     assert!(
-        !submissions
-            .iter()
-            .any(|submission| matches!(submission.intent, Intent::Notify(_)) && !notified),
+        !submissions.iter().any(|submission| matches!(
+            &submission.intent,
+            Intent::Notify(spec) if !notified && !spec.title.ends_with(" needs approval")
+        )),
         "a non-finished transition raised an unexpected notice: {submissions:?}"
     );
     notified

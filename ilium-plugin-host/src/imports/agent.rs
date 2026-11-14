@@ -5,8 +5,8 @@
 use ilium_plugin_api::generated::primitives::agent::{
     AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn,
 };
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
@@ -26,11 +26,6 @@ const MAX_LABEL_CELLS: usize = 32;
 const MAX_TRANSCRIPT_TURNS: u32 = 512;
 /// Most bytes a transcript request returns.
 const MAX_TRANSCRIPT_BYTES: u32 = 4 * 1024 * 1024;
-
-thread_local! {
-    /// Registered signatures by id.
-    static SIGNATURES: RefCell<HashMap<String, SignatureSpec>> = RefCell::new(HashMap::new());
-}
 
 /// Builds a refusal with the given code and a plain-text message.
 fn refuse(code: ErrorCode, message: &str) -> PluginError {
@@ -78,9 +73,22 @@ fn validate_signature(spec: &SignatureSpec) -> Result<(), PluginError> {
     Ok(())
 }
 
-/// Host side of the `agent` interface.
-#[derive(Debug)]
-pub struct AgentImport;
+/// Host side of the `agent` interface of one plugin instance: the signatures it registered are its
+/// own and go away with it. Cloning shares them (a test harness keeps one instance and hands out
+/// clones).
+#[derive(Debug, Clone, Default)]
+pub struct AgentImport {
+    signatures: Arc<Mutex<HashMap<String, SignatureSpec>>>,
+}
+
+impl AgentImport {
+    fn signatures(&self) -> MutexGuard<'_, HashMap<String, SignatureSpec>> {
+        // Every writer does one insert, so the map is consistent after a panic.
+        self.signatures
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
 
 impl HostAgent for AgentImport {
     fn agents(&mut self) -> Vec<AgentPane> {
@@ -102,9 +110,7 @@ impl HostAgent for AgentImport {
 
     fn register_signature(&mut self, spec: SignatureSpec) -> Result<(), PluginError> {
         validate_signature(&spec)?;
-        SIGNATURES.with(|signatures| {
-            signatures.borrow_mut().insert(spec.id.clone(), spec);
-        });
+        self.signatures().insert(spec.id.clone(), spec);
         Ok(())
     }
 
@@ -129,12 +135,10 @@ impl HostAgent for AgentImport {
             return Err(refuse(ErrorCode::NotFound, "pane is not an identified agent"));
         }
         // A button belongs to the plugin only when a registered signature declares it as an action.
-        let owns_button = SIGNATURES.with(|signatures| {
-            signatures
-                .borrow()
-                .values()
-                .any(|spec| spec.actions.iter().any(|action| action.id == button))
-        });
+        let owns_button = self
+            .signatures()
+            .values()
+            .any(|spec| spec.actions.iter().any(|action| action.id == button));
         if !owns_button {
             return Err(refuse(ErrorCode::NotFound, "button is not owned by this plugin"));
         }
@@ -210,14 +214,14 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_a_valid_minimal_spec() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert_eq!(import.register_signature(valid_spec()), Ok(()));
     }
 
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_an_empty_id_with_invalid_argument() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.id = String::new());
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -225,7 +229,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_an_id_of_exactly_64_characters() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.id = "a".repeat(64));
         assert_eq!(import.register_signature(spec), Ok(()));
     }
@@ -233,7 +237,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_an_id_of_65_characters() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.id = "a".repeat(65));
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -241,7 +245,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_ids_outside_lowercase_digits_and_hyphen() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         for bad_id in [
             "Example-Agent",
             "example_agent",
@@ -256,7 +260,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_an_empty_process_name_list() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.process_names = Vec::new());
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -264,7 +268,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_exactly_32_process_names() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.process_names = (0..32).map(|index| format!("agent-{index}")).collect();
         });
@@ -274,7 +278,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_33_process_names() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.process_names = (0..33).map(|index| format!("agent-{index}")).collect();
         });
@@ -284,7 +288,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_an_empty_process_name_entry() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.process_names = vec![String::new()]);
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -292,7 +296,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_a_process_name_of_exactly_255_bytes() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.process_names = vec!["a".repeat(255)]);
         assert_eq!(import.register_signature(spec), Ok(()));
     }
@@ -300,7 +304,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_a_process_name_of_256_bytes() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.process_names = vec!["a".repeat(256)]);
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -308,7 +312,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_a_relative_process_name_with_a_slash() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| spec.process_names = vec!["bin/example-agent".to_string()]);
         assert_refused_with(import.register_signature(spec), ErrorCode::InvalidArgument);
     }
@@ -316,7 +320,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_an_absolute_process_path() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.process_names = vec!["/usr/local/bin/example-agent".to_string()];
         });
@@ -326,7 +330,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_exactly_32_aliases() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.aliases = (0..32).map(|index| format!("alias-{index}")).collect();
         });
@@ -336,7 +340,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_33_aliases() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.aliases = (0..33).map(|index| format!("alias-{index}")).collect();
         });
@@ -346,7 +350,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_exactly_32_actions() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.actions = (0..32)
                 .map(|index| SignatureAction {
@@ -362,7 +366,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_33_actions() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.actions = (0..33)
                 .map(|index| SignatureAction {
@@ -378,7 +382,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_accepts_action_keys_of_exactly_1_kib() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.actions = vec![SignatureAction {
                 id: "compact".to_string(),
@@ -392,7 +396,7 @@ mod tests {
     /// REQ: PRI-010
     #[test]
     fn register_signature_refuses_action_keys_over_1_kib() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let spec = spec_with(|spec| {
             spec.actions = vec![SignatureAction {
                 id: "compact".to_string(),
@@ -406,7 +410,7 @@ mod tests {
     /// REQ: PRI-012
     #[test]
     fn set_toolbar_state_refuses_an_unknown_pane_with_not_found() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result =
             import.set_toolbar_state("compact".to_string(), Some(UNKNOWN_PANE), true, None);
         assert_refused_with(result, ErrorCode::NotFound);
@@ -415,7 +419,7 @@ mod tests {
     /// REQ: PRI-012
     #[test]
     fn set_toolbar_state_refuses_a_button_the_plugin_does_not_own_with_not_found() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result = import.set_toolbar_state("no-such-button".to_string(), None, true, None);
         assert_refused_with(result, ErrorCode::NotFound);
     }
@@ -423,7 +427,7 @@ mod tests {
     /// REQ: PRI-012
     #[test]
     fn set_toolbar_state_refuses_a_label_of_33_cells_with_invalid_argument() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result =
             import.set_toolbar_state("compact".to_string(), None, true, Some("x".repeat(33)));
         assert_refused_with(result, ErrorCode::InvalidArgument);
@@ -432,7 +436,7 @@ mod tests {
     /// REQ: PRI-012
     #[test]
     fn set_toolbar_state_does_not_reject_a_label_of_exactly_32_cells() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result =
             import.set_toolbar_state("compact".to_string(), None, true, Some("x".repeat(32)));
         if let Err(error) = result {
@@ -448,42 +452,42 @@ mod tests {
     /// REQ: PRI-013
     #[test]
     fn agents_returns_an_empty_list_when_no_pane_is_identified() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert!(import.agents().is_empty());
     }
 
     /// REQ: PRI-013
     #[test]
     fn view_returns_none_for_an_unidentified_pane() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert_eq!(import.view(UNKNOWN_PANE), None);
     }
 
     /// REQ: PRI-013
     #[test]
     fn view_returns_none_for_pane_zero() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert_eq!(import.view(NodeId(0)), None);
     }
 
     /// REQ: PRI-013
     #[test]
     fn session_returns_none_for_an_unidentified_pane() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert_eq!(import.session(UNKNOWN_PANE), None);
     }
 
     /// REQ: PRI-013
     #[test]
     fn last_prompt_returns_none_for_an_unidentified_pane() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         assert_eq!(import.last_prompt(UNKNOWN_PANE), None);
     }
 
     /// REQ: PRI-015
     #[test]
     fn view_reports_no_activity_before_identification() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let activity = import.view(UNKNOWN_PANE).map(|view| view.activity);
         assert!(
             activity.is_none() || activity == Some(AgentActivity::None),
@@ -494,7 +498,7 @@ mod tests {
     /// REQ: PRI-014
     #[test]
     fn transcript_refuses_a_pane_without_a_session_with_not_found() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result = import.transcript(TranscriptQuery {
             pane: UNKNOWN_PANE,
             last_turns: 20,
@@ -509,7 +513,7 @@ mod tests {
     /// REQ: PRI-014
     #[test]
     fn transcript_accepts_the_limit_of_512_turns_and_4_mib() {
-        let mut import = AgentImport;
+        let mut import = AgentImport::default();
         let result = import.transcript(TranscriptQuery {
             pane: UNKNOWN_PANE,
             last_turns: 512,
@@ -523,5 +527,26 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn registered_signatures_belong_to_the_instance() {
+        let mut owner = AgentImport::default();
+        let mut stranger = AgentImport::default();
+        let spec = spec_with(|spec| {
+            spec.actions = vec![SignatureAction {
+                id: "go".to_string(),
+                keys: "x".to_string(),
+                allowed_when: None,
+            }];
+        });
+        owner.register_signature(spec).expect("registered");
+        assert!(owner
+            .set_toolbar_state("go".to_string(), None, true, None)
+            .is_ok());
+        let refused = stranger
+            .set_toolbar_state("go".to_string(), None, true, None)
+            .expect_err("the other instance never registered the button");
+        assert_eq!(refused.code, ErrorCode::NotFound);
     }
 }
