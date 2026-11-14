@@ -1557,6 +1557,7 @@ mod tests {
         let cleared = single(key_reaction(
             &model,
             &mut state,
+            SCREEN,
             KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
             Instant::now(),
         ));
@@ -1569,11 +1570,17 @@ mod tests {
         let mut state = state();
         let now = Instant::now();
         assert_eq!(
-            key_reaction(&model, &mut state, press(KeyCode::Char('x')), now),
+            key_reaction(&model, &mut state, SCREEN, press(KeyCode::Char('x')), now),
             Reaction::Stay,
             "the change waits for its debounce"
         );
-        let actions = sent(key_reaction(&model, &mut state, press(KeyCode::Enter), now));
+        let actions = sent(key_reaction(
+            &model,
+            &mut state,
+            SCREEN,
+            press(KeyCode::Enter),
+            now,
+        ));
         assert_eq!(actions.len(), 2, "{actions:?}");
         assert_eq!(actions[0].kind, ActionKind::Changed);
         assert_eq!(actions[0].value, Some(ActionValue::Text("abx".to_owned())));
@@ -1594,7 +1601,7 @@ mod tests {
         let model = model(&rename(200, false)).expect("dialog");
         let mut state = state();
         let start = Instant::now();
-        key_reaction(&model, &mut state, press(KeyCode::Char('x')), start);
+        key_reaction(&model, &mut state, SCREEN, press(KeyCode::Char('x')), start);
         assert!(state.edits.next_due().is_some());
         let mut released = Vec::new();
         release_due(
@@ -1605,10 +1612,11 @@ mod tests {
         assert_eq!(released.len(), 1);
         assert_eq!(released[0].value, Some(ActionValue::Text("abx".to_owned())));
 
-        key_reaction(&model, &mut state, press(KeyCode::Char('y')), start);
+        key_reaction(&model, &mut state, SCREEN, press(KeyCode::Char('y')), start);
         let moved = single(key_reaction(
             &model,
             &mut state,
+            SCREEN,
             press(KeyCode::Down),
             start,
         ));
