@@ -3,8 +3,8 @@ use super::{LeafContext, ProtectedSplitViewContext, RestructureCompletionClient}
 use crate::background_animation::AnimationSettings;
 use crate::semantic_animation::{validate_recommendations, ProposedRecommendations};
 use ilium_core::animation_recommendation::{
-    AnimationRecommendation, PlanAnimationEntry, MAXIMUM_RECOMMENDATION_DEPTH,
-    MAXIMUM_RECOMMENDATION_NODES,
+    AnimationRecommendation, PlanAnimationEntry, RecommendedRestructurePlan,
+    MAXIMUM_RECOMMENDATION_DEPTH, MAXIMUM_RECOMMENDATION_NODES,
 };
 use ilium_core::{NodeId, Tree};
 use serde_json::Value;
@@ -73,13 +73,13 @@ pub fn infer_project_restructure<G: RestructureCompletionClient>(
     splits: &[ProtectedSplitViewContext],
     snapshot: &RecommendationSnapshot,
     animation_home: &Path,
-) -> anyhow::Result<super::RestructureInference> {
+) -> anyhow::Result<RecommendedRestructurePlan> {
     let authored = crate::project_config::load(animation_home)?.animation;
     let recommendation_context = RecommendationContext {
         snapshot: snapshot.clone(),
         authored,
     };
-    super::infer_restructure_with_recaps(
+    super::infer_restructure_plan_with_protected_splits(
         generator,
         contexts,
         structure,
@@ -114,7 +114,6 @@ fn collect_pointers(
                 "short_title",
                 "icon",
                 "command_hint",
-                "recap",
                 "animation",
             ],
             "folder" => &["kind", "id", "title", "short_title", "icon", "animation"],

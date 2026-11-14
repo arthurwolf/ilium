@@ -42,7 +42,7 @@ fn hosted_scene_renders_scene_time_wall_time_and_speed_through_the_host() {
     let mut frame = AnimationFrame::default();
     *frame.host_mut() = fake_host(&probe);
     let settings = AnimationSettings {
-        kind: AnimationKind::Spectrum,
+        kind: AnimationKind::Video,
         speed_percent: 200,
         ..Default::default()
     };
@@ -62,7 +62,7 @@ fn hosted_frame_reuses_the_render_inside_one_bucket_and_repacks_for_density() {
     let mut frame = AnimationFrame::default();
     *frame.host_mut() = fake_host(&probe);
     let settings = AnimationSettings {
-        kind: AnimationKind::Spectrum,
+        kind: AnimationKind::Video,
         ..Default::default()
     };
     let time = Duration::from_secs(1);
@@ -113,7 +113,6 @@ fn a_scene_reporting_cell_colors_colors_the_cells_and_others_do_not() {
 fn catalog_has_unique_serializable_scenes_in_user_order() {
     let expected = [
         "video",
-        "spectrum",
         "images",
         "plugin_scene",
         "wikipedia",
@@ -282,20 +281,20 @@ fn settings_enabled(settings: &AnimationSettings) -> bool {
 #[test]
 fn hosted_controls_route_through_the_crate_and_report_errors() {
     let mut settings = AnimationSettings {
-        kind: AnimationKind::Spectrum,
+        kind: AnimationKind::Images,
         ..Default::default()
     };
     assert_eq!(
         settings.scene_controls(),
         settings
             .ambient
-            .controls(ilium_ambient::AmbientKind::Spectrum)
+            .controls(ilium_ambient::AmbientKind::Images)
     );
     // Unknown ids are not an error; the crate decides what is.
     assert_eq!(
         settings.set_scene_control("definitely_not_a_control", ControlValue::Number(1)),
         settings.ambient.clone().set_control(
-            ilium_ambient::AmbientKind::Spectrum,
+            ilium_ambient::AmbientKind::Images,
             "definitely_not_a_control",
             ControlValue::Number(1)
         )
@@ -503,12 +502,12 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
                 applied: factory_applied.clone(),
             })
         }));
-        let kind = ilium_ambient::AmbientKind::Spectrum;
+        let kind = ilium_ambient::AmbientKind::Images;
         let mut settings = ilium_ambient::AmbientSettings::default();
         let first = host.sync(kind, &settings, Duration::ZERO);
         // The same settings change nothing.
         assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
-        settings.spectrum.sensitivity += 10;
+        settings.images.motion_strength_percent += 10;
         let second = host.sync(kind, &settings, Duration::from_secs(5));
         assert_ne!(
             first, second,
@@ -528,7 +527,7 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
         );
         // A scene of another kind is never reconfigured with foreign settings.
         host.sync(
-            ilium_ambient::AmbientKind::Spectrum,
+            ilium_ambient::AmbientKind::Video,
             &settings,
             Duration::from_secs(6),
         );

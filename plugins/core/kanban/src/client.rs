@@ -999,6 +999,23 @@ impl State {
                     Outcome::Quiet
                 })
             }
+            // A card dragged with the pointer: the host sends the target column's list key, the
+            // card's item id as `source-key` and the insertion line before the card left.
+            (key, ActionKind::Dropped, Some(ActionValue::Drop(dropped))) => {
+                let column = view::parse_drop_column(key);
+                let card = view::parse_dragged_card(&dropped.source_key);
+                if let (Some(column), Some((source_column, source_card))) = (column, card) {
+                    let index = usize::try_from(dropped.index).unwrap_or(usize::MAX);
+                    self.edit(node, out, |board, _| {
+                        edit_outcome(board.move_dragged_card(
+                            source_column,
+                            source_card,
+                            column,
+                            index,
+                        ))
+                    });
+                }
+            }
             _ => {}
         }
     }

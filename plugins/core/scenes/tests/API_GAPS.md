@@ -41,13 +41,13 @@ removal only. What a scene guest can call now:
 | `log`, `clock`, `codec`, `anim/fonts` | all (`codec`: `inflate`, `deflate`, `get-image-info`, `decode-image`, `sha256`, `hmac-sha256`, `constant-time-equal`, `rasterize-text`) | nothing | `SinkLog` to the client log; `ClockImport`; `CodecImport`; `FontsImport` |
 | `anim/surface` | all | nothing | `SceneSurface` (unchanged) |
 | `storage` | `get`, `put`, `remove`, `keys`, `write-batch`, `lease` | nothing | the plugin's own scene-side buckets under `<data>/plugins/storage` (`wiring::import_provider`) |
-| `fs` | `roots`, `metadata`, `list-dir`, `read`, `read-all`, `scan`, `write`, `write-atomic`, `read-with-revision`, `tail`, `create-dir`, `remove`, `rename`, `lock`, `unlock`, `take-bytes`, `take-entries`, `take-lock`, `take-revisioned`, `take-written` | `fs.read:<scope>` / `fs.write:<scope>` | private `package` (read only), `data`, `cache` under `<data>/plugins/fs/<plugin>/`; `minecraft-saves` read only at `<minecraft java dir>/saves` (`host.rs:1822`, `scene.rs:134`). No `project`, `picked`, agent scopes, `watch`/`unwatch`, `pick` or `propose-agent-config` (not scene grants). |
+| `fs` | `roots`, `metadata`, `list-dir`, `read`, `read-all`, `scan`, `write`, `write-atomic`, `read-with-revision`, `tail`, `create-dir`, `remove`, `rename`, `lock`, `unlock`, `take-bytes`, `take-entries`, `take-lock`, `take-revisioned`, `take-written` | `fs.read:<scope>` / `fs.write:<scope>` | private `package` (read only), `data`, `cache` under `<data>/plugins/fs/<plugin>/`; `minecraft-saves` read only at `<minecraft java dir>/saves` (`host.rs:1822`, `scene.rs:134`). Read-only `picked/<n>`: the paths of the scene's `picker` settings rows, lent per instance in row order on `fs.read:picked` (scenehost pass below). No `project`, agent scopes, `watch`/`unwatch`, `pick` or `propose-agent-config` (not scene grants). |
 | `http` | `fetch`, `take-response`, `open-stream`, `close-stream`, `open-websocket`, `send-websocket` | `http:<host>` | render instance: `take-response` never waits (`scene.rs:197`); job instances: waiting `take-response` (blocking fetch) |
 | `jobs` | `start`, `cancel`, `take-output`, `wait-request`; inside a job `report-progress`, `is-cancelled` | `jobs.run` + `contributes.jobs` | `SceneBackground::start_queued_jobs` (`scene.rs:349`) runs each job in a fresh instance of the same component on its own thread with the job's deadline and memory cap, called before every frame by `SceneGuest::pump_background` (`scene_guest.rs:980`, `plugin_scenes.rs:448`); dropping the scene cancels its jobs (`scene.rs:464`). `wait-request` in the render instance blocks the frame up to its timeout, so a scene should poll `take-output` instead. |
 | `audio` | `devices`, `open-capture`, `open-loopback`, `close-capture`, `play` | `audio.capture` / `audio.loopback` / `audio.playback` | `ClientAudio` |
 | `media` | `open-video`, `open-video-bytes`, `open-video-range`, `next-frame`, `seek`, `close-video` | `media.video` (+ `fs.read:<scope>` for the file) | `FfmpegMedia`: one ffmpeg child per open video. This is the only way a scene reaches ffmpeg. |
 | `location` | `current` | `location.observer` | the shared location row (`ObserverLocation`, `imports/location.rs:48`; `plugin_scenes.rs:248`). Without the grant the spec carries no `location` either. |
-| `geocode` | `search`, `reverse`, `take-places` | `location.geocode` | `GeocodeImport` (answers no places yet; no geocoding provider is wired) |
+| `geocode` | `search`, `reverse`, `take-places` | `location.geocode` | `GeocodeImport::with_backend(ClientGeocoder)`: OSM address search (Photon) then Open-Meteo place search, on a worker thread; `reverse` has no provider and completes without places (scenehost pass below) |
 | `gpu` | `run`, `available` | `gpu.kernels` (unstable) | `GpuImport` CPU kernels |
 | `telemetry` | - | - | not equipped: calls trap with `host.engine-error` |
 
@@ -64,8 +64,8 @@ Compiled and run: not yet (edits only in this pass).
 
 Still not reachable, by design of the manual or the WIT, not by missing host code:
 
-- `ilium:anim/base` exports no `handler`: audio frames (spectrum) need either that export added
-  to the world (WIT change in `reference-wit.md`) or a polling `audio` function.
+- (Resolved in the scenehost pass, 2026-11-14: `ilium:anim/base` has the optional fragment
+  `with-handler`, so a scene listing `handler` in its manifest `exports` receives audio frames.)
 - No `process` import in the scene world and `process.run` is not a scene grant: ffmpeg is reached
   only through `media`; a scene cannot spawn processes.
 - `SavedRuntime` (the history-writer fence of the kernel minecraft scenes) is host-internal; a
@@ -112,3 +112,50 @@ Voxel landscape, chain check (cluster scenes3, 2026-11-14, edits only). Nothing 
 Satellite clouds (cluster scenes1, 2026-11-14, edits only, uncompiled): ported to `src/clouds/` and removed from the kernel. The scene owns no thread: `clouds/refresh.rs` is a per-frame state machine over the host `http` import (one decode per poll, per-request deadline from `Frame.now`). Frames are kept in memory only; the kernel's disk cache of tiles is gone. The setting key `history_hours` became the string choice `history` (`latest`, `6h`, `12h`, `24h`).
 
 Earth at night (cluster scenes2, 2026-11-14, edits only, uncompiled): ported to `src/night_lights/` and removed from the kernel (`ilium-ambient/src/scenes/night_lights*` and `animation_services::satellite` are gone, `AmbientKind::NightLights` and `AnimationKind::NightLights` too; a saved `night_lights` selection loads as the plugin scene kind through a serde alias). The scene owns no thread: `loader.rs` is a per-frame state machine over the host `http` import (probe, collect, one decode per step, banded assembly through `kit::geo_tiles::fill_grid_rows`). Tiles are cached in the plugin's shared storage bucket (rebuildable, values of at most 1 MiB); the kernel's disk cache with a size budget and the worker-panic and admission-refusal paths do not exist in the guest. The manifest grants `http:gibs.earthdata.nasa.gov`.
+
+## Scenehost pass (2026-11-14, edits only, uncompiled)
+
+Host APIs added so the remaining kernel scenes can move; none of the scenes was moved in this pass.
+
+- Handler export on the anim world (spectrum). `reference-wit.md` adds `world with-handler { export
+  ilium:exports/handler@0.1.0; }` beside `with-jobs`; `wit/`, `generated/*`, `glue.rs`,
+  `generated_glue.rs` (handler now lists the `scene` side), `generated_dispatch.rs`,
+  `host_handle.rs` and `bridge_defaults.rs` were regenerated by `tools/extract_wit.py` and
+  `tools/gen_plugin_api.py`. The manifest schema accepts `"exports": ["job-runner", "handler"]` on a
+  scene (`validate.rs`, `reference-manifest-schema.md`, `reference-manifest.md`,
+  `worlds-and-sides.md`, `api-exports.md`). The host already delivered events to a handler
+  (`SceneGuest::pump_background`). The audio capture import was already wired (`ClientAudio`).
+  Open: the SDK side of `scene_body` (`ilium-plugin-sdk-macros/src/component.rs`, owned by another
+  pass) dispatches the handler export to the default lifecycle value, not to the scene's
+  renderer program, so an SDK scene cannot yet read the frames in its renderer.
+- Folders and files for images and video. A scene settings field with the `picker` keyword
+  (`"file"` or `"directory"`) is lent, in row order, as the read-only scope `picked/<n>` on
+  `fs.read:picked` (`scene_controls.rs::picked_paths`, `plugin_scenes.rs` `build`,
+  `wiring/scene.rs::lent_picks`, `imports/fs.rs::extra_scope_root`). `list-dir` lists a folder, a
+  file is read on the empty path, writes are refused. Changing the field rebuilds the scene.
+  Documented in `capability-fs-pick.md`. The row is a typed path: the client has no file dialog
+  on scene settings rows yet. Image decoding is the existing `codec` import; video frames are the
+  existing `media` import (`FfmpegMedia`), which now reaches a picked file.
+- Geocode. `GeocodeImport` takes a `GeocodeBackend`; requests run on a worker thread, answers wait
+  for `take-places`, a failure leaves `none`, one provider request per second per instance
+  (`rate-limited` with `retry-after-ms`). The client lends `ClientGeocoder`
+  (`ilium-client/src/plugin_host/geocode_backend.rs`): OSM address search (Photon, default
+  address settings) then the Open-Meteo place search. Open: no reverse provider; the per-plugin
+  consent prompt of `capability-location-geocode.md` is not implemented; `near` and `language`
+  are not passed to the providers; the manual's Nominatim fallback needs a user endpoint and is
+  not used. No `request-completed` outcome is posted, so a failed request (and every `reverse`)
+  looks like a pending one to a polling scene. The OSM address search shares the kernel location
+  picker's process-wide admission gate (one request at a time, 60 s cooldown after a 429 or 503),
+  so a scene that geocodes can make the user's picker answer "already running" or a cooldown.
+- Not done:
+  - The location picker is still special-cased on `AnimationKind::OpenStreetMap`
+    (`location_picker.rs`, `ui.rs`, `animation_settings_ui.rs`), because the OpenStreetMap scene is
+    still a kernel scene. `ExternalSceneFactory::uses_location` already lets a plugin scene ask
+    for the shared location row.
+  - Saved-world host API (minecraft, voxel landscape). `SavedRuntime` is a history-writer fence
+    that has to outlive one scene instance, while a scene's background (jobs) is cancelled when
+    the instance drops. The kernel scenes also use `SceneEnv::resources`, `SceneEnv::cache_dir`,
+    `secure_fs`, the kernel `Worker` and `std::thread`. The scene world has none of these; only the
+    per-instance `cache` scope and `jobs` exist. Moving them needs a host-owned saved-world
+    service that outlives instances, plus a design decision in the manual. That was not attempted
+    here.

@@ -1,0 +1,4 @@
+### Added
+- The local HTTP API can call a plugin service: `POST /v1/plugins/{plugin}/services/{name}/{method}` sends the JSON body to the enabled server plugin that provides the service and returns its reply, with distinct statuses for a missing provider (503), a schema mismatch (400), a timeout (504) and a failed provider (502).
+- Plugins that may read prompts now receive `input-submitted` for each prompt an agent pane records, with the pane's new prompt epoch and whether the user or a plugin sent it; a prompt a plugin sent no longer appears as a line the user typed.
+- A plugin's `send-input` can now carry a prompt epoch or an `if-current` condition (agent activity, screen revision, foreground process); the input is refused as a conflict, naming the condition, when the pane has moved on, instead of being refused as unsupported.

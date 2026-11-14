@@ -691,7 +691,6 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
     let strings = [
         &ambient.location.label,
         &ambient.video.source,
-        &ambient.spectrum.device_name,
         &ambient.images.folders,
         &ambient.images.urls,
         &ambient.openstreetmap.local_path,

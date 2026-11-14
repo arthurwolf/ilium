@@ -4,3 +4,4 @@
 
 ### Removed
 - The recap dot in the pane header, its hover popover and its configurable icon (`chrome_recap`), and the recaps that a project restructure stored on panes.
+- The project restructure prompt no longer carries per-agent recap evidence or asks the model for a short recap; the kernel keeps no recap code.

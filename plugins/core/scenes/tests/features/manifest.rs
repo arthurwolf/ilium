@@ -21,7 +21,8 @@ fn manifest_010_scene_side_only_with_base_world() {
     let m = manifest_value();
     assert_eq!(m["scene"]["entry"], "scene.wasm");
     assert_eq!(m["scene"]["world"], "ilium:anim/base@0.1.0");
-    assert_eq!(m["scene"]["exports"], json!([]));
+    // `handler` receives the audio chunks of the spectrum scene's recording.
+    assert_eq!(m["scene"]["exports"], json!(["handler"]));
     for side in ["server", "client"] {
         assert!(m.get(side).is_none(), "no {side} side expected");
     }
@@ -39,6 +40,8 @@ fn manifest_010_scene_capabilities_are_exact() {
         "media.video",
         "location.observer",
         "gpu.kernels",
+        "audio.loopback",
+        "audio.capture",
         "http:services.swpc.noaa.gov",
         "http:earthquake.usgs.gov",
         "http:opensky-network.org",

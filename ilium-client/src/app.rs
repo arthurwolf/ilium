@@ -440,7 +440,6 @@ impl Eq for VoiceTextOffer {}
 pub enum SettingsTab {
     /// Managed Claude-instruction setup for Ilium agent features.
     Setup,
-    Inference,
     LlmInstructions,
     Titles,
     Triggers,
@@ -551,15 +550,6 @@ impl InferenceSettingField {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InferenceRow {
-    Provider,
-    Field(InferenceSettingField),
-    RefreshModels,
-    KiloGatewayModel,
-    Test,
-}
-
 /// Presentation state for one explicitly user-requested provider model
 /// discovery. Execution stays in `NamingWorkers`; this durable state belongs
 /// to `App` because Settings renders and animates it.
@@ -620,7 +610,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 21] = [
+    pub const ALL: [SettingsTab; 20] = [
         Self::Appearance,
         Self::Icons,
         Self::Toolbar,
@@ -633,7 +623,6 @@ impl SettingsTab {
         Self::Animations,
         Self::Sound,
         Self::VoiceControl,
-        Self::Inference,
         Self::LlmInstructions,
         Self::Titles,
         Self::Triggers,
@@ -647,7 +636,6 @@ impl SettingsTab {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Setup => "Setup",
-            Self::Inference => "Inference",
             Self::LlmInstructions => "LLM Instructions",
             Self::Titles => "Titles",
             Self::Triggers => "Triggers",
@@ -7142,17 +7130,6 @@ impl App {
         self.apply_and_persist_inference_settings(settings);
     }
 
-    pub fn settings_adjust_inference_provider(&mut self, direction: i32) {
-        let providers = ilium_inference::InferenceProviderKind::ALL;
-        let current = providers
-            .iter()
-            .position(|candidate| *candidate == self.inference_settings.selected_provider)
-            .unwrap_or(0);
-        let next =
-            (current as i32 + direction.signum()).rem_euclid(providers.len() as i32) as usize;
-        self.settings_select_inference_provider(providers[next]);
-    }
-
     pub fn settings_open_inference_field(&mut self, field: InferenceSettingField) {
         self.restructure_budget_autosave_deadline = None;
         if field == InferenceSettingField::RestructurePromptTokenLimit {
@@ -7732,23 +7709,6 @@ impl App {
             }
             _ => settings.openai.model = next_model,
         }
-        self.apply_and_persist_inference_settings(settings);
-    }
-
-    pub fn settings_adjust_ollama_model(&mut self, direction: i32) {
-        if self.ollama_models.is_empty() {
-            self.request_model_refresh();
-            return;
-        }
-        let index = self
-            .ollama_models
-            .iter()
-            .position(|model| model == &self.inference_settings.ollama.model)
-            .unwrap_or(0);
-        let next = (index as i32 + direction.signum()).rem_euclid(self.ollama_models.len() as i32)
-            as usize;
-        let mut settings = self.inference_settings.clone();
-        settings.ollama.model = self.ollama_models[next].clone();
         self.apply_and_persist_inference_settings(settings);
     }
 
@@ -19779,7 +19739,7 @@ mod tests {
         assert!(app.openai_models.is_empty());
     }
     #[test]
-    fn openai_keyboard_selection_persists_and_e_keeps_manual_editing() {
+    fn openai_model_step_persists_the_next_catalog_entry() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = configured_openai_app();
         app.config_dir = Some(directory.path().to_path_buf());
@@ -19788,22 +19748,7 @@ mod tests {
             &mut app,
             Ok(vec!["first-model".into(), "second-model".into()]),
         );
-        let index = crate::settings_ui::inference_rows(&app.inference_settings)
-            .iter()
-            .position(|row| *row == InferenceRow::Field(InferenceSettingField::OpenAiModel))
-            .unwrap();
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Inference,
-            selected_row: index,
-            ..Default::default()
-        }));
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Right,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
+        app.settings_adjust_openai_model(1);
         assert_eq!(app.inference_settings.openai.model, "first-model");
         app.settle_filesystem_for_test();
         let loaded = crate::config::load(directory.path()).unwrap();
@@ -19812,73 +19757,11 @@ mod tests {
             loaded.inference.kilo_gateway.model,
             app.inference_settings.kilo_gateway.model
         );
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Char('e'),
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
+        app.settings_open_inference_field(InferenceSettingField::OpenAiModel);
         assert!(matches!(
             app.mode,
             Mode::InferenceSettingPrompt(InferenceSettingField::OpenAiModel, _)
         ));
-    }
-
-    #[test]
-    fn openai_mouse_model_selection_persists_without_opening_manual_prompt() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = configured_openai_app();
-        app.config_dir = Some(directory.path().to_path_buf());
-        app.request_model_refresh();
-        finish_openai_catalog(
-            &mut app,
-            Ok(vec!["first-model".into(), "second-model".into()]),
-        );
-        let state = SettingsState {
-            tab: SettingsTab::Inference,
-            ..Default::default()
-        };
-        app.layout.screen_area = ratatui::layout::Rect::new(0, 0, 180, 60);
-        let mut layout =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
-        // Rendering and real mouse dispatch reserve the instruction panel first.
-        let instruction_height =
-            crate::instruction_settings::panel_height(state.tab, layout.content_area);
-        layout.content_area.y += instruction_height;
-        layout.content_area.height = layout
-            .content_area
-            .height
-            .saturating_sub(instruction_height);
-        let column = layout.content_area.x + 50;
-        let row = (layout.content_area.y..layout.content_area.bottom())
-            .find(|row| {
-                crate::settings_ui::inference_content_hit_with_test(
-                    layout.content_area,
-                    0,
-                    ratatui::layout::Position::new(column, *row),
-                    &app.inference_settings,
-                    &app.inference_test_state,
-                    &app.model_discovery,
-                ) == Some((InferenceRow::Field(InferenceSettingField::OpenAiModel), 1))
-            })
-            .expect("model row has a real mouse hit target");
-        app.mode = Mode::Settings(Box::new(state));
-        crate::mouse::handle_mouse_event(
-            &mut app,
-            crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                column,
-                row,
-                modifiers: crossterm::event::KeyModifiers::NONE,
-            },
-        );
-        assert_eq!(app.inference_settings.openai.model, "first-model");
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        app.settle_filesystem_for_test();
-        let loaded = crate::config::load(directory.path()).unwrap();
-        assert_eq!(loaded.inference.openai.model, "first-model");
-        assert_eq!(loaded.inference.openai.api_key, "fixture-key");
     }
 
     #[test]
@@ -24329,8 +24212,10 @@ mod tests {
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Git);
         assert_eq!(SettingsTab::Git.next(), SettingsTab::Animations);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
-        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
-        assert_eq!(SettingsTab::Inference.next(), SettingsTab::LlmInstructions);
+        assert_eq!(
+            SettingsTab::VoiceControl.next(),
+            SettingsTab::LlmInstructions
+        );
         assert_eq!(SettingsTab::LlmInstructions.next(), SettingsTab::Titles);
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::CustomAgents);

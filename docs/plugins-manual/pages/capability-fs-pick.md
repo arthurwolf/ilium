@@ -240,6 +240,14 @@ No first-party plugin in the feature mapping lists `fs.pick` in its capability c
 paths that the user picked, under the `picked` scope. A scene gets its path from a settings field with
 the `picker` keyword, so it declares `fs.read:picked` without `fs.pick`.
 
+The host lends a scene the paths of its `picker` settings fields when it builds the scene: the
+`n`-th field with `picker` (`"file"` or `"directory"`), in the order the settings rows are shown, is
+the scope `picked/<n>`. A leading `~/` in the field is the home folder. A lent path is read only,
+even with `fs.write:picked`; a field that is empty or relative, or a path that does not exist, has
+no scope. A folder is listed with `list-dir` on the empty path; a file is read on the empty path.
+Changing the field rebuilds the scene, which then sees the new path. `fs.roots` lists each lent
+scope.
+
 ### See also
 
 - [fs.read](/pages/capability-fs-read/) for the read functions that work on a picked path.

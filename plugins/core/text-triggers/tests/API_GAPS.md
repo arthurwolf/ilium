@@ -38,3 +38,9 @@ Not moved: `preview.rs`, `rows.rs` (client dialog and tab rows: G2 and G8, text 
 ## Move blockers (re-verified 2026-11-14, second pass)
 
 The per-file reasons and the blocker keys B1 to B10 (each with its evidence in the source) are in `docs/tasks/02-cuts/text-triggers.md`. The earlier K1 (no `intent_routing.rs`), K3 (no popup text input) and K6 (no terminal menu entries) of this section are closed by the consumer streams; the rest were re-read against the current tree.
+
+## Extension hooks wired (2026-11-14)
+
+- `before-fire`: every due reply runs the veto chain `ilium.core.text-triggers/before-fire` first, with payload `{ rule, pane, match, reply_length }` (`match` = the newest text the rule matched on the scanned screen, `reply_length` in characters, `pane` as decimal text because the declared `payload_schema` types it `string` and the host refuses a non-conforming payload; `tests/features/extension_points.rs` expects an integer there, which the schema would reject). The send is held until `request-completed`; an `ok` chain sends it (after the rule is checked again), a refused or failed chain drops it with an info log. A hook that cannot start because the point is unknown or not granted sends at once, since no contributor can exist; any other start error drops the reply with a warning.
+- `fired`: after a reply is sent the server publishes `ilium.core.text-triggers/fired` `{ rule, pane }`; the manifest and the page's complete manifest declare it under `contributes.topics.publishes`.
+- Not yet wired: the `rule-packs` collect point (pack rules are not merged into the rule list) and the `test-rule` service. The FakeHost feature tests in `tests/features/extension_points.rs` still deliver `output-matched` events and short point names (`before-fire`), so they do not reach the screen-scan server; they need porting to `screen-changed` and full point names.

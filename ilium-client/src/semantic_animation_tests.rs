@@ -2,18 +2,22 @@ use super::*;
 use ControlValue::{Bool, Index, Number, Text};
 
 #[test]
-fn capture_inputs_remain_authored_while_render_controls_remain_available() {
-    for (kind, id) in [(AnimationKind::Spectrum, "input")] {
-        assert!(!inventory(kind).unwrap().contains_key(id));
-        assert!(validate_recommendation(
-            &proposal(kind, vec![(id, Index(0))]),
-            &AnimationSettings::default(),
-        )
-        .is_err());
-    }
-    assert!(inventory(AnimationKind::Spectrum)
+fn discovery_inputs_remain_authored_while_render_controls_remain_available() {
+    let mut authored = AnimationSettings {
+        kind: AnimationKind::Images,
+        ..Default::default()
+    };
+    authored.set_scene_control("mode", Index(1)).unwrap();
+    authored.ambient.images.folders = "synthetic-folder-not-opened".into();
+    assert!(!inventory(AnimationKind::Images)
         .unwrap()
-        .contains_key("refresh_rate"));
+        .contains_key("recursive"));
+    let mut raw = proposal(AnimationKind::Images, vec![("recursive", Bool(true))]);
+    raw.resources = ResourcePolicy::Authored;
+    assert!(validate_recommendation(&raw, &authored).is_err());
+    assert!(inventory(AnimationKind::Images)
+        .unwrap()
+        .contains_key("motion_strength"));
 }
 
 #[test]
@@ -139,10 +143,6 @@ fn conditional_inventory_is_not_default_only() {
             AnimationKind::Video,
             vec!["slowed_percent", "scene_seconds", "seed"],
         ),
-        (
-            AnimationKind::Spectrum,
-            vec!["bar_gap", "spectrogram_speed", "orientation"],
-        ),
     ] {
         let rows = inventory(kind).unwrap();
         for id in ids {
@@ -157,7 +157,7 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     let base = AnimationSettings::default();
     for bad in [
         proposal(AnimationKind::OpenStreetMap, vec![("place", Index(0))]),
-        proposal(AnimationKind::Spectrum, vec![("input", Index(0))]),
+        proposal(AnimationKind::Images, vec![("recursive", Bool(true))]),
         proposal(
             AnimationKind::Wikipedia,
             vec![("topic", Text("Paris".into()))],
@@ -227,7 +227,7 @@ fn paris_is_offline_even_when_authored_osm_was_custom() {
 #[test]
 fn saved_choices_cannot_silently_change() {
     let base = AnimationSettings::default();
-    let raw = proposal(AnimationKind::Spectrum, vec![("style", Index(0))]);
+    let raw = proposal(AnimationKind::Images, vec![("fit", Index(0))]);
     let mut rec = validate_recommendation(&raw, &base).unwrap();
     assert!(resolve_recommendation(&rec, &base).is_ok());
     let mut bad = raw;
@@ -236,7 +236,7 @@ fn saved_choices_cannot_silently_change() {
     let choice = rec
         .parameters
         .iter_mut()
-        .find(|parameter| parameter.id == "style")
+        .find(|parameter| parameter.id == "fit")
         .unwrap();
     let AnimationValue::Choice { label, .. } = &mut choice.value else {
         panic!("choice")
@@ -298,29 +298,6 @@ fn video_and_fixed_time_require_existing_authored_resources() {
 }
 
 #[test]
-fn capture_and_renderer_selection_are_not_semantic_parameters() {
-    let mut base = AnimationSettings {
-        kind: AnimationKind::Spectrum,
-        ..Default::default()
-    };
-    base.set_scene_control("input", Index(1)).unwrap();
-    let raw = proposal(AnimationKind::Spectrum, vec![("style", Index(6))]);
-    let rec = validate_recommendation(&raw, &base).unwrap();
-    let resolved = resolve_recommendation(&rec, &base).unwrap();
-    assert_eq!(selected(&resolved, "input"), Some(1));
-    assert_eq!(
-        resolved.ambient.spectrum.device_name,
-        base.ambient.spectrum.device_name
-    );
-    for raw in [
-        proposal(AnimationKind::Spectrum, vec![("input", Index(0))]),
-        proposal(AnimationKind::Images, vec![("recursive", Bool(true))]),
-    ] {
-        assert!(validate_recommendation(&raw, &base).is_err());
-    }
-}
-
-#[test]
 fn pointer_table_is_required_total_and_round_trips_durable_values() {
     let base = AnimationSettings::default();
     let definition = NamedRecommendation {
@@ -353,23 +330,6 @@ fn pointer_table_is_required_total_and_round_trips_durable_values() {
 #[test]
 fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values() {
     let base = AnimationSettings::default();
-    let cases = [proposal(
-        AnimationKind::Spectrum,
-        vec![("ceiling_db", Number(-20)), ("floor_db", Number(-30))],
-    )];
-    for raw in cases {
-        let forward = validate_recommendation(&raw, &base).unwrap();
-        let mut reverse = raw;
-        reverse.parameters.reverse();
-        assert_eq!(validate_recommendation(&reverse, &base).unwrap(), forward);
-        assert!(!resolve_recommendation(&forward, &base).unwrap().enabled);
-    }
-    for raw in [proposal(
-        AnimationKind::Spectrum,
-        vec![("ceiling_db", Number(-25)), ("floor_db", Number(-30))],
-    )] {
-        assert!(validate_recommendation(&raw, &base).is_err());
-    }
     let mut authored = base.clone();
     authored.kind = AnimationKind::Images;
     authored.set_scene_control("mode", Index(1)).unwrap();
@@ -391,14 +351,4 @@ fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values()
         .unwrap()
         .value = Number(3);
     assert!(validate_recommendation(&raw, &authored).is_err());
-}
-
-#[test]
-fn conditional_controls_are_exposed_and_capture_inputs_are_not() {
-    let spectrum = inventory(AnimationKind::Spectrum).unwrap();
-    for id in ["bar_width", "bar_gap", "spectrogram_speed"] {
-        assert!(spectrum.contains_key(id), "{id}");
-    }
-    assert!(!spectrum.contains_key("input"));
-    assert!(!spectrum.contains_key("device_name"));
 }

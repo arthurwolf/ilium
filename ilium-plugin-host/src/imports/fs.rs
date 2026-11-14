@@ -602,6 +602,19 @@ fn access_family(access: Access) -> &'static [&'static str] {
     }
 }
 
+/// The scope a grant names for the read-only scope `scope`: `picked` for a `picked/<n>` path the
+/// host lent the instance (a scene's `picker` settings row), the scope itself otherwise.
+fn granted_scope_name(scope: &str) -> &str {
+    if scope.starts_with(SCOPE_PICKED_PREFIX) {
+        "picked"
+    } else {
+        scope
+    }
+}
+
+/// The prefix of an agent configuration scope, `agent-config:<agent>`.
+const AGENT_CONFIG_PREFIX: &str = "agent-config:";
+
 /// The root and writability of a `picked/<n>` or read-only named scope.
 fn extra_scope_root(
     state: &FsState,
@@ -627,8 +640,13 @@ fn extra_scope_root(
                 .get(index)
                 .cloned()
         });
-        return match chosen {
-            Some(root) if granted => Ok((root, state.env.holds("fs.write:picked"))),
+        // A path the host lent the instance (the `picker` settings rows of a scene, configured
+        // with `configure_read_only_scope("picked/<n>", ..)`) is read only; a pick the user made
+        // through `pick` keeps its index.
+        let lent = state.read_only.get(scope).cloned();
+        return match (chosen, lent) {
+            (Some(root), _) if granted => Ok((root, state.env.holds("fs.write:picked"))),
+            (None, Some(root)) if granted && matches!(access, Access::Read) => Ok((root, false)),
             _ => Err(refused()),
         };
     }
@@ -639,9 +657,18 @@ fn extra_scope_root(
         Access::Read => state.env.holds(&format!("fs.read:{scope}")),
         // The agent configuration folders are never watched (api-fs "Scopes").
         Access::Watch => {
-            !scope.starts_with("agent-config:") && state.env.holds(&format!("fs.watch:{scope}"))
+            !scope.starts_with(AGENT_CONFIG_PREFIX) && state.env.holds(&format!("fs.watch:{scope}"))
         }
-        Access::Write | Access::Lock => false,
+        // The agent configuration folders are never written through fs (CAP-886); a plugin that
+        // reads one and may propose changes to it takes advisory locks there, so two proposers
+        // take turns between reading a revision and proposing (api-fs "Locks").
+        Access::Lock => scope
+            .strip_prefix(AGENT_CONFIG_PREFIX)
+            .is_some_and(|agent| {
+                state.env.holds(&format!("fs.read:{scope}"))
+                    && state.env.holds(&format!("agent-config.propose:{agent}"))
+            }),
+        Access::Write => false,
     };
     if granted {
         Ok((root.clone(), false))
@@ -1410,7 +1437,11 @@ impl HostFs for FsImport {
             state
                 .read_only
                 .keys()
-                .filter(|scope| state.env.holds(&format!("fs.read:{scope}")))
+                .filter(|scope| {
+                    state
+                        .env
+                        .holds(&format!("fs.read:{}", granted_scope_name(scope)))
+                })
                 .map(|scope| ScopeRoot {
                     scope: scope.clone(),
                     writable: false,
@@ -1685,7 +1716,11 @@ impl HostFs for FsImport {
             ));
         }
         let resolved = self.resolve(&path, Access::Lock)?;
-        resolved.require_writable()?;
+        // An agent configuration scope stays read only; resolving it for a lock already
+        // checked its read and propose grants.
+        if !resolved.scope.starts_with(AGENT_CONFIG_PREFIX) {
+            resolved.require_writable()?;
+        }
         self.with_state(|state| {
             let conflicts = state.held_locks.values().any(|(held_key, held_exclusive)| {
                 *held_key == resolved.key && (exclusive || *held_exclusive)
@@ -2104,6 +2139,129 @@ mod tests {
             .roots()
             .iter()
             .all(|root| root.scope != "agent-sessions:claude"));
+    }
+
+    /// REQ: CAP-886
+    #[test]
+    fn an_agent_config_scope_locks_on_read_and_propose_but_never_writes() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        std::fs::write(scratch.path().join("CLAUDE.md"), b"# rules\n").expect("instructions");
+        let granted = |grants: &[&str]| {
+            let events = PendingEvents::new();
+            let mut fs_import = FsImport::new(
+                ImportEnv::unrestricted()
+                    .with_events(events.clone())
+                    .with_grants(grants.iter().map(|grant| (*grant).to_owned()).collect()),
+            );
+            fs_import
+                .configure_read_only_scope("agent-config:claude", scratch.path())
+                .expect("scope root");
+            (fs_import, events)
+        };
+        let (mut setup, events) =
+            granted(&["fs.read:agent-config:claude", "agent-config.propose:claude"]);
+        let request = setup
+            .lock(fs_path("agent-config:claude", "CLAUDE.md"), true, 0)
+            .expect("lock accepted");
+        assert_eq!(wait_for_completion(&events, request), Outcome::Ok);
+        let lock = setup.take_lock(request).expect("lock id");
+        assert_eq!(
+            error_code_of(setup.lock(fs_path("agent-config:claude", "CLAUDE.md"), false, 0)),
+            Some(ErrorCode::Conflict),
+            "the exclusive lock is held"
+        );
+        setup.unlock(lock);
+        assert_eq!(
+            error_code_of(setup.write(
+                fs_path("agent-config:claude", "CLAUDE.md"),
+                b"x".to_vec(),
+                WriteMode::Replace
+            )),
+            Some(ErrorCode::NotPermitted),
+            "agent configuration is changed only through a proposal"
+        );
+        let (mut reader, _) = granted(&["fs.read:agent-config:claude"]);
+        assert_eq!(
+            error_code_of(reader.lock(fs_path("agent-config:claude", "CLAUDE.md"), true, 0)),
+            Some(ErrorCode::NotPermitted),
+            "a lock needs the propose grant too"
+        );
+        let (mut other_agent, _) =
+            granted(&["fs.read:agent-config:claude", "agent-config.propose:codex"]);
+        assert_eq!(
+            error_code_of(other_agent.lock(fs_path("agent-config:claude", "CLAUDE.md"), true, 0)),
+            Some(ErrorCode::NotPermitted)
+        );
+    }
+
+    #[test]
+    fn picked_paths_lent_by_the_host_list_and_read_on_the_picked_read_grant() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let pictures = scratch.path().join("Pictures");
+        std::fs::create_dir_all(pictures.join("trips")).expect("picture folder");
+        std::fs::write(pictures.join("cat.png"), b"png").expect("picture");
+        let single = scratch.path().join("one.jpg");
+        std::fs::write(&single, b"jpg").expect("single picture");
+        let lent = |grants: &[&str]| {
+            let mut fs_import = FsImport::new(
+                ImportEnv::unrestricted()
+                    .with_grants(grants.iter().map(|grant| (*grant).to_owned()).collect()),
+            );
+            fs_import
+                .configure_read_only_scope("picked/0", &pictures)
+                .expect("folder scope");
+            fs_import
+                .configure_read_only_scope("picked/1", &single)
+                .expect("file scope");
+            fs_import
+        };
+        let mut scene = lent(&["fs.read:picked", "fs.write:picked"]);
+        let scopes: Vec<String> = scene.roots().into_iter().map(|root| root.scope).collect();
+        assert!(scopes.contains(&"picked/0".to_owned()), "{scopes:?}");
+        assert!(scopes.contains(&"picked/1".to_owned()), "{scopes:?}");
+        let mut names: Vec<String> = scene
+            .list_dir(fs_path("picked/0", ""), LIST_DIR_MAX_ENTRIES)
+            .expect("folder listed")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["cat.png".to_owned(), "trips".to_owned()]);
+        assert_eq!(
+            scene
+                .read(fs_path("picked/0", "cat.png"), 0, ONE_MIB)
+                .expect("picture read"),
+            b"png".to_vec()
+        );
+        // A file is its own scope: its empty path is the file.
+        assert_eq!(
+            scene
+                .read(fs_path("picked/1", ""), 0, ONE_MIB)
+                .expect("single file read"),
+            b"jpg".to_vec()
+        );
+        // A lent path stays read only, even with a write grant.
+        assert_eq!(
+            error_code_of(scene.write(
+                fs_path("picked/0", "cat.png"),
+                b"x".to_vec(),
+                WriteMode::Replace
+            )),
+            Some(ErrorCode::NotPermitted)
+        );
+        assert_eq!(
+            error_code_of(scene.read(fs_path("picked/0", "../one.jpg"), 0, ONE_MIB)),
+            Some(ErrorCode::NotPermitted)
+        );
+        let mut ungranted = lent(&["fs.read:cache"]);
+        assert_eq!(
+            error_code_of(ungranted.read(fs_path("picked/0", "cat.png"), 0, ONE_MIB)),
+            Some(ErrorCode::NotPermitted)
+        );
+        assert!(ungranted
+            .roots()
+            .iter()
+            .all(|root| !root.scope.starts_with(SCOPE_PICKED_PREFIX)));
     }
     use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
     use ilium_plugin_api::generated::types::paths::FsPath;

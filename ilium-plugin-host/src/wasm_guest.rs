@@ -40,6 +40,7 @@ const CATALOG_PROVIDER: &str = "ilium:exports/catalog-provider@0.1.0";
 const MENU_PROVIDER: &str = "ilium:exports/menu-provider@0.1.0";
 const VIRTUAL_ROWS_PROVIDER: &str = "ilium:exports/virtual-rows-provider@0.1.0";
 const SERVICE_PROVIDER: &str = "ilium:exports/service-provider@0.1.0";
+const DETECTOR: &str = "ilium:exports/detector@0.1.0";
 
 /// A real Wasmtime store and component instance, with no ambient import authority.
 pub struct WasmGuest {
@@ -390,6 +391,21 @@ impl GuestExports for WasmGuest {
                 let argument = encode(&call, SERVICE_PROVIDER, "handle")?;
                 self.invoke_decoded(SERVICE_PROVIDER, "handle", CallClass::Event, &[argument])
                     .map(ExportReply::ServiceReply)
+            }
+            ExportCall::DetectorIdentifyTree(processes) => {
+                let argument = encode(&processes, DETECTOR, "identify-tree")?;
+                self.invoke_decoded(DETECTOR, "identify-tree", CallClass::Detector, &[argument])
+                    .map(ExportReply::DetectorIdentified)
+            }
+            ExportCall::DetectorClassifyScreen(screen) => {
+                let argument = encode(&screen, DETECTOR, "classify-screen")?;
+                self.invoke_decoded(
+                    DETECTOR,
+                    "classify-screen",
+                    CallClass::Detector,
+                    &[argument],
+                )
+                .map(ExportReply::DetectorVerdict)
             }
         }
     }

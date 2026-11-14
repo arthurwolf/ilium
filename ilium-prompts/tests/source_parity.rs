@@ -112,7 +112,6 @@ Track the actual job identity and its final exit/result record, not merely a loc
         );
     }
     let fields: &[&str] = match name {
-        "agent/ask-for-update" => &["custom_instructions"],
         "naming/project-name" => &["project_naming", "naming_and_organization"],
         "naming/session-title" | "naming/terminal-title" => {
             &["entry_naming", "naming_and_organization"]
@@ -122,12 +121,7 @@ Track the actual job identity and its final exit/result record, not merely a loc
     };
     let mut baseline = source.to_owned();
     for field in fields {
-        let purpose = if *field == "custom_instructions" {
-            "ask-for-update"
-        } else {
-            field
-        };
-        let block = format!("{{{{#if {field}}}}}\n<custom-instructions purpose=\"{purpose}\">\n{{{{{field}}}}}\n</custom-instructions>{{{{/if}}}}");
+        let block = format!("{{{{#if {field}}}}}\n<custom-instructions purpose=\"{field}\">\n{{{{{field}}}}}\n</custom-instructions>{{{{/if}}}}");
         baseline = baseline.replace(&block, "");
     }
     baseline

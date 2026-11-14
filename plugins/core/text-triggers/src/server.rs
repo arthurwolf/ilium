@@ -11,17 +11,21 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use ilium_plugin_sdk::host::{HostClock, HostKernelSettings, HostLog, HostTimers, HostTree, Level};
+use ilium_plugin_sdk::host::{
+    ExtensionError, HostClock, HostExtensions, HostKernelSettings, HostLog, HostTimers, HostTopics,
+    HostTree, Level,
+};
 use ilium_plugin_sdk::primitives::{HostTerminal, ScreenPart, TerminalMode};
 use ilium_plugin_sdk::types::{
     ClientId, Delivery as InputDelivery, Event, Intent, MessageEvent, MessageSpec, MessageTarget,
-    NodeId, PluginId, PluginSide, SendInputSpec, Submission, TimerId,
+    NodeId, Outcome, PluginId, PluginSide, RequestId, RequestRef, RequestResult, SendInputSpec,
+    Submission, TimerId,
 };
 use ilium_plugin_sdk::HostApi;
 use serde_json::{json, Value};
 
 use crate::config::{parse_table, validate, Rule};
-use crate::matching::{target_matches, Delivery, DeliveryQueue, PaneKind, Tracker};
+use crate::matching::{last_match, target_matches, Delivery, DeliveryQueue, PaneKind, Tracker};
 use crate::wire::{
     id_from_payload, notice_payload, rule_from_payload, state_payload, toggle_from_payload,
     DELETE_RULE_CHANNEL, NOTICE_CHANNEL, SAVE_RULE_CHANNEL, STATE_CHANNEL, STATE_REQUEST_CHANNEL,
@@ -37,6 +41,10 @@ const RULES_KEY: &str = "triggers";
 const MAX_SCAN_ROWS: u32 = 500;
 /// The shortest timer the host accepts, in milliseconds.
 const MIN_TIMER_MILLIS: u32 = 50;
+/// The veto hook every send passes first: a contributor may refuse it.
+pub const BEFORE_FIRE_POINT: &str = "ilium.core.text-triggers/before-fire";
+/// The topic published after a rule sent its reply, payload `{ rule, pane }`.
+pub const FIRED_TOPIC: &str = "ilium.core.text-triggers/fired";
 
 #[derive(Default)]
 struct ServerState {
@@ -45,6 +53,8 @@ struct ServerState {
     trackers: HashMap<u64, Tracker>,
     queues: HashMap<u64, DeliveryQueue>,
     timer: Option<TimerId>,
+    /// Sends that wait for their `before-fire` chain, by hook request number.
+    held: HashMap<u64, (u64, Delivery)>,
 }
 
 thread_local! {
@@ -221,6 +231,7 @@ fn on_screen(api: &mut dyn HostApi, pane: u64) -> Vec<Submission> {
             let delivery = Delivery {
                 rule_id: rule.id.clone(),
                 message: rule.message.clone(),
+                matched: last_match(&rule.regexp, &lines),
                 detected_at_ms: now,
                 delay_ms: u64::from(rule.delay_seconds) * 1000,
             };
@@ -277,13 +288,91 @@ fn drain(api: &mut dyn HostApi, now: u64) -> Vec<Submission> {
         if !still_valid(api, pane, &delivery) {
             continue;
         }
-        out.push(Submission::new(Intent::SendInput(input_for(
-            pane,
-            &delivery.message,
-        ))));
+        let payload = before_fire_payload(pane, &delivery);
+        match HostExtensions::run_hook(api, BEFORE_FIRE_POINT.to_string(), payload) {
+            // The send waits for the chain; `request-completed` releases or drops it.
+            Ok(request) => with_state(|state| {
+                state.held.insert(request.0, (pane, delivery));
+            }),
+            // Nobody can contribute to a point the host does not know or does not grant.
+            Err(ExtensionError::UnknownPoint | ExtensionError::NotGranted) => {
+                out.extend(fire(api, pane, &delivery));
+            }
+            Err(error) => log(
+                api,
+                Level::Warn,
+                format!(
+                    "text triggers: rule {} not sent, before-fire did not start: {error:?}",
+                    delivery.rule_id
+                ),
+            ),
+        }
     }
     arm_timer(api, now);
     out
+}
+
+/// The `before-fire` payload: rule, pane, match and reply length (in characters). The point's
+/// declared `payload_schema` types `pane` as a string, and the host refuses a payload that does
+/// not conform, so the node id goes as its decimal text.
+fn before_fire_payload(pane: u64, delivery: &Delivery) -> String {
+    json!({
+        "rule": delivery.rule_id,
+        "pane": pane.to_string(),
+        "match": delivery.matched,
+        "reply_length": delivery.message.chars().count(),
+    })
+    .to_string()
+}
+
+/// Whether a finished `before-fire` chain lets the send go on. A refusal (`extension.vetoed`) or
+/// a failed chain stops it: the point is high risk, so a failure refuses.
+fn chain_allows(outcome: &Outcome) -> bool {
+    matches!(
+        outcome,
+        Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_)
+    )
+}
+
+/// Sends a delivery and announces it on the `fired` topic.
+fn fire(api: &mut dyn HostApi, pane: u64, delivery: &Delivery) -> Vec<Submission> {
+    let payload = json!({ "rule": delivery.rule_id, "pane": pane }).to_string();
+    if let Err(error) = HostTopics::publish(api, FIRED_TOPIC.to_string(), payload) {
+        log(
+            api,
+            Level::Warn,
+            format!("text triggers: the fired topic was not published: {error:?}"),
+        );
+    }
+    vec![Submission::new(Intent::SendInput(input_for(
+        pane,
+        &delivery.message,
+    )))]
+}
+
+/// A `before-fire` chain ended: send the held reply when nobody refused and the rule still holds.
+fn on_completed(api: &mut dyn HostApi, result: &RequestResult) -> Vec<Submission> {
+    let RequestRef::Call(RequestId(request)) = result.request else {
+        return Vec::new();
+    };
+    let Some((pane, delivery)) = with_state(|state| state.held.remove(&request)) else {
+        return Vec::new();
+    };
+    if !chain_allows(&result.outcome) {
+        log(
+            api,
+            Level::Info,
+            format!(
+                "text triggers: rule {} on pane {pane} refused by before-fire: {:?}",
+                delivery.rule_id, result.outcome
+            ),
+        );
+        return Vec::new();
+    }
+    if !still_valid(api, pane, &delivery) {
+        return Vec::new();
+    }
+    fire(api, pane, &delivery)
 }
 
 fn arm_timer(api: &mut dyn HostApi, now: u64) {
@@ -317,6 +406,7 @@ fn on_node_removed(api: &mut dyn HostApi, node: NodeId) -> Vec<Submission> {
     let had = with_state(|state| {
         let tracker = state.trackers.remove(&node.0).is_some();
         let queue = state.queues.remove(&node.0).is_some();
+        state.held.retain(|_, (pane, _)| *pane != node.0);
         tracker || queue
     });
     if had {
@@ -424,6 +514,7 @@ pub fn on_event(api: &mut dyn HostApi, event: Event) -> Vec<Submission> {
             Vec::new()
         }
         Event::TimerFired(timer) => on_timer(api, timer),
+        Event::RequestCompleted(result) => on_completed(api, &result),
         Event::NodeRemoved(node) => on_node_removed(api, node),
         Event::Message(message) => on_message(api, &message),
         Event::KernelSettingsChanged(change) if change.tab == SETTINGS_TAB => {
@@ -453,5 +544,38 @@ mod tests {
         assert_eq!(spec.text, "yes");
         assert_eq!(spec.delivery, InputDelivery::Submitted);
         assert_eq!(spec.raw, None);
+    }
+
+    fn delivery(message: &str, matched: &str) -> Delivery {
+        Delivery {
+            rule_id: "confirm".to_owned(),
+            message: message.to_owned(),
+            matched: matched.to_owned(),
+            detected_at_ms: 0,
+            delay_ms: 0,
+        }
+    }
+
+    #[test]
+    fn the_before_fire_payload_names_rule_pane_match_and_reply_length() {
+        let payload: Value =
+            serde_json::from_str(&before_fire_payload(7, &delivery("oui, merci", "(y/n)")))
+                .unwrap();
+        assert_eq!(
+            payload,
+            json!({"rule": "confirm", "pane": "7", "match": "(y/n)", "reply_length": 10})
+        );
+        let accented: Value =
+            serde_json::from_str(&before_fire_payload(7, &delivery("été", ""))).unwrap();
+        assert_eq!(accented["reply_length"], json!(3));
+    }
+
+    #[test]
+    fn only_a_chain_that_ended_ok_lets_the_reply_go() {
+        use ilium_plugin_sdk::types::{ErrorCode, PluginError};
+        assert!(chain_allows(&Outcome::Ok));
+        let vetoed = PluginError::new(ErrorCode::Conflict, "extension.vetoed: x: quiet hours");
+        assert!(!chain_allows(&Outcome::Refused(vetoed.clone())));
+        assert!(!chain_allows(&Outcome::Failed(vetoed)));
     }
 }

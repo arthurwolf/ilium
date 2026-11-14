@@ -223,6 +223,9 @@ impl SettingRow {
                     _ => text,
                 }
             }
+            "text" if self.schema.get("secret").and_then(Value::as_bool) == Some(true) => {
+                masked(self.value.as_str().unwrap_or_default())
+            }
             _ => plain(&self.value),
         }
     }
@@ -464,6 +467,18 @@ impl SettingRow {
     }
 }
 
+/// A secret text row as the list shows it: never the value, only its last four characters.
+fn masked(secret: &str) -> String {
+    if secret.is_empty() {
+        return "Not set".to_owned();
+    }
+    let characters: Vec<char> = secret.chars().collect();
+    let tail: String = characters[characters.len().saturating_sub(4)..]
+        .iter()
+        .collect();
+    format!("••••{tail}")
+}
+
 /// A value as plain text: strings without quotes, numbers without a trailing `.0`.
 fn plain(value: &Value) -> String {
     match value {
@@ -529,6 +544,21 @@ mod tests {
         let rows = rows_for("acme.demo", MANIFEST, &stored);
         assert_eq!(rows[1].value, json!(9));
         assert_eq!(rows[1].display(), "9");
+    }
+
+    #[test]
+    fn a_secret_text_row_shows_only_its_last_four_characters() {
+        let manifest = r#"{"contributes":{"settings":[{"kind":"tab","id":"main","title":"Keys",
+          "sections":[{"title":"Provider","rows":[
+            {"type":"text","key":"api_key","title":"API key","secret":true,"default":""}
+          ]}]}]}}"#;
+        let mut stored = Map::new();
+        let unset = rows_for("acme.keys", manifest, &stored);
+        assert_eq!(unset[0].display(), "Not set");
+        stored.insert("api_key".to_owned(), json!("sk-synthetic-é123"));
+        let set = rows_for("acme.keys", manifest, &stored);
+        assert_eq!(set[0].display(), "••••é123");
+        assert!(!set[0].display().contains("synthetic"));
     }
 
     #[test]

@@ -281,21 +281,6 @@
     "sha256": "dec6e56b6dec07873f85b7909e07b6bd629d09ee889c1287335189e2f65cd21e"
   },
   {
-    "name": "voice/policy/board-has-no-column",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "1f99db818d2270960a883bcf6f3828bc3cef795a7e07eab5f9679a5bb5a03722"
-  },
-  {
-    "name": "voice/policy/board-has-no-card-v0-in-column",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "30e86810b3a38e82dcd31938ed30c6ab34b9a55543694404d7656a85c6f672d4"
-  },
-  {
     "name": "voice/policy/permanently-delete-the-card-v0-from-column",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",

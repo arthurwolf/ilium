@@ -263,17 +263,10 @@ fn authoritative_cost_number_reopen_observes_disk_without_rolling_back_runtime()
 fn inference_draft_typed_during_read_starts_autosave_only_after_authoritative_gate() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = editor_app(directory.path());
-    let selected_row = crate::settings_ui::inference_rows(&app.inference_settings)
-        .iter()
-        .position(|row| {
-            *row == crate::app::InferenceRow::Field(
-                crate::app::InferenceSettingField::RestructurePromptTokenLimit,
-            )
-        })
-        .unwrap();
+    // The budget dialog opens from the Titles settings context; the Inference
+    // plugin page owns the row itself.
     app.mode = Mode::Settings(Box::new(SettingsState {
-        tab: SettingsTab::Inference,
-        selected_row,
+        tab: SettingsTab::Titles,
         ..SettingsState::default()
     }));
     app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);

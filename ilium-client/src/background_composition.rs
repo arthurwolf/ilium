@@ -2066,7 +2066,7 @@ mod tests {
             "the old scene was dropped before the new one"
         );
         // A different kind rebuilds.
-        app.animation_settings.kind = AnimationKind::Spectrum;
+        app.animation_settings.kind = AnimationKind::Video;
         compose_at(&mut app, 3);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 3);
         assert_eq!(probe.alive(), 1);
@@ -2075,7 +2075,7 @@ mod tests {
         compose_at(&mut app, 4);
         assert_eq!(probe.alive(), 0);
         // Back to a hosted kind builds again; hiding drops it.
-        app.animation_settings.kind = AnimationKind::Spectrum;
+        app.animation_settings.kind = AnimationKind::Video;
         compose_at(&mut app, 5);
         assert_eq!(probe.alive(), 1);
         app.mode = Mode::Move;
@@ -2160,7 +2160,7 @@ mod tests {
         compose_at(&mut app, 2);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
         // Changing the settings key starts a fresh scene.
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Spectrum;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Video;
         let recovered = compose_at(&mut app, 3);
         assert!(braille_cells(&recovered) > 0);
     }

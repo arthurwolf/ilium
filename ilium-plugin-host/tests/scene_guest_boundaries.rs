@@ -165,6 +165,7 @@ fn equipped_scene(
             granted: &granted,
             manifest: &serde_json::Value::Null,
             observer,
+            picked: &[],
         },
         &engine,
         &compiled,

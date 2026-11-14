@@ -198,6 +198,7 @@ only while the agent is idle. When the user presses the button, the plugin submi
 which the kernel sends as `/compact` followed by Enter. The manifest above is the matching manifest.
 
 ```rust
+use ilium_plugin_sdk::exports::{DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict};
 use ilium_plugin_sdk::exports::{Classification, DetectorProcess, DetectorScreen};
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::primitives::agent;
@@ -228,6 +229,14 @@ impl Detector for AgentTools {
             AgentActivity::Idle
         };
         Classification { activity, objective: None, goal: None }
+    }
+
+    fn identify_tree(&mut self, _processes: Vec<DetectorTreeProcess>) -> Option<IdentifiedAgent> {
+        None // `identify` above is enough for this example.
+    }
+
+    fn classify_screen(&mut self, _screen: ScreenRequest) -> Option<ScreenVerdict> {
+        None // The pane keeps the activity `classify` gave it.
     }
 }
 

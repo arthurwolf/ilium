@@ -120,7 +120,6 @@ pub mod project_naming;
 
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
-pub mod recap;
 mod redraw_schedule;
 pub mod release_embedding;
 pub mod render_cache;

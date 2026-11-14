@@ -34,6 +34,7 @@ pub mod registry;
 pub mod scenes2;
 pub mod scenes_c2;
 pub mod solar_system;
+pub mod spectrum;
 pub mod stars;
 pub mod topographic_maps;
 pub mod vector_td;
@@ -45,10 +46,14 @@ pub use kit::{control, debug, dither, raster, scene, style, worldmap};
 
 use dithered_waves::{DitheredWaves, DitheredWavesSettings};
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
+use ilium_plugin_sdk::generated::types::events::Event;
+use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, SceneField, SceneProgram};
+use ilium_plugin_sdk::{
+    ilium_plugin, Handler, Lifecycle, NativeRenderer, SceneField, SceneProgram,
+};
 use kit::raster::Raster;
 use kit::scene::{Frame, OccupancyMask, Scene, SceneEnv, SceneLocation};
 use kit::style::ScenePalette;
@@ -60,7 +65,8 @@ pub const DITHERED_WAVES_ID: &str = "dithered-waves";
 
 /// The scene side of `ilium.core.scenes` (core-plugin-scenes.md, world `ilium:anim/base@0.1.0`).
 /// One value is one scene: the component glue builds it from the spec of a `scene-renderer`.
-#[ilium_plugin(side = "scene", exports = [])]
+// `handler` receives the audio chunks of the spectrum scene's recording (`audio-frames`).
+#[ilium_plugin(side = "scene", exports = ["handler"])]
 pub struct ScenesScene {
     /// Id of the scene this value draws (`scene` of the spec); empty before a spec arrives.
     scene_id: String,
@@ -297,6 +303,19 @@ impl ScenesScene {
             }
         }
         true
+    }
+}
+
+/// Events of the scene's imports, delivered between frames. The audio chunks of a recording go
+/// to the mailbox the spectrum scene drains each frame; a scene submits no intents.
+impl Handler for ScenesScene {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        for event in batch {
+            if let Event::AudioFrames(frames) = event {
+                spectrum::deliver_audio_frames(frames.capture, frames.samples);
+            }
+        }
+        Vec::new()
     }
 }
 

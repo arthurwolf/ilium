@@ -576,17 +576,8 @@ mod inference_value_receipt_tests {
     fn budget_app(directory: &std::path::Path) -> App {
         let mut app = App::new("synthetic-budget-receipt".into(), directory.into());
         app.config_dir = Some(directory.into());
-        let row = crate::settings_ui::inference_rows(&app.inference_settings)
-            .iter()
-            .position(|row| {
-                *row == crate::app::InferenceRow::Field(
-                    InferenceSettingField::RestructurePromptTokenLimit,
-                )
-            })
-            .unwrap();
         app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
-            tab: crate::app::SettingsTab::Inference,
-            selected_row: row,
+            tab: crate::app::SettingsTab::Titles,
             ..crate::app::SettingsState::default()
         }));
         app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);
@@ -796,7 +787,7 @@ mod inference_value_receipt_tests {
         assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
         app.settle_filesystem_for_test();
         assert!(
-            matches!(&app.mode, Mode::Settings(state) if state.tab == crate::app::SettingsTab::Inference)
+            matches!(&app.mode, Mode::Settings(state) if state.tab == crate::app::SettingsTab::Titles)
         );
         assert!(matches!(
             app.inference_save_state,

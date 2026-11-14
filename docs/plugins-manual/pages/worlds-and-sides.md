@@ -121,6 +121,7 @@ A **world variant** is a base world plus the export fragments that a plugin impl
 | `with-views` | `views` | no | yes | no |
 | `with-annotator` | `annotator` | no | yes | no |
 | `with-jobs` | `job-runner` | yes | yes | yes |
+| `with-handler` | `handler` | in the base | in the base | yes |
 | `with-service` | `service-provider` | yes | yes | no |
 | `with-inference-provider` | `inference-provider` | yes | yes | no |
 | `with-settings-validate` | `settings-validate` | yes | yes | no |

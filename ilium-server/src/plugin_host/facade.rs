@@ -96,6 +96,8 @@ pub(crate) struct ServerFacade {
     pane_kinds: std::sync::OnceLock<Arc<super::pane_kinds::PaneKinds>>,
     /// The pane a client last reported as focused (`SetPaneFocus`), `None` after it lost focus.
     focused: Mutex<Option<NodeId>>,
+    /// The prompt epoch of each pane and the plugin submissions still waiting to be recorded.
+    prompt_epochs: super::prompt_epochs::PromptEpochs,
 }
 
 /// Most nodes one plugin keeps metadata on.
@@ -438,7 +440,31 @@ impl ServerFacade {
             notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
             pane_kinds: std::sync::OnceLock::new(),
             focused: Mutex::new(None),
+            prompt_epochs: super::prompt_epochs::PromptEpochs::default(),
         }
+    }
+
+    /// Records one prompt the kernel recorded for `pane` (`PaneLastPromptChanged`): the new
+    /// prompt epoch and the source of the prompt.
+    pub(crate) fn record_prompt(
+        &self,
+        pane: NodeId,
+    ) -> (u64, ilium_plugin_api::generated::types::events::InputSource) {
+        self.prompt_epochs
+            .record_prompt(pane.0, std::time::Instant::now())
+    }
+
+    /// Notes a prompt a plugin submitted to `pane`, so the prompt it records reports the source
+    /// `plugin`.
+    pub(super) fn note_plugin_submission(&self, pane: NodeId) {
+        self.prompt_epochs
+            .note_plugin_submission(pane.0, std::time::Instant::now());
+    }
+
+    /// The current prompt epoch of a live terminal pane; `None` for any other node.
+    pub(super) fn current_prompt_epoch(&self, pane: NodeId) -> Option<u64> {
+        self.with_terminal(pane, |_| ())?;
+        Some(self.prompt_epochs.current(pane.0))
     }
 
     /// Records a client's focus report and returns `pane-focused` when the focused pane changed.
@@ -815,8 +841,13 @@ impl ServerFacade {
     }
 }
 
-/// The verified session of a terminal pane's agent, from what the detection loop discovered.
+/// The verified session of a terminal pane's agent, from what the detection loop discovered,
+/// and the pane's prompt epoch.
 impl ilium_plugin_api::kernel::AgentRead for ServerFacade {
+    fn prompt_epoch(&self, pane: NodeId) -> Option<u64> {
+        self.current_prompt_epoch(pane)
+    }
+
     fn session_json(&self, pane: NodeId) -> Option<String> {
         let state = self.state.upgrade()?;
         let (agent, session_id, transcript) = self.tokio.block_on(async {

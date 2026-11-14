@@ -65,6 +65,10 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
         .route("/v1/panes/{id}", get(pane))
         .route("/v1/panes/{id}/input", post(pane_input))
         .route("/v1/voice", post(voice_text))
+        .route(
+            "/v1/plugins/{plugin}/services/{name}/{method}",
+            post(plugin_service),
+        )
 }
 
 fn format_of(parameters: &HashMap<String, String>) -> Result<Format, (StatusCode, Json<Value>)> {
@@ -537,6 +541,61 @@ async fn confirm(
 }
 
 /// Request ids only need to be unique per process to correlate worktree closes.
+/// How long `POST /v1/plugins/.../services/...` waits for the provider's reply.
+const PLUGIN_SERVICE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Calls one method of a plugin service (`<plugin>/<name>`) with the JSON body as its request
+/// and returns the provider's reply, the same kernel call path a kernel feature uses to ask the
+/// plugin that owns it. A reply that is not JSON comes back as a string.
+async fn plugin_service(
+    State(state): State<Arc<ServerState>>,
+    Path((plugin, name, method)): Path<(String, String, String)>,
+    Json(body): Json<Value>,
+) -> ApiResult {
+    let Some(host) = state.plugins.get() else {
+        return Err(failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unavailable",
+            "this session runs without plugins",
+        ));
+    };
+    let service = format!("{plugin}/{name}");
+    let reply = host
+        .call_service(&service, &method, body.to_string(), PLUGIN_SERVICE_TIMEOUT)
+        .await
+        .map_err(|error| plugin_service_failure(&error))?;
+    let reply = serde_json::from_str::<Value>(&reply).unwrap_or(Value::String(reply));
+    Ok(Json(json!({
+        "type": "result",
+        "ok": true,
+        "op": "plugin_service",
+        "service": service,
+        "method": method,
+        "reply": reply,
+    }))
+    .into_response())
+}
+
+/// The HTTP status and code of a kernel service call that gave no reply: 503 while no provider
+/// runs, 400 for a request or reply the schema refuses, 504 for a provider that took too long,
+/// 502 for any other failure of the provider.
+fn plugin_service_failure(
+    error: &crate::plugin_host::KernelCallError,
+) -> (StatusCode, Json<Value>) {
+    use ilium_plugin_api::ErrorCode;
+    let plugin_error = error.error();
+    let (status, code) = if error.is_unavailable() {
+        (StatusCode::SERVICE_UNAVAILABLE, "unavailable")
+    } else {
+        match plugin_error.code {
+            ErrorCode::InvalidArgument => (StatusCode::BAD_REQUEST, "invalid-argument"),
+            ErrorCode::TimedOut => (StatusCode::GATEWAY_TIMEOUT, "timed-out"),
+            _ => (StatusCode::BAD_GATEWAY, "plugin-failed"),
+        }
+    };
+    failure(status, code, plugin_error.message.clone())
+}
+
 pub(crate) fn next_request_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -564,6 +623,24 @@ mod tests {
             wanted: "pane",
         };
         assert_eq!(select_failure(wrong).0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn plugin_service_failures_map_to_distinct_statuses() {
+        use crate::plugin_host::KernelCallError;
+        use ilium_plugin_api::{ErrorCode, PluginError};
+        let unavailable =
+            KernelCallError::Unavailable(PluginError::new(ErrorCode::NotFound, "no provider"));
+        let (status, body) = plugin_service_failure(&unavailable);
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(body.0.to_string().contains("no provider"));
+        let refused =
+            KernelCallError::Failed(PluginError::new(ErrorCode::InvalidArgument, "at /term"));
+        assert_eq!(plugin_service_failure(&refused).0, StatusCode::BAD_REQUEST);
+        let slow = KernelCallError::Failed(PluginError::new(ErrorCode::TimedOut, "slow"));
+        assert_eq!(plugin_service_failure(&slow).0, StatusCode::GATEWAY_TIMEOUT);
+        let trapped = KernelCallError::Failed(PluginError::new(ErrorCode::Internal, "trap"));
+        assert_eq!(plugin_service_failure(&trapped).0, StatusCode::BAD_GATEWAY);
     }
 
     #[test]

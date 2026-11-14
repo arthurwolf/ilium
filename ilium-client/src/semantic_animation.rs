@@ -75,7 +75,6 @@ fn axes(kind: AnimationKind) -> &'static [&'static str] {
         AnimationKind::Wikipedia => &["wiki_render_mode"],
         AnimationKind::Images => &["mode", "source_kind", "order", "motion", "display_seconds"],
         AnimationKind::Video => &["mode", "shuffle"],
-        AnimationKind::Spectrum => &["style", "floor_db"],
         _ => &[],
     }
 }
@@ -126,10 +125,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
                 && left.place_list == right.place_list
                 && left.destination_id == right.destination_id
         }
-        AnimationKind::Spectrum => {
-            before.ambient.spectrum.input == after.ambient.spectrum.input
-                && before.ambient.spectrum.device_name == after.ambient.spectrum.device_name
-        }
         _ => true,
     }
 }
@@ -139,9 +134,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
 fn narrow(settings: &AnimationSettings, row: &mut Control) {
     if let ControlKind::Slider { min, max, .. } = &mut row.kind {
         match (settings.kind, row.id) {
-            (AnimationKind::Spectrum, "ceiling_db") => {
-                *min = (*min).max(settings.ambient.spectrum.floor_db.saturating_add(10));
-            }
             (AnimationKind::Images, "transition_seconds") => {
                 *max = (*max).min(i32::from(settings.ambient.images.display_seconds / 2));
             }
@@ -270,12 +262,6 @@ fn verify_resources(
             if settings.ambient.video.source.trim() != authored.ambient.video.source.trim() {
                 return Err("Semantic Video cannot replace its authored source".into());
             }
-        }
-        AnimationKind::Spectrum
-            if settings.scene_control("device_name").is_some()
-                && !has_text(settings, "device_name") =>
-        {
-            return Err("The authored named audio device is empty".into());
         }
         _ => {}
     }
@@ -659,9 +645,6 @@ fn notes(kind: AnimationKind) -> &'static str {
         }
         AnimationKind::Video => {
             "Requires resources=authored and existing video input. Slowed exposes slowed_percent; Random scenes exposes scene_seconds and hides shuffle/repeat_one. seed requires Random scenes or shuffle."
-        }
-        AnimationKind::Spectrum => {
-            "Input/device are unchanged. Waveform hides band/frequency/FFT/tilt/floor/ceiling controls. Radial/Pulse rings hide orientation. Bars expose bar_width/bar_gap. Spectrogram exposes spectrogram_speed. Peak markers apply to Bars/Mirrored bars/Line/Area/Radial; mirror excludes Waveform/Pulse rings. ceiling_db >= floor_db+10."
         }
         _ => "",
     }

@@ -135,7 +135,6 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "SETUP", 1, 2);
     ids.insert("DEBUG-01".to_owned());
     ids.insert("PLUGIN-01".to_owned());
-    add_range(&mut ids, "INF", 1, 15);
     add_range(&mut ids, "LLM", 1, 7);
     ids.insert("TITLE-01".to_owned());
     ids.insert("TITLE-02".to_owned());
@@ -174,8 +173,6 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-64".to_owned()
         } else if kind == AnimationKind::Video {
             "AN-15".to_owned()
-        } else if kind == AnimationKind::Spectrum {
-            "AN-16".to_owned()
         } else if kind == AnimationKind::Images {
             "AN-17".to_owned()
         } else if kind == AnimationKind::PluginScene {

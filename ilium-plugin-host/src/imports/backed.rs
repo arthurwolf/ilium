@@ -960,6 +960,9 @@ pub struct KernelAgent {
     rest: super::agent::AgentImport,
     /// Whether the plugin holds `agent.read`.
     reads_agents: bool,
+    /// Whether the plugin holds `terminal.write`, the grant that sends the input an epoch
+    /// guards (capability-agent-read-prompts.md).
+    writes_terminal: bool,
 }
 
 impl KernelAgent {
@@ -969,6 +972,7 @@ impl KernelAgent {
             kernel,
             rest: super::agent::AgentImport::default(),
             reads_agents: holds(granted, "agent.read"),
+            writes_terminal: holds(granted, "terminal.write"),
         }
     }
 }
@@ -1031,8 +1035,17 @@ impl HostAgent for KernelAgent {
         self.rest.model(pane)
     }
 
+    /// The epoch a `send-input` with `prompt-epoch` is compared against, from the kernel that
+    /// records the prompts. The manual names `terminal.write` (capability-agent-read-prompts.md)
+    /// and `agent.read` (primitives-agent.md) for it; either grant reads it.
     fn prompt_epoch(&mut self, pane: NodeId) -> Option<u64> {
-        self.rest.prompt_epoch(pane)
+        if !(self.writes_terminal || self.reads_agents) {
+            return None;
+        }
+        match self.kernel.agents() {
+            Some(agents) => agents.prompt_epoch(pane),
+            None => self.rest.prompt_epoch(pane),
+        }
     }
 
     fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
@@ -1269,5 +1282,85 @@ mod grant_tests {
             &granted(&["settings.read-kernel:terminal"]),
             "settings.read-kernel:terminal"
         ));
+    }
+}
+
+#[cfg(test)]
+mod prompt_epoch_tests {
+    use std::sync::Arc;
+
+    use ilium_plugin_api::generated::primitives::agent::HostAgent;
+    use ilium_plugin_api::generated::types::ids::NodeId;
+    use ilium_plugin_api::generated::types::intents::Intent;
+    use ilium_plugin_api::generated::types::requests::Outcome;
+    use ilium_plugin_api::kernel::{
+        AgentRead, Cell, IntentResult, KernelFacade, Origin, PaneRead, TreeNode, TreeRead,
+    };
+    use ilium_plugin_api::ProcessKind;
+
+    use super::KernelAgent;
+
+    /// A kernel whose pane 4 is at prompt epoch 6 and that knows no other pane.
+    struct Kernel;
+    impl TreeRead for Kernel {
+        fn nodes(&self) -> Vec<TreeNode> {
+            Vec::new()
+        }
+        fn node(&self, _id: NodeId) -> Option<TreeNode> {
+            None
+        }
+        fn epoch(&self) -> u64 {
+            0
+        }
+    }
+    impl PaneRead for Kernel {
+        fn screen_text(&self, _pane: NodeId) -> Option<String> {
+            None
+        }
+        fn cells(&self, _pane: NodeId, _rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
+            None
+        }
+        fn history(&self, _pane: NodeId, _lines: u32) -> Option<Vec<String>> {
+            None
+        }
+    }
+    impl AgentRead for Kernel {
+        fn prompt_epoch(&self, pane: NodeId) -> Option<u64> {
+            (pane == NodeId(4)).then_some(6)
+        }
+    }
+    impl KernelFacade for Kernel {
+        fn apply_intent(&self, _origin: &Origin, _intent: Intent) -> IntentResult {
+            Outcome::Ok
+        }
+        fn tree(&self) -> &dyn TreeRead {
+            self
+        }
+        fn panes(&self) -> &dyn PaneRead {
+            self
+        }
+        fn agents(&self) -> Option<&dyn AgentRead> {
+            Some(self)
+        }
+        fn process_kind(&self) -> ProcessKind {
+            ProcessKind::Server
+        }
+    }
+
+    fn agent(grants: &[&str]) -> KernelAgent {
+        let granted: Vec<String> = grants.iter().map(|grant| (*grant).to_owned()).collect();
+        KernelAgent::new(Arc::new(Kernel), &granted)
+    }
+
+    #[test]
+    fn the_prompt_epoch_comes_from_the_kernel_for_a_plugin_that_may_read_it() {
+        assert_eq!(agent(&["terminal.write"]).prompt_epoch(NodeId(4)), Some(6));
+        assert_eq!(agent(&["agent.read"]).prompt_epoch(NodeId(4)), Some(6));
+        assert_eq!(agent(&["terminal.write"]).prompt_epoch(NodeId(5)), None);
+    }
+
+    #[test]
+    fn a_plugin_without_either_grant_reads_no_epoch() {
+        assert_eq!(agent(&["tree.read"]).prompt_epoch(NodeId(4)), None);
     }
 }

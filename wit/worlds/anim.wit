@@ -21,3 +21,4 @@ world base {
 }
 
 world with-jobs { export ilium:exports/job-runner@0.1.0; }
+world with-handler { export ilium:exports/handler@0.1.0; }

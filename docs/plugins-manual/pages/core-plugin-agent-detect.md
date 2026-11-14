@@ -376,6 +376,7 @@ A custom signature recognises a new agent CLI. The plugin declares it under [age
 **Rust**
 
 ```rust
+use ilium_plugin_sdk::exports::{DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict};
 use ilium_plugin_sdk::exports::{Classification, Detector, DetectorProcess, DetectorScreen};
 use ilium_plugin_sdk::host::log::{self, Level};
 use ilium_plugin_sdk::prelude::*;
@@ -415,6 +416,14 @@ impl Detector for AgentDetect {
             AgentActivity::Idle
         };
         Classification { activity, objective: None, goal: None }
+    }
+
+    fn identify_tree(&mut self, _processes: Vec<DetectorTreeProcess>) -> Option<IdentifiedAgent> {
+        None // `identify` above is enough for this example.
+    }
+
+    fn classify_screen(&mut self, _screen: ScreenRequest) -> Option<ScreenVerdict> {
+        None // The pane keeps the activity `classify` gave it.
     }
 }
 ```

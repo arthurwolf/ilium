@@ -15,6 +15,10 @@
 //! "evidence_line", "goal", "goal_line", "goal_rule", "goal_pattern", "fresh_screen",
 //! "interstitial_response", "prompt_ready"}]}` in request order, or `{"error": {...}}`.
 
+use ilium_plugin_sdk::generated::exports::detector::{
+    ActivityEvidence as WireEvidence, AgentTurn as WireTurn, GoalEvidence as WireGoal,
+    ScreenRequest as WireRequest, ScreenVerdict,
+};
 use serde_json::{json, Map, Value};
 
 use crate::screen::{
@@ -191,8 +195,48 @@ fn optional_text(text: Option<&str>) -> Value {
     text.map_or(Value::Null, |text| Value::String(text.to_owned()))
 }
 
-/// The verdict of one screen.
-pub fn verdict_of(request: &ScreenRequest) -> Value {
+/// The provider turn as the `detector` export's `agent-turn`.
+fn wire_turn(turn: AgentTurn) -> WireTurn {
+    match turn {
+        AgentTurn::Working => WireTurn::Working,
+        AgentTurn::WaitingApproval => WireTurn::WaitingApproval,
+        AgentTurn::WaitingSubagents => WireTurn::WaitingSubagents,
+        AgentTurn::Settling => WireTurn::Settling,
+        AgentTurn::Idle => WireTurn::Idle,
+    }
+}
+
+/// The matched predicate as the `detector` export's `activity-evidence`.
+fn wire_evidence(evidence: ActivityEvidence) -> WireEvidence {
+    match evidence {
+        ActivityEvidence::InterruptMarker => WireEvidence::InterruptMarker,
+        ActivityEvidence::GenericLiveStatus => WireEvidence::GenericLiveStatus,
+        ActivityEvidence::ClaudeLiveStatus => WireEvidence::ClaudeLiveStatus,
+        ActivityEvidence::CodexLiveStatus => WireEvidence::CodexLiveStatus,
+        ActivityEvidence::BackgroundWait => WireEvidence::BackgroundWait,
+        ActivityEvidence::BackgroundTaskWait => WireEvidence::BackgroundTaskWait,
+        ActivityEvidence::ConfirmationPrompt => WireEvidence::ConfirmationPrompt,
+        ActivityEvidence::SelectionPrompt => WireEvidence::SelectionPrompt,
+        ActivityEvidence::FolderTrustPrompt => WireEvidence::FolderTrustPrompt,
+        ActivityEvidence::NoActiveMarker => WireEvidence::NoActiveMarker,
+    }
+}
+
+/// The goal evidence as the `detector` export's `goal-evidence`.
+fn wire_goal(goal: GoalEvidence) -> WireGoal {
+    match goal {
+        GoalEvidence::State(GoalState::Active) => WireGoal::Active,
+        GoalEvidence::State(GoalState::Paused) => WireGoal::Paused,
+        GoalEvidence::State(GoalState::Blocked) => WireGoal::Blocked,
+        GoalEvidence::State(GoalState::UsageLimited) => WireGoal::UsageLimited,
+        GoalEvidence::State(GoalState::Reached) => WireGoal::Reached,
+        GoalEvidence::Inactive => WireGoal::Inactive,
+        GoalEvidence::Unknown => WireGoal::Unknown,
+    }
+}
+
+/// The typed verdict of one screen: the `screen-verdict` record of `detector.classify-screen`.
+pub fn screen_verdict(request: &ScreenRequest) -> ScreenVerdict {
     let class = AgentClass::from_signature(&request.signature);
     let activity = screen::classify_activity_for_agent_detailed(&class, &request.text);
     let goal = screen::goal_evidence_for_agent_detailed(&class, &request.text);
@@ -206,36 +250,89 @@ pub fn verdict_of(request: &ScreenRequest) -> Value {
         ),
         None => screen::is_agent_prompt_ready(&class, &request.text),
     };
-    let mut verdict = Map::new();
-    verdict.insert("pane".into(), json!(request.pane));
-    verdict.insert("generation".into(), json!(request.generation));
-    verdict.insert("signature".into(), json!(request.signature));
-    verdict.insert("turn".into(), json!(turn_name(activity.turn)));
-    verdict.insert("evidence".into(), json!(evidence_name(activity.evidence)));
-    verdict.insert(
+    ScreenVerdict {
+        pane: request.pane,
+        generation: request.generation,
+        signature: request.signature.clone(),
+        turn: wire_turn(activity.turn),
+        evidence: wire_evidence(activity.evidence),
+        evidence_line: activity.matched_line,
+        goal: wire_goal(goal.evidence),
+        goal_line: goal.matched_line,
+        goal_rule: goal
+            .matched_rule
+            .map(|rule| goal_rule_name(rule).to_owned()),
+        goal_pattern: goal.matched_pattern.map(str::to_owned),
+        fresh_screen: screen::is_fresh_agent_screen(&class, &request.text),
+        interstitial_response: screen::interstitial_prompt_response(&class, &request.text)
+            .map(str::to_owned),
+        prompt_ready,
+    }
+}
+
+/// The screen of a typed `screen-request`, or `None` when it breaks a bound: an empty signature,
+/// a text over [`MAX_SCREEN_BYTES`] or more than [`MAX_DIMMED_CELLS`] dimmed cells. Such a
+/// screen gets no verdict, so its pane keeps its activity.
+pub fn screen_of_request(request: &WireRequest) -> Option<ScreenRequest> {
+    if request.signature.is_empty()
+        || request.text.len() > MAX_SCREEN_BYTES
+        || request.dimmed.len() > MAX_DIMMED_CELLS
+    {
+        return None;
+    }
+    Some(ScreenRequest {
+        pane: request.pane,
+        generation: request.generation,
+        signature: request.signature.clone(),
+        text: request.text.clone(),
+        cursor: request.cursor.as_ref().map(|cell| (cell.row, cell.column)),
+        dimmed: request
+            .dimmed
+            .iter()
+            .map(|cell| (cell.row, cell.column))
+            .collect(),
+    })
+}
+
+/// Answers `detector.classify-screen`: the verdict of one pane's screen, or `None` when the
+/// screen breaks a bound ([`screen_of_request`]), so the pane keeps its activity.
+pub fn classify_screen(request: &WireRequest) -> Option<ScreenVerdict> {
+    screen_of_request(request).map(|screen| screen_verdict(&screen))
+}
+
+/// The verdict of one screen, as the JSON object of the `classify-batch` service reply.
+pub fn verdict_of(request: &ScreenRequest) -> Value {
+    let verdict = screen_verdict(request);
+    let mut object = Map::new();
+    object.insert("pane".into(), json!(verdict.pane));
+    object.insert("generation".into(), json!(verdict.generation));
+    object.insert("signature".into(), json!(verdict.signature));
+    object.insert("turn".into(), json!(verdict.turn.as_str()));
+    object.insert("evidence".into(), json!(verdict.evidence.as_str()));
+    object.insert(
         "evidence_line".into(),
-        optional_text(activity.matched_line.as_deref()),
+        optional_text(verdict.evidence_line.as_deref()),
     );
-    verdict.insert("goal".into(), json!(goal_name(goal.evidence)));
-    verdict.insert(
+    object.insert("goal".into(), json!(verdict.goal.as_str()));
+    object.insert(
         "goal_line".into(),
-        optional_text(goal.matched_line.as_deref()),
+        optional_text(verdict.goal_line.as_deref()),
     );
-    verdict.insert(
+    object.insert(
         "goal_rule".into(),
-        optional_text(goal.matched_rule.map(goal_rule_name)),
+        optional_text(verdict.goal_rule.as_deref()),
     );
-    verdict.insert("goal_pattern".into(), optional_text(goal.matched_pattern));
-    verdict.insert(
-        "fresh_screen".into(),
-        json!(screen::is_fresh_agent_screen(&class, &request.text)),
+    object.insert(
+        "goal_pattern".into(),
+        optional_text(verdict.goal_pattern.as_deref()),
     );
-    verdict.insert(
+    object.insert("fresh_screen".into(), json!(verdict.fresh_screen));
+    object.insert(
         "interstitial_response".into(),
-        optional_text(screen::interstitial_prompt_response(&class, &request.text)),
+        optional_text(verdict.interstitial_response.as_deref()),
     );
-    verdict.insert("prompt_ready".into(), json!(prompt_ready));
-    Value::Object(verdict)
+    object.insert("prompt_ready".into(), json!(verdict.prompt_ready));
+    Value::Object(object)
 }
 
 #[cfg(test)]

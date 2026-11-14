@@ -4,3 +4,4 @@
 
 ### Removed
 - The dead `Tree::is_agent_pane_idle_for_update` and `Tree::panes_eligible_for_update` helpers in `ilium-core`; the Fleet plugin owns the idle-agent rule.
+- The kernel copy of the Ask for update status prompt template (`ilium-prompts` `agent/ask-for-update`). The Fleet plugin builds the status request and appends the custom-instructions block itself.

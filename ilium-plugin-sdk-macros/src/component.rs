@@ -223,6 +223,22 @@ const SCENE_WITH: &[(&str, &str)] = &[
     ("ilium:types/ui@0.1.0", "ilium::types::ui"),
 ];
 
+/// The inline world of a scene component: lifecycle and renderer, plus `job-runner` and
+/// `handler` when the plugin declares them.
+fn scene_world(exports_jobs: bool, exports_handler: bool) -> String {
+    let mut world = String::from(
+        "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n",
+    );
+    if exports_jobs {
+        world.push_str("    export ilium:exports/job-runner@0.1.0;\n");
+    }
+    if exports_handler {
+        world.push_str("    export ilium:exports/handler@0.1.0;\n");
+    }
+    world.push_str("}\n");
+    world
+}
+
 /// The body of the scene component module: lifecycle (shared glue macro) and the renderer
 /// resource. The plugin type implements `SceneProgram` (one value per `scene-renderer`) and
 /// `Default` + `Lifecycle` (the instance behind `activate`).
@@ -233,26 +249,29 @@ fn scene_body(
     manifest_directory: &Path,
 ) -> Result<TokenStream, String> {
     // Lifecycle and renderer are always exported. A scene may also export `job-runner`, the
-    // entry of the background jobs it starts with `jobs.start`: the host runs each job in a
-    // fresh instance of the same component.
+    // entry of the background jobs it starts with `jobs.start` (the host runs each job in a
+    // fresh instance of the same component), and `handler`, which receives what its imports
+    // queue as events between frames (audio frames, request completions, job progress).
     if let Some(other) = exports
         .iter()
-        .find(|export| export.as_str() != "job-runner")
+        .find(|export| !matches!(export.as_str(), "job-runner" | "handler"))
     {
         return Err(format!(
-            "ilium_plugin: a scene component exports lifecycle, renderer and optionally job-runner, not `{other}`"
+            "ilium_plugin: a scene component exports lifecycle, renderer and optionally job-runner and handler, not `{other}`"
         ));
     }
-    let exports_jobs = !exports.is_empty();
+    let exports_jobs = exports.iter().any(|export| export == "job-runner");
+    let exports_handler = exports.iter().any(|export| export == "handler");
     let wit_root = wit_root(manifest_directory)?;
     let krate_text = quote!(#krate).to_string().replace(' ', "");
-    let world = if exports_jobs {
-        "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n    export ilium:exports/job-runner@0.1.0;\n}\n"
-    } else {
-        "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n}\n"
-    };
+    let world = scene_world(exports_jobs, exports_handler);
     let job_export = if exports_jobs {
         quote!(#krate::__ilium_wasm_export_job_runner!();)
+    } else {
+        TokenStream::new()
+    };
+    let handler_export = if exports_handler {
+        quote!(#krate::__ilium_wasm_export_handler!();)
     } else {
         TokenStream::new()
     };
@@ -260,8 +279,22 @@ fn scene_body(
         .iter()
         .map(|directory| wit_root.join(directory).to_string_lossy().into_owned())
         .collect();
-    let with_keys = SCENE_WITH.iter().map(|(key, _)| *key);
-    let with_paths = SCENE_WITH
+    // The scene interfaces, plus the import interfaces each declared optional export needs
+    // (the handler's events and intents), each once.
+    let mut with: Vec<(&str, &str)> = SCENE_WITH.to_vec();
+    for export in EXPORTS
+        .iter()
+        .filter(|export| exports.iter().any(|name| name == export.name))
+    {
+        for entry in export.with {
+            if !with.contains(entry) {
+                with.push(*entry);
+            }
+        }
+    }
+    with.sort();
+    let with_keys = with.iter().map(|(key, _)| *key);
+    let with_paths = with
         .iter()
         .map(|(_, suffix)| {
             syn::parse_str::<syn::Path>(&format!("{krate_text}::wasm::bindings::{suffix}"))
@@ -346,6 +379,8 @@ fn scene_body(
         #krate::__ilium_wasm_export_lifecycle!();
 
         #job_export
+
+        #handler_export
 
         /// One `scene-renderer` resource: the scene and the pixel field it draws into.
         struct __IliumSceneRenderer {

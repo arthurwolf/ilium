@@ -1810,6 +1810,7 @@ impl ClientPlugins {
                 minecraft_saves: ilium_platform::minecraft::java_directory()
                     .map(|directory| directory.join("saves")),
                 minecraft_java: ilium_platform::minecraft::java_directory(),
+                geocode: Some(Arc::new(super::geocode_backend::ClientGeocoder::new())),
             },
         );
         let scenes = super::plugin_scenes::register_bundled(

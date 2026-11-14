@@ -26,6 +26,7 @@ use crate::engine::{EngineConfig, PluginEngine};
 use crate::imports::backed::LogSink;
 use crate::imports::services::BrokeredServices;
 use crate::instance::{ExportCall, ExportReply, GuestExports, PluginInstance};
+use crate::runtime::kernel_calls::{KernelCallError, KERNEL_CALLER};
 use crate::runtime::{HostRuntime, PluginRecord, PluginState, RuntimeConfig};
 
 const PROVIDER: &str = "com.example.glossary";
@@ -99,6 +100,8 @@ struct Script {
     seen: Vec<(String, String)>,
     /// The call number of each delivered call, for a deferred reply.
     calls: Vec<u64>,
+    /// The caller each delivered call named.
+    callers: Vec<String>,
 }
 
 struct ScriptedProvider(Arc<Mutex<Script>>);
@@ -131,6 +134,7 @@ impl GuestExports for ScriptedProvider {
                 service_call.payload_json.clone(),
             ));
             script.calls.push(service_call.call);
+            script.callers.push(service_call.caller.0.clone());
         }
         let reply = script
             .replies
@@ -371,4 +375,118 @@ fn describe_returns_the_schema_text_without_calling_the_provider() {
     assert_eq!(caller.take_reply(request), Some(SCHEMA.to_owned()));
     assert!(script.lock().expect("script").seen.is_empty());
     assert_eq!(runtime.service_schema(SERVICE), Some(SCHEMA.to_owned()));
+}
+
+// ---- calls the kernel itself makes (key M3 of the workspace cuts) ----------------------------
+
+#[test]
+fn a_kernel_call_reaches_the_provider_as_the_kernel_and_returns_its_reply() {
+    let (mut runtime, script, _) = runtime_with_provider();
+    script
+        .lock()
+        .expect("script")
+        .replies
+        .push_back(ServiceReply::Done(r#"{"found":true}"#.to_owned()));
+    let (end, failures) =
+        runtime.call_service_as_kernel(SERVICE, "lookup", r#"{"term":"latency"}"#);
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(end, Ok(r#"{"found":true}"#.to_owned()));
+    {
+        let seen = script.lock().expect("script");
+        assert_eq!(
+            seen.seen,
+            vec![("lookup".to_owned(), r#"{"term":"latency"}"#.to_owned())]
+        );
+        assert_eq!(seen.callers, vec![KERNEL_CALLER.to_owned()]);
+    }
+    // The call number comes from the runtime's allocator, like a plugin's call, so a later
+    // plugin call never shares it.
+    let mut caller = caller(&runtime);
+    let request = caller
+        .call(
+            SERVICE.to_owned(),
+            "lookup".to_owned(),
+            r#"{"term":"x"}"#.to_owned(),
+        )
+        .expect("queued");
+    assert_eq!(route(&mut runtime, request), Outcome::Ok);
+    let seen = script.lock().expect("script");
+    assert_eq!(seen.calls.len(), 2);
+    assert_ne!(seen.calls[0], seen.calls[1]);
+    assert_eq!(seen.callers[1], CALLER);
+}
+
+#[test]
+fn a_kernel_request_the_schema_refuses_fails_without_reaching_the_provider() {
+    let (mut runtime, script, _) = runtime_with_provider();
+    let (end, failures) = runtime.call_service_as_kernel(SERVICE, "lookup", r#"{"term": 7}"#);
+    assert!(failures.is_empty(), "{failures:?}");
+    let error = end.expect_err("the schema refuses the request");
+    assert!(!error.is_unavailable());
+    assert_eq!(error.error().code, ErrorCode::InvalidArgument);
+    assert!(error.error().message.contains("/term"), "{error}");
+    assert!(script.lock().expect("script").seen.is_empty());
+}
+
+#[test]
+fn a_kernel_reply_the_schema_refuses_fails_and_is_logged_for_the_provider() {
+    let (mut runtime, script, log) = runtime_with_provider();
+    script
+        .lock()
+        .expect("script")
+        .replies
+        .push_back(ServiceReply::Done(r#"{"found":"yes"}"#.to_owned()));
+    let (end, _) = runtime.call_service_as_kernel(SERVICE, "lookup", r#"{"term":"x"}"#);
+    let error = end.expect_err("the schema refuses the reply");
+    assert_eq!(error.error().code, ErrorCode::InvalidArgument);
+    let errors = errors_of(&log);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(errors[0].0, PROVIDER);
+}
+
+#[test]
+fn a_kernel_call_of_an_unprovided_service_is_unavailable() {
+    let (mut runtime, _, _) = runtime_with_provider();
+    let (end, failures) = runtime.call_service_as_kernel("com.example.none/lookup", "lookup", "{}");
+    assert!(failures.is_empty(), "{failures:?}");
+    let error = end.expect_err("nothing provides it");
+    assert!(matches!(error, KernelCallError::Unavailable(_)));
+    assert!(error.is_unavailable());
+    assert_eq!(error.error().code, ErrorCode::NotFound);
+}
+
+#[test]
+fn a_kernel_call_of_a_disabled_provider_is_unavailable_and_never_reaches_it() {
+    let (mut runtime, script, _) = runtime_with_provider();
+    if let Some(record) = runtime.plugins.get_mut(PROVIDER) {
+        record.state = PluginState::Disabled;
+    }
+    let (end, _) = runtime.call_service_as_kernel(SERVICE, "lookup", r#"{"term":"x"}"#);
+    let error = end.expect_err("a disabled provider does not answer");
+    assert!(error.is_unavailable());
+    assert_eq!(error.error().code, ErrorCode::Busy);
+    assert!(script.lock().expect("script").seen.is_empty());
+}
+
+#[test]
+fn a_deferred_reply_fails_a_kernel_call() {
+    let (mut runtime, script, _) = runtime_with_provider();
+    script
+        .lock()
+        .expect("script")
+        .replies
+        .push_back(ServiceReply::Deferred);
+    let (end, _) = runtime.call_service_as_kernel(SERVICE, "lookup", r#"{"term":"x"}"#);
+    assert_eq!(
+        end.map_err(|error| (error.is_unavailable(), error.error().code)),
+        Err((false, ErrorCode::Unsupported))
+    );
+}
+
+#[test]
+fn a_kernel_describe_returns_the_schema_without_calling_the_provider() {
+    let (mut runtime, script, _) = runtime_with_provider();
+    let (end, _) = runtime.call_service_as_kernel(SERVICE, "describe", "");
+    assert_eq!(end, Ok(SCHEMA.to_owned()));
+    assert!(script.lock().expect("script").seen.is_empty());
 }

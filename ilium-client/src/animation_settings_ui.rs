@@ -1576,20 +1576,6 @@ mod tests {
             AnimationKind::OpenStreetMap => {
                 &["destination", "dwell_seconds", "place", "selection", "tour"]
             }
-            AnimationKind::Spectrum => &[
-                "band_scale",
-                "bands",
-                "bar_gap",
-                "bar_width",
-                "ceiling_db",
-                "fft_size",
-                "floor_db",
-                "max_frequency",
-                "min_frequency",
-                "orientation",
-                "spectrogram_speed",
-                "tilt",
-            ],
             AnimationKind::Video => &["scene_seconds", "seed", "slowed_percent"],
             AnimationKind::Wikipedia => &["wiki_zoom"],
             _ => &[],

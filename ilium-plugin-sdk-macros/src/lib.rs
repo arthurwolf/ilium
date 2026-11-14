@@ -110,7 +110,8 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     // Every server and client component exports the handler (rust-sdk.md "Exports"), whether
     // or not `exports` names it: events go to the plugin's `Handler` implementation, and a
     // plugin without one answers with no submission.
-    let events = if is_scene {
+    // A scene receives events only when it declares the `handler` export.
+    let events = if is_scene && !exports.iter().any(|export| export == "handler") {
         quote!(unimplemented!("rust-sdk.scene-native-handler"))
     } else {
         quote! {

@@ -285,7 +285,7 @@ Forecasts use public announcements; they cannot predict private rolling limits.
 
 ### Inference
 
-Provider selection, endpoints, credentials, models, **Load available models**, **Test provider**, and the restructure token budget. Fully described in [Inference and privacy](inference-and-privacy.md). The Organization, Shared context, Project naming and Smart Copy instruction inputs are also available at the bottom of this tab.
+The Inference page comes from the Inference core plugin: provider selection, endpoints, credentials, models (typed by name), the restructure token budget and **Test provider**. Disabling the plugin removes the page. Fully described in [Inference and privacy](inference-and-privacy.md). The Organization, Shared context and Project naming instruction inputs live in the **LLM Instructions** tab.
 
 ### LLM Instructions
 

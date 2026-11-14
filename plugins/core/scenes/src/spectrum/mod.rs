@@ -1,38 +1,37 @@
-//! Spectrum analyzer of the audio currently playing on the system, drawn in
-//! Braille. See `capture` for how audio is obtained, `dsp` for the analysis
-//! and smoothing math and `draw` for the eight visual styles.
+//! Spectrum analyzer of the audio currently playing on the system, drawn in Braille. See
+//! `capture` for how audio arrives, `dsp` for the analysis and smoothing math and `draw` for
+//! the eight visual styles.
 //!
-//! Threading: a `source::Worker` owned by the scene captures and analyses
-//! audio and publishes immutable snapshots; `render` only reads the newest
-//! one with `try_lock`, animates it (attack, gravity, peak hold) from the
-//! frame clock and draws. Dropping the scene stops the worker and any helper
-//! process.
+//! The scene owns no thread: the host records (loopback of the system output, the default
+//! input or a named device) and delivers 20 ms chunks to the component's handler export, which
+//! files them in the capture's mailbox. Each `render` drains the mailbox, analyses the new
+//! samples, animates the bands (attack, gravity, peak hold) from the frame clock and draws.
+//! Dropping the scene closes the capture.
 
 mod capture;
 mod draw;
 mod dsp;
 
-pub use capture::{
-    pipewire_command as native_pipewire_audio_command, pulse_command as native_pulse_audio_command,
-    CaptureCommand as NativeAudioCommand, CaptureTarget as NativeAudioTarget,
-    PcmDecoder as NativeAudioPcmDecoder,
-};
-pub use dsp::Fft as AudioFft;
+pub use capture::deliver as deliver_audio_frames;
 
 use crate::control::{self, Control, ControlValue, SceneSettings};
-use crate::resources::AmbientResources;
 use crate::scene::{Frame, Scene, SceneEnv};
-use crate::source::Worker;
 use crate::style::ScenePalette;
 use capture::{
-    new_shared, plan_factory, spawn_capture, AnalysisConfig, CaptureTarget, Shared, Snapshot,
-    SourceFactory, WorkerStatus, WAVEFORM_LEN,
+    AnalysisConfig, AudioInput, CaptureTarget, HostAudioInput, Pipeline, Snapshot, WorkerStatus,
+    SAMPLE_RATE, WAVEFORM_LEN,
 };
 use draw::{DrawInput, EnergyLevels, Ripple, SpectrogramHistory};
 use dsp::{band_centers, band_edges, BandState, Dynamics, LevelScaler, SILENCE_RMS_DB};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Builds the spectrum scene from the spec of the host.
+pub fn create(spec: &serde_json::Value, env: &SceneEnv) -> Box<dyn Scene> {
+    let settings: SpectrumSettings = crate::kit::settings::from_spec(spec);
+    Box::new(SpectrumScene::new(&settings, env))
+}
 
 /// Declares a settings enum that is edited as a `Choice` control: the serde
 /// name is the snake_case variant, the label is what the Settings panel shows.
@@ -127,7 +126,9 @@ pub struct SpectrumSettings {
     pub min_frequency: u32,
     /// Highest displayed frequency, 2000..=20000 Hz (default 16000).
     pub max_frequency: u32,
-    /// FFT window: 2048 (faster) or 4096 (finer bass), default 2048.
+    /// FFT window: 2048 (faster) or 4096 (finer bass), default 2048. The host sends the
+    /// choice of the manifest row as text (`"2048"`, `"4096"`).
+    #[serde(deserialize_with = "number_or_text")]
     pub fft_size: u32,
     /// Auto-gain makes the loudest band reach the top whatever the volume.
     pub auto_gain: bool,
@@ -181,6 +182,20 @@ impl Default for SpectrumSettings {
             spectrogram_speed: 30,
             refresh_rate: 24,
         }
+    }
+}
+
+/// A number given as a JSON number or as its decimal text (a choice row of the manifest).
+fn number_or_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Given {
+        Number(u32),
+        Text(String),
+    }
+    match Given::deserialize(deserializer)? {
+        Given::Number(number) => Ok(number),
+        Given::Text(text) => text.trim().parse().map_err(serde::de::Error::custom),
     }
 }
 
@@ -550,9 +565,18 @@ struct RippleState {
 
 pub struct SpectrumScene {
     settings: SpectrumSettings,
-    shared: Shared,
-    // Dropped with the scene: stops the capture thread and its helper process.
-    _worker: Option<Worker>,
+    /// The host's audio (or a fake one in tests).
+    input: Box<dyn AudioInput>,
+    /// The open recording, once `input.open` succeeded.
+    capture: Option<u64>,
+    /// When the next attempt to open the input is due after a failure.
+    retry_at: Option<Duration>,
+    /// When the open recording started; a recording that stays mute this long is silent.
+    opened_at: Duration,
+    /// The analysis of the recording; `None` when the settings cannot be analysed.
+    pipeline: Option<Pipeline>,
+    /// Scratch samples drained from the input, reused between frames.
+    samples: Vec<f32>,
     groups: BandGroups,
     dynamics: Dynamics,
     scaler: LevelScaler,
@@ -577,6 +601,9 @@ pub struct SpectrumScene {
     palette: ScenePalette,
 }
 
+/// Pause between attempts to open the input.
+const RETRY_AFTER: Duration = Duration::from_secs(4);
+
 impl SpectrumScene {
     // PALETTE (native Scene contract): `env.palette` is the shared look's current
     // palette. This scene follows it natively: its cell colours are mapped onto the
@@ -584,30 +611,14 @@ impl SpectrumScene {
     // `Scene::set_palette` delivers later changes (applied from the next render).
     // With no palette provided the colours are untouched.
     pub fn new(settings: &SpectrumSettings, env: &SceneEnv) -> Self {
-        let settings = settings.normalized();
-        let target = CaptureTarget::from_settings(settings.input, &settings.device_name);
-        let resources = env.resources.clone();
-        let mut scene = Self::with_factory_and_resources(
-            &settings,
-            plan_factory(target, resources.clone()),
-            resources,
-        );
+        let mut scene = Self::with_input(settings, Box::new(HostAudioInput));
         scene.palette = env.palette.clone();
         scene
     }
 
-    #[cfg(test)]
-    fn with_factory(settings: &SpectrumSettings, factory: SourceFactory) -> Self {
-        Self::with_factory_and_resources(settings, factory, crate::resources::test_resources())
-    }
-
-    fn with_factory_and_resources(
-        settings: &SpectrumSettings,
-        factory: SourceFactory,
-        resources: AmbientResources,
-    ) -> Self {
+    /// The scene over `input`; nothing is opened before the first frame.
+    fn with_input(settings: &SpectrumSettings, input: Box<dyn AudioInput>) -> Self {
         let settings = settings.normalized();
-        let shared = new_shared();
         let config = AnalysisConfig {
             fft_size: settings.fft_size as usize,
             bands: settings.bands as usize,
@@ -616,15 +627,9 @@ impl SpectrumScene {
             max_hz: settings.max_frequency as f32,
             tilt_db_per_octave: settings.tilt as f32,
         };
-        let worker = match spawn_capture(&resources, Arc::clone(&shared), config, factory) {
-            Ok(worker) => Some(worker),
-            Err(error) => {
-                shared
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .status = WorkerStatus::Failed(error);
-                None
-            }
+        let (pipeline, worker_status) = match Pipeline::new(&config, SAMPLE_RATE) {
+            Ok(pipeline) => (Some(pipeline), WorkerStatus::Starting),
+            Err(reason) => (None, WorkerStatus::Failed(reason)),
         };
         let edges = band_edges(
             settings.band_scale,
@@ -644,10 +649,14 @@ impl SpectrumScene {
             ),
             bands: vec![BandState::default(); bands],
             settings,
-            shared,
-            _worker: worker,
+            input,
+            capture: None,
+            retry_at: None,
+            opened_at: Duration::ZERO,
+            pipeline,
+            samples: Vec::new(),
             snapshot: Arc::new(Snapshot::empty()),
-            worker_status: WorkerStatus::Starting,
+            worker_status,
             audio: AudioState::Starting,
             last_wall: None,
             snapshot_changed_at: Duration::ZERO,
@@ -667,16 +676,51 @@ impl SpectrumScene {
         }
     }
 
-    /// Copy the newest snapshot and worker status without ever blocking.
-    fn pull_shared(&mut self, wall: Duration) {
-        if let Ok(state) = self.shared.try_lock() {
-            if state.snapshot.seq != self.snapshot.seq {
-                self.snapshot = Arc::clone(&state.snapshot);
-                self.snapshot_changed_at = wall;
+    /// Opens the input when it is not open (again after a failure, every `RETRY_AFTER`),
+    /// then analyses what arrived since the last frame. Never waits.
+    fn pull_audio(&mut self, wall: Duration) {
+        let Some(pipeline) = self.pipeline.as_mut() else {
+            return;
+        };
+        let capture = match self.capture {
+            Some(capture) => capture,
+            None => {
+                if self.retry_at.is_some_and(|due| wall < due) {
+                    return;
+                }
+                let target =
+                    CaptureTarget::from_settings(self.settings.input, &self.settings.device_name);
+                match self.input.open(&target, SAMPLE_RATE) {
+                    Ok(capture) => {
+                        self.capture = Some(capture);
+                        self.retry_at = None;
+                        self.opened_at = wall;
+                        self.worker_status = WorkerStatus::Starting;
+                        capture
+                    }
+                    Err(reason) => {
+                        self.retry_at = Some(wall + RETRY_AFTER);
+                        self.worker_status = WorkerStatus::Failed(reason);
+                        return;
+                    }
+                }
             }
-            if state.status != self.worker_status {
-                self.worker_status = state.status.clone();
+        };
+        self.samples.clear();
+        self.input.take(capture, &mut self.samples);
+        if self.samples.is_empty() {
+            // A recording that never delivers anything is running but mute.
+            if self.worker_status == WorkerStatus::Starting
+                && wall.saturating_sub(self.opened_at) > SILENCE_HOLD
+            {
+                self.worker_status = WorkerStatus::Running;
             }
+            return;
+        }
+        self.worker_status = WorkerStatus::Running;
+        if let Some(snapshot) = pipeline.push(&self.samples) {
+            self.snapshot = Arc::new(snapshot);
+            self.snapshot_changed_at = wall;
         }
     }
 
@@ -795,7 +839,7 @@ impl Scene for SpectrumScene {
             .map_or(nominal_dt, |last| wall.saturating_sub(last).as_secs_f32())
             .clamp(0.0, 0.25);
         self.last_wall = Some(wall);
-        self.pull_shared(wall);
+        self.pull_audio(wall);
         let is_live = self.update_audio_state(wall);
         let seconds = frame.time.as_secs_f32();
         if is_live {
@@ -880,87 +924,53 @@ impl Scene for SpectrumScene {
     }
 }
 
+impl Drop for SpectrumScene {
+    fn drop(&mut self) {
+        if let Some(capture) = self.capture.take() {
+            self.input.close(capture);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::capture::testing::{MusicSource, SilentSource, SineSource};
-    use super::capture::AudioSource;
+    use super::capture::testing::FakeInput;
     use super::*;
     use crate::debug::render_frame;
     use crate::raster::DitherMode;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Instant;
+    use std::sync::atomic::Ordering;
 
-    fn sine_factory(frequency: f32, amplitude: f32) -> (SourceFactory, Arc<AtomicBool>) {
-        let (source, dropped) = SineSource::new(frequency, amplitude);
-        let mut source = Some(source);
-        let factory: SourceFactory = Box::new(move |_| {
-            source
-                .take()
-                .map(|source| Box::new(source) as Box<dyn AudioSource>)
-                .ok_or_else(|| "used twice".to_owned())
-        });
-        (factory, dropped)
+    fn failing(settings: &SpectrumSettings) -> SpectrumScene {
+        SpectrumScene::with_input(settings, Box::new(FakeInput::failing("no device")))
     }
 
-    fn wait_until(mut condition: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            if condition() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(5));
+    /// A scene over an endless sine, after a few frames of analysis.
+    fn live_scene(settings: &SpectrumSettings, frequency: f32, amplitude: f32) -> SpectrumScene {
+        let mut scene =
+            SpectrumScene::with_input(settings, Box::new(FakeInput::sine(frequency, amplitude)));
+        for step in 0..4u32 {
+            render_frame(&mut scene, 8, 2, Duration::from_millis(10) * step);
         }
-        false
+        assert!(scene.snapshot.seq >= 4, "seq {}", scene.snapshot.seq);
+        scene
     }
 
-    /// Wait for a few analyses, then render `frames` frames 40 ms apart.
-    /// A `Busy` refusal of the shared test client is momentary contention, not a
-    /// capture failure: rebuild the scene (the factory is consumed by the refused
-    /// spawn) until it is admitted or the deadline passes.
-    fn live_scene(
-        settings: &SpectrumSettings,
-        frequency: f32,
-        amplitude: f32,
-    ) -> (SpectrumScene, Arc<AtomicBool>) {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let (factory, dropped) = sine_factory(frequency, amplitude);
-            let scene = SpectrumScene::with_factory(settings, factory);
-            let shared = Arc::clone(&scene.shared);
-            wait_until(|| {
-                shared
-                    .lock()
-                    .map(|state| {
-                        state.snapshot.seq >= 4 || matches!(state.status, WorkerStatus::Failed(_))
-                    })
-                    .unwrap_or(false)
-            });
-            let refused_busy = shared
-                .lock()
-                .map(|state| {
-                    matches!(&state.status, WorkerStatus::Failed(message) if message.ends_with("Busy"))
-                })
-                .unwrap_or(false);
-            if refused_busy && Instant::now() < deadline {
-                continue;
-            }
-            assert!(shared
-                .lock()
-                .map(|state| state.snapshot.seq >= 4)
-                .unwrap_or(false));
-            return (scene, dropped);
-        }
-    }
-
+    /// Renders `frames` frames 40 ms apart, after the frames `live_scene` already drew.
     fn run_frames(
         scene: &mut SpectrumScene,
         width: u16,
         height: u16,
         frames: u32,
     ) -> crate::debug::Rendered {
-        let mut last = render_frame(scene, width, height, Duration::ZERO);
+        let start = scene.last_wall.unwrap_or(Duration::ZERO);
+        let mut last = render_frame(scene, width, height, start);
         for step in 1..frames {
-            last = render_frame(scene, width, height, Duration::from_millis(40) * step);
+            last = render_frame(
+                scene,
+                width,
+                height,
+                start + Duration::from_millis(40) * step,
+            );
         }
         last
     }
@@ -1175,18 +1185,6 @@ mod tests {
     }
 
     #[test]
-    fn scene_key_changes_when_any_visual_setting_changes() {
-        use crate::registry::{AmbientKind, AmbientSettings};
-        let base = AmbientSettings::default();
-        let mut changed = base.clone();
-        changed.spectrum.style = SpectrumStyle::Radial;
-        assert_ne!(
-            base.scene_key(AmbientKind::Spectrum),
-            changed.scene_key(AmbientKind::Spectrum)
-        );
-    }
-
-    #[test]
     fn groups_split_bands_by_frequency() {
         let edges = band_edges(BandScale::Log, 48, 40.0, 16_000.0);
         let groups = BandGroups::from_centers(&band_centers(&edges));
@@ -1208,7 +1206,7 @@ mod tests {
             smoothing: 20,
             ..SpectrumSettings::default()
         };
-        let (mut scene, _dropped) = live_scene(&settings, 1000.0, 0.5);
+        let mut scene = live_scene(&settings, 1000.0, 0.5);
         let rendered = run_frames(&mut scene, 64, 16, 12);
         assert!(
             scene.status().is_none(),
@@ -1244,13 +1242,7 @@ mod tests {
             style: SpectrumStyle::Waveform,
             ..SpectrumSettings::default()
         };
-        let (factory, _dropped) = sine_factory(440.0, 0.4);
-        // A failing source keeps the scene in its deterministic idle animation.
-        drop(factory);
-        let failing = |settings: &SpectrumSettings| {
-            let factory: SourceFactory = Box::new(|_| Err("no device".to_owned()));
-            SpectrumScene::with_factory(settings, factory)
-        };
+        // A failing input keeps the scene in its deterministic idle animation.
         let mut first = failing(&settings);
         let mut second = failing(&settings);
         let at_zero = render_frame(&mut first, 40, 10, Duration::from_secs(1));
@@ -1273,8 +1265,7 @@ mod tests {
                 style: *style,
                 ..SpectrumSettings::default()
             };
-            let factory: SourceFactory = Box::new(|_| Err("no device".to_owned()));
-            let mut scene = SpectrumScene::with_factory(&settings, factory);
+            let mut scene = failing(&settings);
             let rendered = run_frames(&mut scene, 60, 14, 60);
             let dots = rendered.raster.dots.len();
             let visible = rendered
@@ -1294,63 +1285,61 @@ mod tests {
 
     #[test]
     fn status_reports_failure_silence_and_starting() {
-        let failing: SourceFactory =
-            Box::new(|_| Err("cannot start pw-record: not found".to_owned()));
-        let mut scene = SpectrumScene::with_factory(&SpectrumSettings::default(), failing);
-        assert!(wait_until(|| {
-            render_frame(&mut scene, 20, 6, Duration::ZERO);
-            scene
-                .status()
-                .is_some_and(|status| status.starts_with("Audio input unavailable:"))
-        }));
+        let mut scene = SpectrumScene::with_input(
+            &SpectrumSettings::default(),
+            Box::new(FakeInput::failing("no loopback device")),
+        );
+        render_frame(&mut scene, 20, 6, Duration::ZERO);
         assert_eq!(
             scene.status().as_deref(),
-            Some("Audio input unavailable: cannot start pw-record: not found")
+            Some("Audio input unavailable: no loopback device")
         );
-        // A running source that delivers nothing is "No audio playing".
-        let dropped = Arc::new(AtomicBool::new(false));
-        let mut source = Some(SilentSource { dropped });
-        let silent: SourceFactory = Box::new(move |_| {
-            source
-                .take()
-                .map(|source| Box::new(source) as Box<dyn AudioSource>)
-                .ok_or_else(|| "again".to_owned())
-        });
-        let mut scene = SpectrumScene::with_factory(&SpectrumSettings::default(), silent);
+        // An input that opens but delivers nothing starts, then is "No audio playing".
+        let mut scene =
+            SpectrumScene::with_input(&SpectrumSettings::default(), Box::new(FakeInput::silent()));
         render_frame(&mut scene, 20, 6, Duration::ZERO);
         assert_eq!(scene.status().as_deref(), Some("Starting audio capture..."));
-        // With a working (but mute) source and time passing, it becomes "No audio playing".
-        scene.shared.lock().unwrap().status = WorkerStatus::Running;
         render_frame(&mut scene, 20, 6, Duration::from_secs(3));
         assert_eq!(scene.status().as_deref(), Some("No audio playing"));
     }
 
     #[test]
+    fn a_failed_input_is_retried_only_after_the_pause() {
+        let mut scene = failing(&SpectrumSettings::default());
+        render_frame(&mut scene, 20, 6, Duration::ZERO);
+        assert_eq!(scene.retry_at, Some(RETRY_AFTER));
+        render_frame(&mut scene, 20, 6, Duration::from_secs(1));
+        assert_eq!(scene.retry_at, Some(RETRY_AFTER), "no new attempt yet");
+        render_frame(&mut scene, 20, 6, Duration::from_secs(5));
+        assert_eq!(scene.retry_at, Some(Duration::from_secs(5) + RETRY_AFTER));
+    }
+
+    #[test]
     fn quiet_input_counts_as_silence_and_loud_input_wakes_the_scene() {
-        let (mut scene, _dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.0002);
+        let mut scene = live_scene(&SpectrumSettings::default(), 1000.0, 0.0002);
         run_frames(&mut scene, 30, 8, 5);
         assert_eq!(
             scene.status().as_deref(),
             Some("No audio playing"),
             "-74 dBFS is silence"
         );
-        let (mut scene, _dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.3);
+        let mut scene = live_scene(&SpectrumSettings::default(), 1000.0, 0.3);
         run_frames(&mut scene, 30, 8, 5);
         assert_eq!(scene.status(), None);
     }
 
     #[test]
     fn stalled_capture_falls_back_to_idle_after_the_stale_period() {
-        let (mut scene, _dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.4);
-        run_frames(&mut scene, 30, 8, 3);
-        assert_eq!(scene.status(), None);
-        // Freeze the published data by making the scene ignore new snapshots:
-        // render far into the future with the same snapshot sequence.
-        let frozen = Arc::clone(&scene.snapshot);
-        scene.shared = new_shared();
-        scene.shared.lock().unwrap().snapshot = Arc::clone(&frozen);
-        scene.shared.lock().unwrap().status = WorkerStatus::Running;
-        scene.snapshot = frozen;
+        let mut scene = SpectrumScene::with_input(
+            &SpectrumSettings::default(),
+            Box::new(FakeInput::sine(1000.0, 0.4)),
+        );
+        run_frames(&mut scene, 30, 8, 6);
+        assert_eq!(scene.status(), None, "live first");
+        // Then the open recording stops delivering.
+        let mut stalled = FakeInput::sine(1000.0, 0.4);
+        stalled.stall();
+        scene.input = Box::new(stalled);
         render_frame(&mut scene, 30, 8, Duration::from_secs(10));
         render_frame(&mut scene, 30, 8, Duration::from_secs(12));
         assert_eq!(scene.status().as_deref(), Some("No audio playing"));
@@ -1364,7 +1353,7 @@ mod tests {
                 style: *style,
                 ..SpectrumSettings::default()
             };
-            let (mut scene, _dropped) = live_scene(&settings, 700.0, 0.4);
+            let mut scene = live_scene(&settings, 700.0, 0.4);
             let rendered = run_frames(&mut scene, 60, 16, 20);
             assert!(
                 rendered.lit_dots() > 60,
@@ -1389,7 +1378,7 @@ mod tests {
             color_mode: ColorMode::Heat,
             ..SpectrumSettings::default()
         };
-        let (mut scene, _dropped) = live_scene(&settings, 500.0, 0.4);
+        let mut scene = live_scene(&settings, 500.0, 0.4);
         assert!(scene.follows_palette());
         let plain = run_frames(&mut scene, 40, 10, 1);
         scene.set_palette(&crate::style::ScenePalette {
@@ -1412,7 +1401,7 @@ mod tests {
                 color_mode: mode,
                 ..SpectrumSettings::default()
             };
-            let (mut scene, _dropped) = live_scene(&settings, 500.0, 0.4);
+            let mut scene = live_scene(&settings, 500.0, 0.4);
             assert!(scene.uses_cell_colors());
             let rendered = run_frames(&mut scene, 40, 10, 6);
             assert_eq!(rendered.cell_colors.len(), 400);
@@ -1424,11 +1413,7 @@ mod tests {
                 distinct.len()
             );
         }
-        assert!(!SpectrumScene::with_factory(
-            &SpectrumSettings::default(),
-            Box::new(|_| Err("x".to_owned()))
-        )
-        .uses_cell_colors());
+        assert!(!failing(&SpectrumSettings::default()).uses_cell_colors());
     }
 
     #[test]
@@ -1438,49 +1423,110 @@ mod tests {
                 refresh_rate: rate,
                 ..SpectrumSettings::default()
             };
-            let scene = SpectrumScene::with_factory(&settings, Box::new(|_| Err("x".to_owned())));
+            let scene = failing(&settings);
             assert_eq!(scene.frames_per_second(), rate);
         }
     }
 
     #[test]
-    fn dropping_the_scene_stops_capture_promptly() {
-        let (scene, dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.4);
-        let ticket = scene
-            ._worker
-            .as_ref()
-            .expect("capture worker admitted")
-            .join_observer()
-            .unwrap();
-        let started = Instant::now();
+    fn dropping_the_scene_closes_the_capture() {
+        let input = FakeInput::sine(1000.0, 0.4);
+        let closed = Arc::clone(&input.closed);
+        let mut scene = SpectrumScene::with_input(&SpectrumSettings::default(), Box::new(input));
+        render_frame(&mut scene, 8, 2, Duration::ZERO);
+        assert!(!closed.load(Ordering::SeqCst));
         drop(scene);
         assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "nonblocking drop"
+            closed.load(Ordering::SeqCst),
+            "the recording is closed with the scene"
         );
-        assert_eq!(
-            ticket
-                .join_until(Instant::now() + Duration::from_secs(1))
-                .unwrap(),
-            ilium_platform::owned_worker::WorkerExit::Joined
-        );
-        assert!(
-            dropped.load(Ordering::SeqCst),
-            "source released by the worker"
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // A scene whose input never opened closes nothing.
+        let input = FakeInput::failing("x");
+        let closed = Arc::clone(&input.closed);
+        let mut scene = SpectrumScene::with_input(&SpectrumSettings::default(), Box::new(input));
+        render_frame(&mut scene, 8, 2, Duration::ZERO);
+        drop(scene);
+        assert!(!closed.load(Ordering::SeqCst));
     }
 
     #[test]
-    fn render_never_blocks_while_the_worker_holds_the_lock() {
-        let (mut scene, _dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.4);
-        let shared = Arc::clone(&scene.shared);
-        let guard = shared.lock().unwrap();
-        let started = Instant::now();
-        let rendered = render_frame(&mut scene, 30, 8, Duration::from_secs(1));
-        assert!(started.elapsed() < Duration::from_millis(500));
-        assert!(rendered.raster.dots.len() == 60 * 32);
-        drop(guard);
+    fn the_host_settings_build_the_scene() {
+        let spec = serde_json::json!({
+            "scene": "spectrum",
+            "settings": {"style": "radial", "fft_size": "4096", "input": "named_device", "device_name": "BlackHole 2ch"},
+        });
+        let settings: SpectrumSettings = crate::kit::settings::from_spec(&spec);
+        assert_eq!(settings.style, SpectrumStyle::Radial);
+        assert_eq!(settings.fft_size, 4096);
+        assert_eq!(settings.input, InputKind::NamedDevice);
+        assert_eq!(settings.device_name, "BlackHole 2ch");
+        let numeric: SpectrumSettings =
+            crate::kit::settings::from_spec(&serde_json::json!({"fft_size": 4096}));
+        assert_eq!(numeric.fft_size, 4096);
+    }
+
+    #[test]
+    fn manifest_rows_match_the_scene_controls() {
+        // The default rows, plus the rows only a named device or the spectrogram shows (at
+        // their default values).
+        let mut rows = SpectrumSettings::default().controls();
+        let named = SpectrumSettings {
+            input: InputKind::NamedDevice,
+            ..SpectrumSettings::default()
+        };
+        let spectrogram = SpectrumSettings {
+            style: SpectrumStyle::Spectrogram,
+            ..SpectrumSettings::default()
+        };
+        rows.extend(
+            named
+                .controls()
+                .into_iter()
+                .chain(spectrogram.controls())
+                .filter(|row| matches!(row.id, "device_name" | "spectrogram_speed")),
+        );
+        crate::kit::settings::assert_schema_matches_controls("spectrum", &rows);
+    }
+
+    #[test]
+    fn manifest_enum_values_are_the_serde_names() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        let entry = manifest["contributes"]["scenes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|scene| scene["id"] == "spectrum")
+            .expect("spectrum is in the catalogue");
+        let properties = &entry["settings_schema"]["properties"];
+        let values = |key: &str| -> Vec<serde_json::Value> {
+            properties[key]["enum"].as_array().unwrap().clone()
+        };
+        for (position, value) in values("input").into_iter().enumerate() {
+            let parsed: InputKind = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.index(), position);
+        }
+        for (position, value) in values("style").into_iter().enumerate() {
+            let parsed: SpectrumStyle = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.index(), position);
+        }
+        for (position, value) in values("orientation").into_iter().enumerate() {
+            let parsed: Orientation = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.index(), position);
+        }
+        for (position, value) in values("color_mode").into_iter().enumerate() {
+            let parsed: ColorMode = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.index(), position);
+        }
+        for (position, value) in values("band_scale").into_iter().enumerate() {
+            let parsed: BandScale = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.index(), position);
+        }
+        for (position, value) in values("fft_size").into_iter().enumerate() {
+            let settings: SpectrumSettings =
+                crate::kit::settings::from_spec(&serde_json::json!({ "fft_size": value }));
+            assert_eq!(usize::from(settings.fft_size >= 3072), position);
+        }
     }
 
     #[test]
@@ -1492,8 +1538,7 @@ mod tests {
                     color_mode: ColorMode::Rainbow,
                     ..SpectrumSettings::default()
                 };
-                let mut scene =
-                    SpectrumScene::with_factory(&settings, Box::new(|_| Err("x".to_owned())));
+                let mut scene = failing(&settings);
                 let rendered = render_frame(&mut scene, width, height, Duration::from_secs(2));
                 assert_eq!(
                     rendered.cell_colors.len(),
@@ -1504,24 +1549,15 @@ mod tests {
     }
 
     fn music_scene(settings: &SpectrumSettings) -> SpectrumScene {
-        let mut source = Some(MusicSource::new());
-        let factory: SourceFactory = Box::new(move |_| {
-            source
-                .take()
-                .map(|source| Box::new(source) as Box<dyn AudioSource>)
-                .ok_or_else(|| "again".to_owned())
-        });
-        let scene = SpectrumScene::with_factory(settings, factory);
-        let shared = Arc::clone(&scene.shared);
-        assert!(wait_until(|| shared
-            .lock()
-            .map(|state| state.snapshot.seq >= 4)
-            .unwrap_or(false)));
+        let mut scene = SpectrumScene::with_input(settings, Box::new(FakeInput::music()));
+        for step in 0..4u32 {
+            render_frame(&mut scene, 8, 2, Duration::from_millis(10) * step);
+        }
         scene
     }
 
     /// Prints a live-signal picture per style for visual review:
-    /// `cargo test -p ilium-ambient show_scene_pictures -- --ignored --nocapture`.
+    /// `cargo test -p ilium-plugin-core-scenes show_scene_pictures -- --ignored --nocapture`.
     #[test]
     #[ignore = "prints Braille for visual inspection"]
     fn show_scene_pictures() {

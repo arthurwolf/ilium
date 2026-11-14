@@ -104,14 +104,6 @@ pub const VOICE_POLICY_RUN_THE_SHELL_COMMAND_V0_IN_A: &str = include_str!(concat
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/run-the-shell-command-v0-in-a.hbs"
 ));
-pub const VOICE_POLICY_BOARD_HAS_NO_COLUMN: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/policy/board-has-no-column.hbs"
-));
-pub const VOICE_POLICY_BOARD_HAS_NO_CARD_V0_IN_COLUMN: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/policy/board-has-no-card-v0-in-column.hbs"
-));
 pub const VOICE_POLICY_PERMANENTLY_DELETE_THE_CARD_V0_FROM_COLUMN: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/permanently-delete-the-card-v0-from-column.hbs"
@@ -618,22 +610,6 @@ pub const VOICE_SETTINGS_KEYBOARD_BINDING_WAS_REJECTED: &str = include_str!(conc
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/settings/keyboard-binding-was-rejected.hbs"
 ));
-pub const VOICE_SETTINGS_CARD_PREVIEW_LINE_COUNT_IS_TOO_LARGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/settings/card-preview-line-count-is-too-large.hbs"
-));
-pub const VOICE_SETTINGS_CARD_PREVIEW_LINES_MUST_BE_BETWEEN_1: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/settings/card-preview-lines-must-be-between-1.hbs"
-));
-pub const VOICE_SETTINGS_COLUMN_WIDTH_IS_TOO_LARGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/settings/column-width-is-too-large.hbs"
-));
-pub const VOICE_SETTINGS_MINIMUM_COLUMN_WIDTH_MUST_BE_BETWEEN_10: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/settings/minimum-column-width-must-be-between-10.hbs"
-));
 pub const VOICE_SETTINGS_SOUND_SOURCE_MUST_BE_SYSTEM_BEEP_OR: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/settings/sound-source-must-be-system-beep-or.hbs"
@@ -838,14 +814,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/policy/run-the-shell-command-v0-in-a",
         VOICE_POLICY_RUN_THE_SHELL_COMMAND_V0_IN_A,
-    ),
-    (
-        "voice/policy/board-has-no-column",
-        VOICE_POLICY_BOARD_HAS_NO_COLUMN,
-    ),
-    (
-        "voice/policy/board-has-no-card-v0-in-column",
-        VOICE_POLICY_BOARD_HAS_NO_CARD_V0_IN_COLUMN,
     ),
     (
         "voice/policy/permanently-delete-the-card-v0-from-column",
@@ -1335,22 +1303,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/settings/keyboard-binding-was-rejected",
         VOICE_SETTINGS_KEYBOARD_BINDING_WAS_REJECTED,
-    ),
-    (
-        "voice/settings/card-preview-line-count-is-too-large",
-        VOICE_SETTINGS_CARD_PREVIEW_LINE_COUNT_IS_TOO_LARGE,
-    ),
-    (
-        "voice/settings/card-preview-lines-must-be-between-1",
-        VOICE_SETTINGS_CARD_PREVIEW_LINES_MUST_BE_BETWEEN_1,
-    ),
-    (
-        "voice/settings/column-width-is-too-large",
-        VOICE_SETTINGS_COLUMN_WIDTH_IS_TOO_LARGE,
-    ),
-    (
-        "voice/settings/minimum-column-width-must-be-between-10",
-        VOICE_SETTINGS_MINIMUM_COLUMN_WIDTH_MUST_BE_BETWEEN_10,
     ),
     (
         "voice/settings/sound-source-must-be-system-beep-or",

@@ -18,7 +18,7 @@ Each operation needs a grant in the form `<grant>:<scope>`.
 |---|---|---|
 | Read, list, scan | `fs.read:<scope>` | server, client, scene |
 | Write, create, remove, rename | `fs.write:<scope>` | server, client, scene |
-| Lock | `fs.read:<scope>` and `fs.write:<scope>` | server, client, scene |
+| Lock | `fs.read:<scope>` and `fs.write:<scope>`; on `agent-config:<agent>`, `fs.read:agent-config:<agent>` and `agent-config.propose:<agent>` | server, client, scene |
 | Watch | `fs.watch:<scope>` | server, client |
 | Picker | `fs.pick`, plus `fs.read:picked` or `fs.write:picked` | client |
 
@@ -132,6 +132,7 @@ A shared lock (`exclusive: false`) coexists with other shared locks. An exclusiv
 - A held lock with timeout 0 gives `conflict` at once.
 - A lock still held when its timeout ends gives `timed-out`. `busy` is never used for locks.
 - Locks are released with `unlock`, and also when the plugin is deactivated, disabled or loses the grant.
+- An `agent-config:<agent>` scope has no write grant, but a plugin that holds `fs.read:agent-config:<agent>` and `agent-config.propose:<agent>` may lock paths in it. It locks a file, reads its revision and proposes the change, so two proposers do not race on one file. The lock never makes the scope writable.
 
 ### Watches
 

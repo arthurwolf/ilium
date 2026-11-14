@@ -32,11 +32,6 @@ pub enum SettingsChoice {
     SoundFile,
     TitleStyle,
     CodexThreadNames,
-    InferenceProvider,
-    KiloModel,
-    OllamaModel,
-    OpenAiModel,
-    AnthropicModel,
     ProgressFillStyle,
     GitDefaultWhere,
     GitDefaultBase,
@@ -189,7 +184,7 @@ fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 27] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -212,11 +207,6 @@ impl SettingsChoice {
         Self::SoundFile,
         Self::TitleStyle,
         Self::CodexThreadNames,
-        Self::InferenceProvider,
-        Self::KiloModel,
-        Self::OllamaModel,
-        Self::OpenAiModel,
-        Self::AnthropicModel,
         Self::ProgressFillStyle,
         Self::GitDefaultWhere,
         Self::GitDefaultBase,
@@ -233,22 +223,6 @@ impl SettingsChoice {
                 Some(crate::app::GitRow::DefaultClosePolicy) => Some(Self::GitClosePolicy),
                 _ => None,
             },
-            SettingsTab::Inference => {
-                match crate::settings_ui::inference_rows(&app.inference_settings).get(row) {
-                    Some(crate::app::InferenceRow::Provider) => Some(Self::InferenceProvider),
-                    Some(crate::app::InferenceRow::KiloGatewayModel) => Some(Self::KiloModel),
-                    Some(crate::app::InferenceRow::Field(
-                        crate::app::InferenceSettingField::OllamaModel,
-                    )) => Some(Self::OllamaModel),
-                    Some(crate::app::InferenceRow::Field(
-                        crate::app::InferenceSettingField::OpenAiModel,
-                    )) => Some(Self::OpenAiModel),
-                    Some(crate::app::InferenceRow::Field(
-                        crate::app::InferenceSettingField::AnthropicModel,
-                    )) => Some(Self::AnthropicModel),
-                    _ => None,
-                }
-            }
             SettingsTab::Sound => match crate::app::SoundRow::ALL.get(row) {
                 Some(crate::app::SoundRow::Source) => Some(Self::SoundSource),
                 Some(crate::app::SoundRow::File) => Some(Self::SoundFile),
@@ -315,11 +289,6 @@ impl SettingsChoice {
             Self::GitBranchLine => "Branch line",
             Self::GitClosePolicy => "Close policy",
             Self::ProgressFillStyle => "Progress fill style",
-            Self::InferenceProvider => "Provider",
-            Self::KiloModel => "Kilo model",
-            Self::OllamaModel => "Ollama model",
-            Self::OpenAiModel => "OpenAI model",
-            Self::AnthropicModel => "Anthropic model",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
@@ -387,45 +356,6 @@ impl SettingsChoice {
                 };
                 (options, selected)
             }
-            Self::OllamaModel | Self::OpenAiModel | Self::AnthropicModel => {
-                let (models, current) = match self {
-                    Self::OllamaModel => (&app.ollama_models, &app.inference_settings.ollama.model),
-                    Self::AnthropicModel => (
-                        &app.anthropic_models,
-                        &app.inference_settings.anthropic.model,
-                    ),
-                    _ => (&app.openai_models, &app.inference_settings.openai.model),
-                };
-                let mut options = Vec::new();
-                let mut ids = std::collections::HashSet::new();
-                for model in std::iter::once(current)
-                    .chain(models.iter())
-                    .filter(|model| !model.trim().is_empty())
-                {
-                    if ids.insert(model.as_str()) {
-                        options.push(ChoiceOption {
-                            id: model.clone(),
-                            label: model.clone(),
-                            disabled_reason: None,
-                        });
-                    }
-                }
-                if options.is_empty() {
-                    options.push(ChoiceOption { id: "unavailable".into(), label: "No model configured".into(), disabled_reason: Some("Press E on the model row to enter a name, or refresh the model catalog".into()) });
-                }
-                // An empty configured model has no current catalog selection.
-                // Keeping that identity empty also makes the first step choose A.
-                (options, current.clone())
-            }
-            Self::InferenceProvider => catalog(
-                &ilium_inference::InferenceProviderKind::ALL,
-                app.inference_settings.selected_provider,
-                |provider| provider.label().into(),
-            ),
-            Self::KiloModel => (
-                crate::value_inference::OnboardingInference::KiloModel.options(app),
-                app.inference_settings.kilo_gateway.model.clone(),
-            ),
             Self::SoundSource => catalog(
                 &ilium_sound::SoundSourceKind::ALL,
                 app.sound_settings.source,
@@ -656,22 +586,10 @@ impl App {
         }
         if matches!(
             field,
-            SettingsChoice::InferenceProvider
-                | SettingsChoice::TitleStyle
-                | SettingsChoice::CodexThreadNames
-                | SettingsChoice::KiloModel
-                | SettingsChoice::OllamaModel
-                | SettingsChoice::OpenAiModel
-                | SettingsChoice::AnthropicModel
+            SettingsChoice::TitleStyle | SettingsChoice::CodexThreadNames
         ) {
             let mut desired = self.inference_settings.clone();
             match field {
-                SettingsChoice::InferenceProvider => {
-                    desired.selected_provider = ilium_inference::InferenceProviderKind::ALL
-                        .into_iter()
-                        .find(|provider| format!("{provider:?}") == id)
-                        .ok_or("Provider is unavailable")?
-                }
                 SettingsChoice::TitleStyle => {
                     desired.title_style = [
                         ilium_inference::TitleStyle::Labeling,
@@ -688,10 +606,6 @@ impl App {
                         _ => return Err("Codex thread name option is unavailable".into()),
                     };
                 }
-                SettingsChoice::KiloModel => desired.kilo_gateway.model = id.into(),
-                SettingsChoice::OllamaModel => desired.ollama.model = id.into(),
-                SettingsChoice::OpenAiModel => desired.openai.model = id.into(),
-                SettingsChoice::AnthropicModel => desired.anthropic.model = id.into(),
                 _ => return Err("This is not an inference choice".into()),
             }
             self.enqueue_inference_value(directory, &desired, token)?;
@@ -726,13 +640,7 @@ impl App {
             SettingsChoice::GitClosePolicy => {
                 select!(crate::config::GitClosePolicy::ALL, git.default_close_policy)
             }
-            SettingsChoice::InferenceProvider
-            | SettingsChoice::TitleStyle
-            | SettingsChoice::CodexThreadNames
-            | SettingsChoice::KiloModel
-            | SettingsChoice::OllamaModel
-            | SettingsChoice::OpenAiModel
-            | SettingsChoice::AnthropicModel => {
+            SettingsChoice::TitleStyle | SettingsChoice::CodexThreadNames => {
                 return Err("Inference choice was not dispatched".into());
             }
             SettingsChoice::SoundSource => {
@@ -930,98 +838,6 @@ impl App {
 mod tests {
     use super::*;
     use crate::app::SettingsState;
-
-    #[test]
-    fn universal_review_blank_model_does_not_select_or_skip_first_catalog_entry() {
-        for field in [
-            SettingsChoice::OllamaModel,
-            SettingsChoice::OpenAiModel,
-            SettingsChoice::AnthropicModel,
-        ] {
-            for count in 0..=2 {
-                for direction in [-1, 1] {
-                    let directory = tempfile::tempdir().unwrap();
-                    let mut app = App::new("blank-model".into(), directory.path().into());
-                    app.config_dir = Some(directory.path().into());
-                    app.inference_settings.ollama.model.clear();
-                    app.inference_settings.openai.model.clear();
-                    app.inference_settings.anthropic.model.clear();
-                    let models: Vec<String> = ["synthetic-A", "synthetic-B"]
-                        .into_iter()
-                        .take(count)
-                        .map(str::to_owned)
-                        .collect();
-                    app.ollama_models = models.clone();
-                    app.openai_models = models.clone();
-                    app.anthropic_models = models;
-                    app.inference_settings.selected_provider = match field {
-                        SettingsChoice::OllamaModel => {
-                            ilium_inference::InferenceProviderKind::Ollama
-                        }
-                        SettingsChoice::AnthropicModel => {
-                            ilium_inference::InferenceProviderKind::Anthropic
-                        }
-                        _ => ilium_inference::InferenceProviderKind::OpenAi,
-                    };
-                    let row = (0..crate::settings_ui::inference_rows(&app.inference_settings)
-                        .len())
-                        .find(|row| {
-                            SettingsChoice::at(&app, crate::app::SettingsTab::Inference, *row)
-                                == Some(field)
-                        })
-                        .unwrap();
-                    let state = SettingsState {
-                        tab: crate::app::SettingsTab::Inference,
-                        selected_row: row,
-                        ..SettingsState::default()
-                    };
-                    let area = ratatui::layout::Rect::new(0, 0, 140, 100);
-                    let (_, control) =
-                        crate::settings_ui::settings_choice_control(area, &app, &state, row)
-                            .unwrap();
-                    let has_step = (0..area.height).any(|y| {
-                        (0..area.width).any(|x| {
-                            matches!(
-                                control.hit(
-                                    ratatui::layout::Position::new(x, y),
-                                    crate::value_control::PointerButton::Left
-                                ),
-                                Some(
-                                    crate::value_control::ControlAction::PreviousChoice
-                                        | crate::value_control::ControlAction::NextChoice
-                                )
-                            )
-                        })
-                    });
-                    assert_eq!(has_step, count > 0, "blank model step availability");
-                    let ValueDialogState::Choice(dialog) = field.dialog(&app).unwrap() else {
-                        panic!("not a catalog")
-                    };
-                    assert!(
-                        dialog.selected_id.as_deref().is_none_or(str::is_empty),
-                        "unconfigured model claimed a selection: {:?}",
-                        dialog.selected_id
-                    );
-                    app.step_settings_choice(field, direction);
-                    app.settle_filesystem_for_test();
-                    let loaded = crate::config::load(directory.path()).unwrap();
-                    let actual = match field {
-                        SettingsChoice::OllamaModel => loaded.inference.ollama.model,
-                        SettingsChoice::AnthropicModel => loaded.inference.anthropic.model,
-                        _ => loaded.inference.openai.model,
-                    };
-                    let expected = if count == 0 {
-                        ""
-                    } else if count == 2 && direction < 0 {
-                        "synthetic-B"
-                    } else {
-                        "synthetic-A"
-                    };
-                    assert_eq!(actual, expected);
-                }
-            }
-        }
-    }
 
     #[test]
     fn sound_catalog_retains_authored_file_and_selection_updates_disk_and_server() {
@@ -1396,69 +1212,6 @@ mod tests {
     }
 
     #[test]
-    fn discovered_model_catalogs_are_complete_deduplicated_and_keep_authored_current() {
-        let mut app = App::new("synthetic-full-model-catalogs".into(), std::env::temp_dir());
-        for field in [
-            SettingsChoice::OllamaModel,
-            SettingsChoice::OpenAiModel,
-            SettingsChoice::AnthropicModel,
-        ] {
-            let models: Vec<String> = (0..400)
-                .map(|index| format!("synthetic/model-α-{index}"))
-                .collect();
-            if field == SettingsChoice::OllamaModel {
-                app.ollama_models = models;
-                app.ollama_models.push("synthetic/model-α-399".into());
-                app.inference_settings.ollama.model = "authored/not-discovered".into();
-            } else if field == SettingsChoice::OpenAiModel {
-                app.openai_models = models;
-                app.openai_models.push("synthetic/model-α-399".into());
-                app.inference_settings.openai.model = "authored/not-discovered".into();
-            } else {
-                app.anthropic_models = models;
-                app.anthropic_models.push("synthetic/model-α-399".into());
-                app.inference_settings.anthropic.model = "authored/not-discovered".into();
-            }
-            let (options, selected) = field.options(&app);
-            assert_eq!(options.len(), 401);
-            assert_eq!(selected, "authored/not-discovered");
-            assert!(options
-                .iter()
-                .any(|option| option.id == "synthetic/model-α-399"));
-            let ValueDialogState::Choice(dialog) = field.dialog(&app).unwrap() else {
-                panic!("model catalog");
-            };
-            assert_eq!(dialog.options().len(), 401);
-            assert_eq!(
-                dialog.selected_id.as_deref(),
-                Some("authored/not-discovered")
-            );
-        }
-    }
-
-    #[test]
-    fn empty_model_catalog_explains_manual_entry_without_saving_placeholder() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("synthetic-empty-models".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        for field in [SettingsChoice::OllamaModel, SettingsChoice::OpenAiModel] {
-            let (options, selected) = field.options(&app);
-            assert_eq!(options.len(), 1);
-            assert!(selected.is_empty());
-            assert!(options[0]
-                .disabled_reason
-                .as_deref()
-                .unwrap()
-                .contains("Press E"));
-            let attempts = app.configuration_admission.attempts;
-            assert!(app
-                .save_settings_choice(field, &options[0].id, directory.path().into(), None)
-                .is_err());
-            assert_eq!(app.configuration_admission.attempts, attempts);
-        }
-    }
-
-    #[test]
     fn progress_style_catalog_retains_authored_frames_until_explicit_preset_and_persists() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
@@ -1547,13 +1300,6 @@ mod tests {
             1,
             2,
             2,
-            ilium_inference::InferenceProviderKind::ALL.len(),
-            crate::value_inference::OnboardingInference::KiloModel
-                .options(&app)
-                .len(),
-            1,
-            1,
-            1,
             crate::icon_settings::TASK_PROGRESS_STYLE_NAMES.len(),
             crate::config::GitDefaultWhere::ALL.len(),
             crate::config::GitDefaultBase::ALL.len(),
@@ -1562,44 +1308,17 @@ mod tests {
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
-            app.inference_settings.selected_provider = match field {
-                SettingsChoice::KiloModel => ilium_inference::InferenceProviderKind::KiloGateway,
-                SettingsChoice::OllamaModel => ilium_inference::InferenceProviderKind::Ollama,
-                SettingsChoice::OpenAiModel => ilium_inference::InferenceProviderKind::OpenAi,
-                SettingsChoice::AnthropicModel => ilium_inference::InferenceProviderKind::Anthropic,
-                _ => app.inference_settings.selected_provider,
-            };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");
-            let unconfigured_model = selected.is_empty()
-                && matches!(
-                    field,
-                    SettingsChoice::OllamaModel
-                        | SettingsChoice::OpenAiModel
-                        | SettingsChoice::AnthropicModel
-                );
-            if unconfigured_model {
-                assert_eq!(
-                    options.len(),
-                    1,
-                    "empty model catalog has one unavailable placeholder"
-                );
-                assert_eq!(options[0].id, "unavailable");
-                assert!(
-                    options[0].disabled_reason.is_some(),
-                    "placeholder must not be selectable"
-                );
-            } else {
-                assert!(options
-                    .iter()
-                    .all(|option| option.disabled_reason.is_none() || option.id == selected));
-            }
+            assert!(options
+                .iter()
+                .all(|option| option.disabled_reason.is_none() || option.id == selected));
             assert_eq!(
                 options
                     .iter()
                     .filter(|option| option.id == selected)
                     .count(),
-                usize::from(!unconfigured_model)
+                1
             );
             let ids: std::collections::HashSet<_> =
                 options.iter().map(|option| &option.id).collect();
@@ -1608,10 +1327,7 @@ mod tests {
                 panic!("choice");
             };
             assert_eq!(dialog.options().len(), expected);
-            assert_eq!(
-                dialog.selected_id,
-                (!unconfigured_model).then_some(selected)
-            );
+            assert_eq!(dialog.selected_id, Some(selected));
 
             let location = crate::app::SettingsTab::ALL
                 .into_iter()

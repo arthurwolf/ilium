@@ -145,6 +145,12 @@ impl ServiceBrokerState {
         Ok(())
     }
 
+    /// A fresh call number from the runtime's allocator, for a call the kernel itself makes
+    /// (`HostRuntime::call_service_as_kernel`): it never equals the number of a plugin's call.
+    pub fn next_call(&self) -> u64 {
+        self.ids.next_call()
+    }
+
     /// Installs the schema file of `service`, replacing an earlier one (gap G13).
     pub fn install_schema(&mut self, service: &str, text: &str) -> Result<(), String> {
         self.schemas.install(service, text)

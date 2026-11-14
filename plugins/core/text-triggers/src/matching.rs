@@ -361,8 +361,24 @@ impl Tracker {
 pub struct Delivery {
     pub rule_id: String,
     pub message: String,
+    /// The text the rule matched, as the `before-fire` hook payload carries it.
+    pub matched: String,
     pub detected_at_ms: u64,
     pub delay_ms: u64,
+}
+
+/// The text a rule matched on the scanned lines: the last match, which is the newest output on a
+/// terminal screen. Empty when the pattern does not compile or matches nothing.
+pub fn last_match(regexp: &str, lines: &[String]) -> String {
+    let Ok(regex) = Regex::new(regexp) else {
+        return String::new();
+    };
+    lines
+        .iter()
+        .rev()
+        .find_map(|line| regex.find_iter(line).last())
+        .map(|found| found.as_str().to_owned())
+        .unwrap_or_default()
 }
 
 impl Delivery {
@@ -619,6 +635,7 @@ mod tests {
         let delivery = |id: &str, detected, delay| Delivery {
             rule_id: id.to_string(),
             message: id.to_string(),
+            matched: String::new(),
             detected_at_ms: detected,
             delay_ms: delay,
         };
@@ -639,12 +656,22 @@ mod tests {
     }
 
     #[test]
+    fn the_matched_text_is_the_newest_match_on_screen() {
+        let screen = lines(&["Continue? (y/n)", "done", "Delete all? (y/n)  (y/n)"]);
+        assert_eq!(last_match(r"\w+\? \(y/n\)", &screen), "all? (y/n)");
+        assert_eq!(last_match(r"\(y/n\)", &screen), "(y/n)");
+        assert_eq!(last_match("absent", &screen), "");
+        assert_eq!(last_match("(", &screen), "");
+    }
+
+    #[test]
     fn a_full_queue_hands_the_delivery_back() {
         let mut queue = DeliveryQueue::default();
         for index in 0..MAX_PENDING_DELIVERIES {
             let item = Delivery {
                 rule_id: format!("r{index}"),
                 message: String::new(),
+                matched: String::new(),
                 detected_at_ms: 0,
                 delay_ms: 10,
             };
@@ -653,6 +680,7 @@ mod tests {
         let extra = Delivery {
             rule_id: "extra".into(),
             message: String::new(),
+            matched: String::new(),
             detected_at_ms: 0,
             delay_ms: 10,
         };

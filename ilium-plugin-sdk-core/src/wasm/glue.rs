@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=0ccb29e2d3d7b0806518a45f30823eb146adf907acc2d16fb94229696c352d22
+// @generated from wit/ sha256=05da3da95edc993fde6a9dddb6747cb846cf613f28397de02930c1d628aa60ef
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.
@@ -14409,6 +14409,204 @@ macro_rules! __ilium_wasm_export_detector {
                 }
             }
         }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::DetectorTreeProcess> for $crate::generated::exports::detector::DetectorTreeProcess {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::DetectorTreeProcess {
+                bindings::exports::ilium::exports::detector::DetectorTreeProcess {
+                    pid: $crate::wasm::IntoWit::into_wit(self.pid),
+                    parent_pid: $crate::wasm::IntoWit::into_wit(self.parent_pid),
+                    depth: $crate::wasm::IntoWit::into_wit(self.depth),
+                    started_at_unix_seconds: $crate::wasm::IntoWit::into_wit(self.started_at_unix_seconds),
+                    name: $crate::wasm::IntoWit::into_wit(self.name),
+                    argv: $crate::wasm::IntoWit::into_wit(self.argv),
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::DetectorTreeProcess> for bindings::exports::ilium::exports::detector::DetectorTreeProcess {
+            fn into_mirror(self) -> $crate::generated::exports::detector::DetectorTreeProcess {
+                $crate::generated::exports::detector::DetectorTreeProcess {
+                    pid: $crate::wasm::IntoMirror::into_mirror(self.pid),
+                    parent_pid: $crate::wasm::IntoMirror::into_mirror(self.parent_pid),
+                    depth: $crate::wasm::IntoMirror::into_mirror(self.depth),
+                    started_at_unix_seconds: $crate::wasm::IntoMirror::into_mirror(self.started_at_unix_seconds),
+                    name: $crate::wasm::IntoMirror::into_mirror(self.name),
+                    argv: $crate::wasm::IntoMirror::into_mirror(self.argv),
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::IdentifiedAgent> for $crate::generated::exports::detector::IdentifiedAgent {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::IdentifiedAgent {
+                bindings::exports::ilium::exports::detector::IdentifiedAgent {
+                    signature: $crate::wasm::IntoWit::into_wit(self.signature),
+                    pid: $crate::wasm::IntoWit::into_wit(self.pid),
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::IdentifiedAgent> for bindings::exports::ilium::exports::detector::IdentifiedAgent {
+            fn into_mirror(self) -> $crate::generated::exports::detector::IdentifiedAgent {
+                $crate::generated::exports::detector::IdentifiedAgent {
+                    signature: $crate::wasm::IntoMirror::into_mirror(self.signature),
+                    pid: $crate::wasm::IntoMirror::into_mirror(self.pid),
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::ScreenCell> for $crate::generated::exports::detector::ScreenCell {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::ScreenCell {
+                bindings::exports::ilium::exports::detector::ScreenCell {
+                    row: $crate::wasm::IntoWit::into_wit(self.row),
+                    column: $crate::wasm::IntoWit::into_wit(self.column),
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::ScreenCell> for bindings::exports::ilium::exports::detector::ScreenCell {
+            fn into_mirror(self) -> $crate::generated::exports::detector::ScreenCell {
+                $crate::generated::exports::detector::ScreenCell {
+                    row: $crate::wasm::IntoMirror::into_mirror(self.row),
+                    column: $crate::wasm::IntoMirror::into_mirror(self.column),
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::ScreenRequest> for $crate::generated::exports::detector::ScreenRequest {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::ScreenRequest {
+                bindings::exports::ilium::exports::detector::ScreenRequest {
+                    pane: $crate::wasm::IntoWit::into_wit(self.pane),
+                    generation: $crate::wasm::IntoWit::into_wit(self.generation),
+                    signature: $crate::wasm::IntoWit::into_wit(self.signature),
+                    text: $crate::wasm::IntoWit::into_wit(self.text),
+                    cursor: $crate::wasm::IntoWit::into_wit(self.cursor),
+                    dimmed: $crate::wasm::IntoWit::into_wit(self.dimmed),
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::ScreenRequest> for bindings::exports::ilium::exports::detector::ScreenRequest {
+            fn into_mirror(self) -> $crate::generated::exports::detector::ScreenRequest {
+                $crate::generated::exports::detector::ScreenRequest {
+                    pane: $crate::wasm::IntoMirror::into_mirror(self.pane),
+                    generation: $crate::wasm::IntoMirror::into_mirror(self.generation),
+                    signature: $crate::wasm::IntoMirror::into_mirror(self.signature),
+                    text: $crate::wasm::IntoMirror::into_mirror(self.text),
+                    cursor: $crate::wasm::IntoMirror::into_mirror(self.cursor),
+                    dimmed: $crate::wasm::IntoMirror::into_mirror(self.dimmed),
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::AgentTurn> for $crate::generated::exports::detector::AgentTurn {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::AgentTurn {
+                match self {
+                    $crate::generated::exports::detector::AgentTurn::Working => bindings::exports::ilium::exports::detector::AgentTurn::Working,
+                    $crate::generated::exports::detector::AgentTurn::WaitingApproval => bindings::exports::ilium::exports::detector::AgentTurn::WaitingApproval,
+                    $crate::generated::exports::detector::AgentTurn::WaitingSubagents => bindings::exports::ilium::exports::detector::AgentTurn::WaitingSubagents,
+                    $crate::generated::exports::detector::AgentTurn::Settling => bindings::exports::ilium::exports::detector::AgentTurn::Settling,
+                    $crate::generated::exports::detector::AgentTurn::Idle => bindings::exports::ilium::exports::detector::AgentTurn::Idle,
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::AgentTurn> for bindings::exports::ilium::exports::detector::AgentTurn {
+            fn into_mirror(self) -> $crate::generated::exports::detector::AgentTurn {
+                match self {
+                    bindings::exports::ilium::exports::detector::AgentTurn::Working => $crate::generated::exports::detector::AgentTurn::Working,
+                    bindings::exports::ilium::exports::detector::AgentTurn::WaitingApproval => $crate::generated::exports::detector::AgentTurn::WaitingApproval,
+                    bindings::exports::ilium::exports::detector::AgentTurn::WaitingSubagents => $crate::generated::exports::detector::AgentTurn::WaitingSubagents,
+                    bindings::exports::ilium::exports::detector::AgentTurn::Settling => $crate::generated::exports::detector::AgentTurn::Settling,
+                    bindings::exports::ilium::exports::detector::AgentTurn::Idle => $crate::generated::exports::detector::AgentTurn::Idle,
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::ActivityEvidence> for $crate::generated::exports::detector::ActivityEvidence {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::ActivityEvidence {
+                match self {
+                    $crate::generated::exports::detector::ActivityEvidence::InterruptMarker => bindings::exports::ilium::exports::detector::ActivityEvidence::InterruptMarker,
+                    $crate::generated::exports::detector::ActivityEvidence::GenericLiveStatus => bindings::exports::ilium::exports::detector::ActivityEvidence::GenericLiveStatus,
+                    $crate::generated::exports::detector::ActivityEvidence::ClaudeLiveStatus => bindings::exports::ilium::exports::detector::ActivityEvidence::ClaudeLiveStatus,
+                    $crate::generated::exports::detector::ActivityEvidence::CodexLiveStatus => bindings::exports::ilium::exports::detector::ActivityEvidence::CodexLiveStatus,
+                    $crate::generated::exports::detector::ActivityEvidence::BackgroundWait => bindings::exports::ilium::exports::detector::ActivityEvidence::BackgroundWait,
+                    $crate::generated::exports::detector::ActivityEvidence::BackgroundTaskWait => bindings::exports::ilium::exports::detector::ActivityEvidence::BackgroundTaskWait,
+                    $crate::generated::exports::detector::ActivityEvidence::ConfirmationPrompt => bindings::exports::ilium::exports::detector::ActivityEvidence::ConfirmationPrompt,
+                    $crate::generated::exports::detector::ActivityEvidence::SelectionPrompt => bindings::exports::ilium::exports::detector::ActivityEvidence::SelectionPrompt,
+                    $crate::generated::exports::detector::ActivityEvidence::FolderTrustPrompt => bindings::exports::ilium::exports::detector::ActivityEvidence::FolderTrustPrompt,
+                    $crate::generated::exports::detector::ActivityEvidence::NoActiveMarker => bindings::exports::ilium::exports::detector::ActivityEvidence::NoActiveMarker,
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::ActivityEvidence> for bindings::exports::ilium::exports::detector::ActivityEvidence {
+            fn into_mirror(self) -> $crate::generated::exports::detector::ActivityEvidence {
+                match self {
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::InterruptMarker => $crate::generated::exports::detector::ActivityEvidence::InterruptMarker,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::GenericLiveStatus => $crate::generated::exports::detector::ActivityEvidence::GenericLiveStatus,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::ClaudeLiveStatus => $crate::generated::exports::detector::ActivityEvidence::ClaudeLiveStatus,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::CodexLiveStatus => $crate::generated::exports::detector::ActivityEvidence::CodexLiveStatus,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::BackgroundWait => $crate::generated::exports::detector::ActivityEvidence::BackgroundWait,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::BackgroundTaskWait => $crate::generated::exports::detector::ActivityEvidence::BackgroundTaskWait,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::ConfirmationPrompt => $crate::generated::exports::detector::ActivityEvidence::ConfirmationPrompt,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::SelectionPrompt => $crate::generated::exports::detector::ActivityEvidence::SelectionPrompt,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::FolderTrustPrompt => $crate::generated::exports::detector::ActivityEvidence::FolderTrustPrompt,
+                    bindings::exports::ilium::exports::detector::ActivityEvidence::NoActiveMarker => $crate::generated::exports::detector::ActivityEvidence::NoActiveMarker,
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::GoalEvidence> for $crate::generated::exports::detector::GoalEvidence {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::GoalEvidence {
+                match self {
+                    $crate::generated::exports::detector::GoalEvidence::Active => bindings::exports::ilium::exports::detector::GoalEvidence::Active,
+                    $crate::generated::exports::detector::GoalEvidence::Paused => bindings::exports::ilium::exports::detector::GoalEvidence::Paused,
+                    $crate::generated::exports::detector::GoalEvidence::Blocked => bindings::exports::ilium::exports::detector::GoalEvidence::Blocked,
+                    $crate::generated::exports::detector::GoalEvidence::UsageLimited => bindings::exports::ilium::exports::detector::GoalEvidence::UsageLimited,
+                    $crate::generated::exports::detector::GoalEvidence::Reached => bindings::exports::ilium::exports::detector::GoalEvidence::Reached,
+                    $crate::generated::exports::detector::GoalEvidence::Inactive => bindings::exports::ilium::exports::detector::GoalEvidence::Inactive,
+                    $crate::generated::exports::detector::GoalEvidence::Unknown => bindings::exports::ilium::exports::detector::GoalEvidence::Unknown,
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::GoalEvidence> for bindings::exports::ilium::exports::detector::GoalEvidence {
+            fn into_mirror(self) -> $crate::generated::exports::detector::GoalEvidence {
+                match self {
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Active => $crate::generated::exports::detector::GoalEvidence::Active,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Paused => $crate::generated::exports::detector::GoalEvidence::Paused,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Blocked => $crate::generated::exports::detector::GoalEvidence::Blocked,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::UsageLimited => $crate::generated::exports::detector::GoalEvidence::UsageLimited,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Reached => $crate::generated::exports::detector::GoalEvidence::Reached,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Inactive => $crate::generated::exports::detector::GoalEvidence::Inactive,
+                    bindings::exports::ilium::exports::detector::GoalEvidence::Unknown => $crate::generated::exports::detector::GoalEvidence::Unknown,
+                }
+            }
+        }
+        impl $crate::wasm::IntoWit<bindings::exports::ilium::exports::detector::ScreenVerdict> for $crate::generated::exports::detector::ScreenVerdict {
+            fn into_wit(self) -> bindings::exports::ilium::exports::detector::ScreenVerdict {
+                bindings::exports::ilium::exports::detector::ScreenVerdict {
+                    pane: $crate::wasm::IntoWit::into_wit(self.pane),
+                    generation: $crate::wasm::IntoWit::into_wit(self.generation),
+                    signature: $crate::wasm::IntoWit::into_wit(self.signature),
+                    turn: $crate::wasm::IntoWit::into_wit(self.turn),
+                    evidence: $crate::wasm::IntoWit::into_wit(self.evidence),
+                    evidence_line: $crate::wasm::IntoWit::into_wit(self.evidence_line),
+                    goal: $crate::wasm::IntoWit::into_wit(self.goal),
+                    goal_line: $crate::wasm::IntoWit::into_wit(self.goal_line),
+                    goal_rule: $crate::wasm::IntoWit::into_wit(self.goal_rule),
+                    goal_pattern: $crate::wasm::IntoWit::into_wit(self.goal_pattern),
+                    fresh_screen: $crate::wasm::IntoWit::into_wit(self.fresh_screen),
+                    interstitial_response: $crate::wasm::IntoWit::into_wit(self.interstitial_response),
+                    prompt_ready: $crate::wasm::IntoWit::into_wit(self.prompt_ready),
+                }
+            }
+        }
+        impl $crate::wasm::IntoMirror<$crate::generated::exports::detector::ScreenVerdict> for bindings::exports::ilium::exports::detector::ScreenVerdict {
+            fn into_mirror(self) -> $crate::generated::exports::detector::ScreenVerdict {
+                $crate::generated::exports::detector::ScreenVerdict {
+                    pane: $crate::wasm::IntoMirror::into_mirror(self.pane),
+                    generation: $crate::wasm::IntoMirror::into_mirror(self.generation),
+                    signature: $crate::wasm::IntoMirror::into_mirror(self.signature),
+                    turn: $crate::wasm::IntoMirror::into_mirror(self.turn),
+                    evidence: $crate::wasm::IntoMirror::into_mirror(self.evidence),
+                    evidence_line: $crate::wasm::IntoMirror::into_mirror(self.evidence_line),
+                    goal: $crate::wasm::IntoMirror::into_mirror(self.goal),
+                    goal_line: $crate::wasm::IntoMirror::into_mirror(self.goal_line),
+                    goal_rule: $crate::wasm::IntoMirror::into_mirror(self.goal_rule),
+                    goal_pattern: $crate::wasm::IntoMirror::into_mirror(self.goal_pattern),
+                    fresh_screen: $crate::wasm::IntoMirror::into_mirror(self.fresh_screen),
+                    interstitial_response: $crate::wasm::IntoMirror::into_mirror(self.interstitial_response),
+                    prompt_ready: $crate::wasm::IntoMirror::into_mirror(self.prompt_ready),
+                }
+            }
+        }
         impl bindings::exports::ilium::exports::detector::Guest for __IliumGlue {
             fn identify(a0: ::std::vec::Vec<bindings::exports::ilium::exports::detector::DetectorProcess>) -> ::core::option::Option<::std::string::String> {
                 let m0: ::std::vec::Vec<$crate::generated::exports::detector::DetectorProcess> = $crate::wasm::IntoMirror::into_mirror(a0);
@@ -14419,6 +14617,16 @@ macro_rules! __ilium_wasm_export_detector {
                 let m0: ::std::string::String = $crate::wasm::IntoMirror::into_mirror(a0);
                 let m1: $crate::generated::exports::detector::DetectorScreen = $crate::wasm::IntoMirror::into_mirror(a1);
                 let out = __ilium_with(|plugin| <__IliumPlugin as $crate::generated::exports::detector::ExportDetector>::classify(plugin, m0, m1));
+                $crate::wasm::IntoWit::into_wit(out)
+            }
+            fn identify_tree(a0: ::std::vec::Vec<bindings::exports::ilium::exports::detector::DetectorTreeProcess>) -> ::core::option::Option<bindings::exports::ilium::exports::detector::IdentifiedAgent> {
+                let m0: ::std::vec::Vec<$crate::generated::exports::detector::DetectorTreeProcess> = $crate::wasm::IntoMirror::into_mirror(a0);
+                let out = __ilium_with(|plugin| <__IliumPlugin as $crate::generated::exports::detector::ExportDetector>::identify_tree(plugin, m0));
+                $crate::wasm::IntoWit::into_wit(out)
+            }
+            fn classify_screen(a0: bindings::exports::ilium::exports::detector::ScreenRequest) -> ::core::option::Option<bindings::exports::ilium::exports::detector::ScreenVerdict> {
+                let m0: $crate::generated::exports::detector::ScreenRequest = $crate::wasm::IntoMirror::into_mirror(a0);
+                let out = __ilium_with(|plugin| <__IliumPlugin as $crate::generated::exports::detector::ExportDetector>::classify_screen(plugin, m0));
                 $crate::wasm::IntoWit::into_wit(out)
             }
         }

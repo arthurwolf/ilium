@@ -15,7 +15,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/agent_feature_setup.rs:22 CHATROOM_INSTRUCTION` | [agent/chatroom-instructions](templates/agent/chatroom-instructions.hbs) | `CHATROOM_INSTRUCTIONS` |
 | `ilium-client/src/agent_feature_setup.rs:24 PROGRESS_INSTRUCTION` | [agent/progress-instructions](templates/agent/progress-instructions.hbs) | `PROGRESS_INSTRUCTIONS` |
 | `ilium-server/src/workspace.rs worktree agent initial prompt` | [agent/worktree-wrap-up](templates/agent/worktree-wrap-up.hbs) | `WORKTREE_WRAP_UP_INSTRUCTIONS` |
-| `ilium-client/src/app.rs:9785 ASK_FOR_UPDATE_PROMPT` | [agent/ask-for-update](templates/agent/ask-for-update.hbs) | `ASK_FOR_UPDATE` |
 | `ilium-client/src/session_naming.rs:279` | [naming/session-label-example](templates/naming/session-label-example.hbs) | `SESSION_LABEL_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:280` | [naming/session-summary-example](templates/naming/session-summary-example.hbs) | `SESSION_SUMMARY_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:300` | [naming/unavailable-process](templates/naming/unavailable-process.hbs) | `UNAVAILABLE_PROCESS` |
@@ -113,8 +112,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/tools.rs:216` | [voice/tools/confirm-or-cancel-one-pending-ilium-action](templates/voice/tools/confirm-or-cancel-one-pending-ilium-action.hbs) | `VOICE_TOOLS_CONFIRM_OR_CANCEL_ONE_PENDING_ILIUM_ACTION` |
 | `ilium-client/src/control/tools.rs:244` | [voice/tools/slash-separated-node-name-path-from-the](templates/voice/tools/slash-separated-node-name-path-from-the.hbs) | `VOICE_TOOLS_SLASH_SEPARATED_NODE_NAME_PATH_FROM_THE` |
 | `ilium-client/src/control/policy.rs:42` | [voice/policy/run-the-shell-command-v0-in-a](templates/voice/policy/run-the-shell-command-v0-in-a.hbs) | `VOICE_POLICY_RUN_THE_SHELL_COMMAND_V0_IN_A` |
-| `ilium-client/src/control/policy.rs:171` | [voice/policy/board-has-no-column](templates/voice/policy/board-has-no-column.hbs) | `VOICE_POLICY_BOARD_HAS_NO_COLUMN` |
-| `ilium-client/src/control/policy.rs:179` | [voice/policy/board-has-no-card-v0-in-column](templates/voice/policy/board-has-no-card-v0-in-column.hbs) | `VOICE_POLICY_BOARD_HAS_NO_CARD_V0_IN_COLUMN` |
 | `ilium-client/src/control/policy.rs:181` | [voice/policy/permanently-delete-the-card-v0-from-column](templates/voice/policy/permanently-delete-the-card-v0-from-column.hbs) | `VOICE_POLICY_PERMANENTLY_DELETE_THE_CARD_V0_FROM_COLUMN` |
 | `ilium-client/src/control/policy.rs:186` | [voice/policy/permanently-delete-the-column-v0-and-its](templates/voice/policy/permanently-delete-the-column-v0-and-its.hbs) | `VOICE_POLICY_PERMANENTLY_DELETE_THE_COLUMN_V0_AND_ITS` |
 | `ilium-client/src/control/policy.rs:40` | [voice/policy/command-line-is-required](templates/voice/policy/command-line-is-required.hbs) | `VOICE_POLICY_COMMAND_LINE_IS_REQUIRED` |
@@ -145,8 +142,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/executor.rs:775` | [voice/executor/node-v0-is-not-a-live](templates/voice/executor/node-v0-is-not-a-live.hbs) | `VOICE_EXECUTOR_NODE_V0_IS_NOT_A_LIVE` |
 | `ilium-client/src/control/executor.rs:781` | [voice/executor/node-v0-is-not-a-terminal-pane](templates/voice/executor/node-v0-is-not-a-terminal-pane.hbs) | `VOICE_EXECUTOR_NODE_V0_IS_NOT_A_TERMINAL_PANE` |
 | `ilium-client/src/control/executor.rs:787` | [voice/executor/node-v0-is-not-an-editor-pane](templates/voice/executor/node-v0-is-not-an-editor-pane.hbs) | `VOICE_EXECUTOR_NODE_V0_IS_NOT_AN_EDITOR_PANE` |
-| `ilium-client/src/control/executor.rs:813` | [voice/policy/board-has-no-column](templates/voice/policy/board-has-no-column.hbs) | `VOICE_POLICY_BOARD_HAS_NO_COLUMN` |
-| `ilium-client/src/control/executor.rs:830` | [voice/policy/board-has-no-card-v0-in-column](templates/voice/policy/board-has-no-card-v0-in-column.hbs) | `VOICE_POLICY_BOARD_HAS_NO_CARD_V0_IN_COLUMN` |
 | `ilium-client/src/control/executor.rs:836` | [voice/executor/v0-is-required](templates/voice/executor/v0-is-required.hbs) | `VOICE_EXECUTOR_V0_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:838` | [voice/executor/v0-must-not-be-empty](templates/voice/executor/v0-must-not-be-empty.hbs) | `VOICE_EXECUTOR_V0_MUST_NOT_BE_EMPTY` |
 | `ilium-client/src/control/executor.rs:874` | [voice/executor/unknown-settings-tab](templates/voice/executor/unknown-settings-tab.hbs) | `VOICE_EXECUTOR_UNKNOWN_SETTINGS_TAB` |
@@ -273,10 +268,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/settings.rs:296` | [voice/settings/keyboard-preset-must-be-screen-or-tmux](templates/voice/settings/keyboard-preset-must-be-screen-or-tmux.hbs) | `VOICE_SETTINGS_KEYBOARD_PRESET_MUST_BE_SCREEN_OR_TMUX` |
 | `ilium-client/src/control/settings.rs:308` | [voice/settings/keyboard-binding-must-be-one-printable-key](templates/voice/settings/keyboard-binding-must-be-one-printable-key.hbs) | `VOICE_SETTINGS_KEYBOARD_BINDING_MUST_BE_ONE_PRINTABLE_KEY` |
 | `ilium-client/src/control/settings.rs:319` | [voice/settings/keyboard-binding-was-rejected](templates/voice/settings/keyboard-binding-was-rejected.hbs) | `VOICE_SETTINGS_KEYBOARD_BINDING_WAS_REJECTED` |
-| `ilium-client/src/control/settings.rs:324` | [voice/settings/card-preview-line-count-is-too-large](templates/voice/settings/card-preview-line-count-is-too-large.hbs) | `VOICE_SETTINGS_CARD_PREVIEW_LINE_COUNT_IS_TOO_LARGE` |
-| `ilium-client/src/control/settings.rs:326` | [voice/settings/card-preview-lines-must-be-between-1](templates/voice/settings/card-preview-lines-must-be-between-1.hbs) | `VOICE_SETTINGS_CARD_PREVIEW_LINES_MUST_BE_BETWEEN_1` |
-| `ilium-client/src/control/settings.rs:339` | [voice/settings/column-width-is-too-large](templates/voice/settings/column-width-is-too-large.hbs) | `VOICE_SETTINGS_COLUMN_WIDTH_IS_TOO_LARGE` |
-| `ilium-client/src/control/settings.rs:341` | [voice/settings/minimum-column-width-must-be-between-10](templates/voice/settings/minimum-column-width-must-be-between-10.hbs) | `VOICE_SETTINGS_MINIMUM_COLUMN_WIDTH_MUST_BE_BETWEEN_10` |
 | `ilium-client/src/control/settings.rs:356` | [voice/settings/sound-source-must-be-system-beep-or](templates/voice/settings/sound-source-must-be-system-beep-or.hbs) | `VOICE_SETTINGS_SOUND_SOURCE_MUST_BE_SYSTEM_BEEP_OR` |
 | `ilium-client/src/control/settings.rs:369` | [voice/settings/sound-file-is-not-in-ilium-s](templates/voice/settings/sound-file-is-not-in-ilium-s.hbs) | `VOICE_SETTINGS_SOUND_FILE_IS_NOT_IN_ILIUM_S` |
 | `ilium-client/src/control/settings.rs:399` | [voice/settings/trigger-actions-must-be-an-array-of](templates/voice/settings/trigger-actions-must-be-an-array-of.hbs) | `VOICE_SETTINGS_TRIGGER_ACTIONS_MUST_BE_AN_ARRAY_OF` |

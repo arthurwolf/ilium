@@ -4,7 +4,7 @@
 //! (see `app.rs`'s module docs) instead of a direct tree edit.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ilium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
+use ilium_core::NodeId;
 #[cfg(test)]
 use ilium_ipc::ClientRequest;
 
@@ -717,103 +717,33 @@ fn execute_action(app: &mut App, action: Action) {
     }
 }
 
-/// While `Mode::Move` is active: up/down (arrows or `k`/`j`) reorder the
-/// selected node one step via a queued `MoveNode` request; left/right
-/// (arrows or `h`/`l`) outdent/indent it via a queued `ReparentNode`
-/// request (see `compute_outdent_target`/`compute_indent_target`);
-/// `Enter`/`m`/`Esc` exits back to Normal.
+/// While `Mode::Move` is active: up/down (arrows or `k`/`j`) reorder the selected node one step
+/// and left/right (arrows or `h`/`l`) outdent/indent it. The Tree plugin (`ilium.core.tree`) owns
+/// those four moves as the commands `move-up`, `move-down`, `outdent` and `indent`; with the
+/// plugin off the keys do nothing. `Enter`/`m`/`Esc` exits back to Normal.
 fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
     let Some(id) = app.selected_node_id() else {
         return;
     };
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.request_move(id, TreeMoveDirection::Up);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            app.request_move(id, TreeMoveDirection::Down);
-        }
-        KeyCode::Left | KeyCode::Char('h') => {
-            if let Some((new_parent, index)) = compute_outdent_target(&app.tree, id) {
-                app.request_reparent(id, new_parent, index);
-            }
-        }
-        KeyCode::Right | KeyCode::Char('l') => {
-            if let Some((new_parent, index)) = compute_indent_target(&app.tree, id) {
-                app.request_reparent(id, new_parent, index);
-            }
-        }
+    let command = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => Some("ilium.core.tree/move-up"),
+        KeyCode::Down | KeyCode::Char('j') => Some("ilium.core.tree/move-down"),
+        KeyCode::Left | KeyCode::Char('h') => Some("ilium.core.tree/outdent"),
+        KeyCode::Right | KeyCode::Char('l') => Some("ilium.core.tree/indent"),
         KeyCode::Enter | KeyCode::Char('m') | KeyCode::Esc => {
             app.mode = Mode::Normal;
             return;
         }
-        _ => {}
+        _ => None,
+    };
+    if let Some(command) = command {
+        app.invoke_plugin_command(
+            command,
+            serde_json::json!({ "node": id.0 }).to_string(),
+            ilium_plugin_api::generated::types::CommandOrigin::Keybinding,
+        );
     }
     app.mode = Mode::Move;
-}
-
-/// Computes the "indent into the previous group" `ReparentNode` target for
-/// `id`: the nearest preceding sibling that is a `Group`, walking outward
-/// from `id`'s own position among its current siblings, appended at the
-/// end of that group's children. Returns `None` when there is no
-/// preceding sibling group to indent into (already first, or every
-/// preceding sibling is a pane) -- nothing is sent in that case rather
-/// than a request that could only be rejected.
-fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
-    if tree.worktree_container_for_node(id).is_some() {
-        return None;
-    }
-    let parent = tree.parent_of(id)?;
-    let siblings = tree.children_of(parent).ok()?;
-    let own_index = siblings.iter().position(|&sibling| sibling == id)?;
-    let moving_is_pane = tree.get(id).is_some_and(ilium_core::Node::is_pane);
-    let preceding_container =
-        siblings[..own_index].iter().rev().find(|&&candidate| {
-            match tree.get(candidate).map(|node| &node.kind) {
-                Some(NodeKind::Container(container)) if container.is_group() => true,
-                Some(NodeKind::Container(container)) if container.is_split_view() => {
-                    moving_is_pane
-                        && container.children.len() < ilium_core::MAXIMUM_SPLIT_VIEW_PANES
-                }
-                _ => false,
-            }
-        })?;
-    Some((*preceding_container, None))
-}
-
-/// Computes the "outdent out of the current group" `ReparentNode` target
-/// for `id`: `id`'s current group's own parent, positioned right after
-/// that group among its new siblings. Returns `None` when `id` is already
-/// at the top level (no enclosing group to outdent out of) or when
-/// outdenting would leave a pane parentless at the top level (panes always
-/// need an enclosing group) -- nothing is sent in either case rather than
-/// a request that could only be rejected.
-fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
-    if tree.worktree_container_for_node(id).is_some() {
-        return None;
-    }
-    let current_group = tree.parent_of(id)?;
-    if current_group == ROOT_ID {
-        return None;
-    }
-    let grandparent = tree.parent_of(current_group)?;
-    let is_pane = matches!(
-        tree.get(id).map(|node| &node.kind),
-        Some(NodeKind::Pane { .. })
-    );
-    // Split views are exempt: `Tree::move_node`/`create_split_view` only
-    // require the new parent to satisfy `is_group()`, and the session root
-    // itself does (see `ilium_core::Tree`'s "one root normal group" doc
-    // comment) -- only panes are specifically barred from sitting directly
-    // under `ROOT_ID`.
-    if grandparent == ROOT_ID && is_pane {
-        return None;
-    }
-    let group_siblings = tree.children_of(grandparent).ok()?;
-    let group_index = group_siblings
-        .iter()
-        .position(|&sibling| sibling == current_group)?;
-    Some((grandparent, Some(group_index + 1)))
 }
 
 fn handle_settings_help_event(
@@ -2197,25 +2127,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     if let Some(field) =
         crate::value_settings_choice::SettingsChoice::at(app, state.tab, state.selected_row)
     {
-        if matches!(key.code, KeyCode::Char('e') | KeyCode::Char('E')) {
-            let manual = match field {
-                crate::value_settings_choice::SettingsChoice::OllamaModel => {
-                    Some(crate::app::InferenceSettingField::OllamaModel)
-                }
-                crate::value_settings_choice::SettingsChoice::OpenAiModel => {
-                    Some(crate::app::InferenceSettingField::OpenAiModel)
-                }
-                crate::value_settings_choice::SettingsChoice::AnthropicModel => {
-                    Some(crate::app::InferenceSettingField::AnthropicModel)
-                }
-                _ => None,
-            };
-            if let Some(manual) = manual {
-                app.mode = Mode::Settings(Box::new(state));
-                app.settings_open_inference_field(manual);
-                return;
-            }
-        }
         if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
             app.mode = Mode::Settings(Box::new(state));
             app.begin_settings_choice_dialog(field);
@@ -2483,76 +2394,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             {
                 app.settings_remove_custom_agent_signature(index);
                 state.selected_row = state.selected_row.saturating_sub(1);
-            }
-        }
-        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Inference => {
-            state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Inference => {
-            state.selected_row = (state.selected_row + 1).min(
-                crate::settings_ui::inference_rows(&app.inference_settings)
-                    .len()
-                    .saturating_sub(1),
-            );
-        }
-        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Inference => {
-            match crate::settings_ui::inference_rows(&app.inference_settings)
-                .get(state.selected_row)
-            {
-                Some(crate::app::InferenceRow::Provider) => {
-                    app.settings_adjust_inference_provider(-1)
-                }
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::OllamaModel,
-                )) => app.settings_adjust_ollama_model(-1),
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::OpenAiModel,
-                )) => app.settings_adjust_openai_model(-1),
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::AnthropicModel,
-                )) => app.settings_adjust_anthropic_model(-1),
-                Some(crate::app::InferenceRow::KiloGatewayModel) => {
-                    app.settings_adjust_kilo_gateway_model(-1)
-                }
-                _ => {}
-            }
-        }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
-            if state.tab == SettingsTab::Inference =>
-        {
-            match crate::settings_ui::inference_rows(&app.inference_settings)
-                .get(state.selected_row)
-                .copied()
-            {
-                Some(crate::app::InferenceRow::Provider) => {
-                    app.settings_adjust_inference_provider(1)
-                }
-                Some(crate::app::InferenceRow::RefreshModels) => app.request_model_refresh(),
-                Some(crate::app::InferenceRow::KiloGatewayModel) => {
-                    app.settings_adjust_kilo_gateway_model(1)
-                }
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::OllamaModel,
-                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
-                    app.settings_adjust_ollama_model(1)
-                }
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::OpenAiModel,
-                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
-                    app.settings_adjust_openai_model(1)
-                }
-                Some(crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::AnthropicModel,
-                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
-                    app.settings_adjust_anthropic_model(1)
-                }
-                Some(crate::app::InferenceRow::Field(field)) => {
-                    app.mode = Mode::Settings(Box::new(state));
-                    app.settings_open_inference_field(field);
-                    return;
-                }
-                Some(crate::app::InferenceRow::Test) => app.request_inference_test(),
-                None => {}
             }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Triggers => {
@@ -3165,6 +3006,7 @@ mod custom_status_rules_editor_key_tests {
 mod indent_outdent_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
+    use ilium_core::{Tree, ROOT_ID};
 
     #[test]
     fn f8_toggles_semantic_vad_and_preserves_push_to_talk_edges() {
@@ -3314,19 +3156,6 @@ mod indent_outdent_tests {
                 .column_mode,
             crate::app::IconPickerColumnMode::MultiColumn
         );
-    }
-
-    /// `top` (group) containing `sibling_group` (group, empty) and `pane`
-    /// (pane), in that order, plus a second top-level group `other`.
-    fn sample_tree() -> (Tree, NodeId, NodeId, NodeId, NodeId) {
-        let mut tree = Tree::new();
-        let top = tree.add_group(ROOT_ID, "top").unwrap();
-        let sibling_group = tree.add_group(top, "sibling_group").unwrap();
-        let pane = tree
-            .add_pane(top, "pane", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        let other = tree.add_group(ROOT_ID, "other").unwrap();
-        (tree, top, sibling_group, pane, other)
     }
 
     #[test]
@@ -3562,7 +3391,7 @@ mod indent_outdent_tests {
             ));
             app.mode = Mode::Move;
             app.push_modal(Mode::Settings(Box::new(SettingsState {
-                tab: SettingsTab::Inference,
+                tab: SettingsTab::Appearance,
                 selected_row: 4,
                 scroll: 3,
                 ..SettingsState::default()
@@ -3593,12 +3422,12 @@ mod indent_outdent_tests {
             assert_eq!(app.modal_stack.len(), 2);
             assert!(matches!(&app.modal_stack[0], Mode::Move));
             assert!(
-                matches!(&app.modal_stack[1], Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
+                matches!(&app.modal_stack[1], Mode::Settings(state) if state.tab == SettingsTab::Appearance && state.selected_row == 4 && state.scroll == 3)
             );
         }
         fn parent(app: &App) {
             assert!(
-                matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
+                matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Appearance && state.selected_row == 4 && state.scroll == 3)
             );
             assert_eq!(app.modal_stack.len(), 1);
             assert!(matches!(&app.modal_stack[0], Mode::Move));
@@ -3942,28 +3771,18 @@ mod indent_outdent_tests {
     }
 
     #[test]
-    fn inference_field_and_file_action_menu_restore_their_exact_parents() {
+    fn inference_prompt_and_file_action_menu_restore_their_exact_parents() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::OpenAi;
-        let selected_row = crate::settings_ui::inference_rows(&app.inference_settings)
-            .iter()
-            .position(|row| {
-                *row == crate::app::InferenceRow::Field(
-                    crate::app::InferenceSettingField::OpenAiApiKey,
-                )
-            })
-            .expect("OpenAI API key row");
+        let selected_row = 1;
         app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Inference,
+            tab: SettingsTab::Titles,
             selected_row,
             scroll: 3,
             ..SettingsState::default()
         }));
 
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        );
+        app.settings_open_inference_field(crate::app::InferenceSettingField::OpenAiApiKey);
         assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
         handle_event(
             &mut app,
@@ -3972,7 +3791,7 @@ mod indent_outdent_tests {
         assert!(matches!(
             &app.mode,
             Mode::Settings(state)
-                if state.tab == SettingsTab::Inference
+                if state.tab == SettingsTab::Titles
                     && state.selected_row == selected_row
                     && state.scroll == 3
         ));
@@ -4371,77 +4190,5 @@ mod indent_outdent_tests {
             panic!("single-line paste with a trailing newline must not submit");
         };
         assert_eq!(state.buf, "/tmp/custom-CLAUDE.md");
-    }
-
-    #[test]
-    fn indent_moves_into_the_nearest_preceding_sibling_group() {
-        let (tree, _top, sibling_group, pane, _other) = sample_tree();
-        assert_eq!(
-            compute_indent_target(&tree, pane),
-            Some((sibling_group, None))
-        );
-    }
-
-    #[test]
-    fn indent_with_no_preceding_sibling_group_is_a_no_op() {
-        let (tree, _top, sibling_group, ..) = sample_tree();
-        // `sibling_group` is the first child of `top`; nothing precedes it.
-        assert_eq!(compute_indent_target(&tree, sibling_group), None);
-    }
-
-    #[test]
-    fn outdent_moves_out_into_the_parent_group_right_after_the_current_group() {
-        // top_a -> [inner_b -> [pane_x], pane_c]
-        let mut tree = Tree::new();
-        let top_a = tree.add_group(ROOT_ID, "top_a").unwrap();
-        let inner_b = tree.add_group(top_a, "inner_b").unwrap();
-        let pane_x = tree
-            .add_pane(inner_b, "x", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        tree.add_pane(top_a, "c", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-
-        // Outdenting `pane_x` out of `inner_b` lands it in `top_a` (the
-        // group's own parent) right after `inner_b` among `top_a`'s
-        // children -- index 1, ahead of `pane_c`.
-        assert_eq!(
-            compute_outdent_target(&tree, pane_x),
-            Some((top_a, Some(1)))
-        );
-    }
-
-    #[test]
-    fn outdent_at_the_top_level_is_a_no_op() {
-        let (tree, top, ..) = sample_tree();
-        assert_eq!(compute_outdent_target(&tree, top), None);
-    }
-
-    #[test]
-    fn outdent_allows_a_split_view_out_of_a_top_level_group_to_the_root() {
-        // ROOT -> top (group) -> sv (split view, no panes yet). The root
-        // itself is a group (`ilium_core::Tree`'s doc comment), so a split
-        // view landing directly under it is a request `Tree::move_node`
-        // actually accepts -- only panes are barred from the bare root.
-        let mut tree = Tree::new();
-        let top = tree.add_group(ROOT_ID, "top").unwrap();
-        let split_view = tree
-            .create_split_view(top, "split", ilium_core::SplitOrientation::Vertical, &[])
-            .unwrap();
-        assert_eq!(
-            compute_outdent_target(&tree, split_view),
-            Some((ROOT_ID, Some(1)))
-        );
-    }
-
-    #[test]
-    fn outdent_rejects_leaving_a_pane_parentless_at_the_top_level() {
-        let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "group").unwrap();
-        let pane = tree
-            .add_pane(group, "pane", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        // `group` is already top-level, so outdenting `pane` out of it
-        // would leave the pane parentless at the root -- rejected.
-        assert_eq!(compute_outdent_target(&tree, pane), None);
     }
 }

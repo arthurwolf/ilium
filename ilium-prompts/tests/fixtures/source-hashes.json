@@ -40,10 +40,6 @@
     "sha256": "a7877efbc0a5921dd802d6369585627decd79126083c6ceb5ffe15e8905f24d9"
   },
   {
-    "name": "agent/ask-for-update",
-    "sha256": "5ec7738a9565da351bf4c9cd76251d480d753c2d644023d780bb588f67efdc9e"
-  },
-  {
     "name": "naming/session-label-example",
     "sha256": "d8ca5aa413c6b97e26a44eaaf2996a2b86cede72736bb2a37c48c9fc11b3fd96"
   },
@@ -402,14 +398,6 @@
   {
     "name": "voice/policy/run-the-shell-command-v0-in-a",
     "sha256": "e93da11fa32e705a4e15ccff40504e057a642f1aaee81d6a5608316f42453489"
-  },
-  {
-    "name": "voice/policy/board-has-no-column",
-    "sha256": "f40513ae11c6ed547d371f6d38db2244bb93c39ad53758da0d2c608a887e9464"
-  },
-  {
-    "name": "voice/policy/board-has-no-card-v0-in-column",
-    "sha256": "d052202c97e58d57ecdab39286df79bcac6f9bcad4d396d56459dc75f69cb6b1"
   },
   {
     "name": "voice/policy/permanently-delete-the-card-v0-from-column",
@@ -914,22 +902,6 @@
   {
     "name": "voice/settings/keyboard-binding-was-rejected",
     "sha256": "88157b4ddd55e227aa7c2dddf8358df5cab6ff89c229bc1fe9e3276434e17e6f"
-  },
-  {
-    "name": "voice/settings/card-preview-line-count-is-too-large",
-    "sha256": "dc03b559317c2a075b909f3b1a70078b0e7149dcf588904e83a0725d83c2424f"
-  },
-  {
-    "name": "voice/settings/card-preview-lines-must-be-between-1",
-    "sha256": "4421fb443e707668e350a3ba88419ca3a2358b96aeb1da0af73fb671be57940b"
-  },
-  {
-    "name": "voice/settings/column-width-is-too-large",
-    "sha256": "3dee0ae408ac493e4d05a0dcc1993370a9471e5bef06d1af05508a28d5cf6b7a"
-  },
-  {
-    "name": "voice/settings/minimum-column-width-must-be-between-10",
-    "sha256": "a6f3b8b7f8d0d2900b62d456540a9a0e0dc1efe747e5da1da5defb496ea0f436"
   },
   {
     "name": "voice/settings/sound-source-must-be-system-beep-or",

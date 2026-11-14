@@ -47,7 +47,7 @@ A plugin's world is one base world plus the fragments it implements. The manifes
 |---|---|---|
 | `ilium:server/base` | `lifecycle`, `handler` | `with-detector`, `with-jobs`, `with-service`, `with-inference-provider`, `with-settings-validate`, `with-catalog`, `with-virtual-rows`, `with-hook-handler`, `with-migrator` |
 | `ilium:client/base` | `lifecycle`, `handler` | `with-views`, `with-annotator`, `with-jobs`, `with-service`, `with-inference-provider`, `with-settings-validate`, `with-catalog`, `with-menus`, `with-virtual-rows`, `with-tokens`, `with-hook-handler`, `with-migrator` |
-| `ilium:anim/base` | `lifecycle`, `renderer` | `with-jobs` |
+| `ilium:anim/base` | `lifecycle`, `renderer` | `with-jobs`, `with-handler` |
 
 <figure>
 <svg viewBox="0 0 420 190" role="img" aria-label="Exports the host calls on each side">
@@ -216,6 +216,7 @@ A detector identifies an agent in a pane's process list, then classifies the pan
 **Rust**
 
 ```rust
+use ilium_plugin_sdk::exports::{DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict};
 use ilium_plugin_sdk::exports::{
     Activation, Classification, Detector, DetectorProcess, DetectorScreen,
     DeactivationReason, Handler, Lifecycle,
@@ -255,6 +256,14 @@ impl Detector for Plugin {
         let working = screen.rows.iter().any(|row| row.contains("esc to interrupt"));
         let activity = if working { AgentActivity::Working } else { AgentActivity::Idle };
         Classification { activity, objective: None, goal: None }
+    }
+
+    fn identify_tree(&mut self, _processes: Vec<DetectorTreeProcess>) -> Option<IdentifiedAgent> {
+        None // `identify` above is enough for this example.
+    }
+
+    fn classify_screen(&mut self, _screen: ScreenRequest) -> Option<ScreenVerdict> {
+        None // The pane keeps the activity `classify` gave it.
     }
 }
 ```

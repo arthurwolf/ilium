@@ -162,7 +162,9 @@ impl App {
                 view::drag(&target, cursor, position, &mut moved);
                 moved
             }
-            MouseEventKind::Up(MouseButton::Left) => view::release(&target, cursor),
+            MouseEventKind::Up(MouseButton::Left) => {
+                view::release_at(&scene, &target, cursor, position)
+            }
             MouseEventKind::ScrollUp => view::wheel(&scene, &target, cursor, position, -1),
             MouseEventKind::ScrollDown => view::wheel(&scene, &target, cursor, position, 1),
             _ => Vec::new(),

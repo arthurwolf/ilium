@@ -1056,10 +1056,18 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
     match action {
         TreeRowAction::Rename => app.action_start_rename(),
         TreeRowAction::MoveUp => {
-            app.request_move(id, ilium_core::TreeMoveDirection::Up);
+            app.invoke_plugin_command(
+                "ilium.core.tree/move-up",
+                serde_json::json!({ "node": id.0 }).to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::Toolbar,
+            );
         }
         TreeRowAction::MoveDown => {
-            app.request_move(id, ilium_core::TreeMoveDirection::Down);
+            app.invoke_plugin_command(
+                "ilium.core.tree/move-down",
+                serde_json::json!({ "node": id.0 }).to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::Toolbar,
+            );
         }
         TreeRowAction::Close => app.action_close_selected(),
         TreeRowAction::Retitle => app.action_request_retitle(id),
@@ -2724,46 +2732,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             }
                             _ => app.settings_toggle_agent_setup_row(&row),
                         }
-                    }
-                }
-            } else if state.tab == crate::app::SettingsTab::Inference {
-                if let Some((row, direction)) = crate::settings_ui::inference_content_hit_with_test(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    &app.inference_settings,
-                    &app.inference_test_state,
-                    &app.model_discovery,
-                ) {
-                    if let Some(index) = crate::settings_ui::inference_rows(&app.inference_settings)
-                        .iter()
-                        .position(|candidate| *candidate == row)
-                    {
-                        state.selected_row = index;
-                    }
-                    match row {
-                        crate::app::InferenceRow::Provider => {
-                            app.settings_adjust_inference_provider(direction)
-                        }
-                        crate::app::InferenceRow::RefreshModels => app.request_model_refresh(),
-                        crate::app::InferenceRow::KiloGatewayModel => {
-                            app.settings_adjust_kilo_gateway_model(direction)
-                        }
-                        crate::app::InferenceRow::Field(
-                            crate::app::InferenceSettingField::OllamaModel,
-                        ) => app.settings_adjust_ollama_model(direction),
-                        crate::app::InferenceRow::Field(
-                            crate::app::InferenceSettingField::OpenAiModel,
-                        ) => app.settings_adjust_openai_model(direction),
-                        crate::app::InferenceRow::Field(
-                            crate::app::InferenceSettingField::AnthropicModel,
-                        ) => app.settings_adjust_anthropic_model(direction),
-                        crate::app::InferenceRow::Field(field) => {
-                            app.mode = Mode::Settings(Box::new(state));
-                            app.settings_open_inference_field(field);
-                            return;
-                        }
-                        crate::app::InferenceRow::Test => app.request_inference_test(),
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::CustomAgents {

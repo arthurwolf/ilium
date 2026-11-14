@@ -11,6 +11,9 @@ use ilium_plugin_api::PluginError;
 
 use crate::calls::Trap;
 use ilium_plugin_api::generated::exports::annotator::LineAnnotation;
+use ilium_plugin_api::generated::exports::detector::{
+    DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict,
+};
 use ilium_plugin_api::generated::exports::menu_provider::{MenuContext, MenuEntry};
 use ilium_plugin_api::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_api::generated::exports::token_provider::Token;
@@ -74,6 +77,10 @@ pub enum ExportCall {
     },
     /// `service-provider.handle` (reference-wit.md section 8.5).
     ServiceHandle(ServiceCall),
+    /// `detector.identify-tree` (reference-wit.md section 8.4): one pane's process tree.
+    DetectorIdentifyTree(Vec<DetectorTreeProcess>),
+    /// `detector.classify-screen` (reference-wit.md section 8.4): one identified pane's screen.
+    DetectorClassifyScreen(ScreenRequest),
 }
 
 /// The reply of an [`ExportCall`].
@@ -99,6 +106,10 @@ pub enum ExportReply {
     VirtualChildren(Result<(Vec<VirtualRowChild>, Option<String>), PluginError>),
     /// Reply of `service-provider.handle`.
     ServiceReply(ServiceReply),
+    /// Reply of `detector.identify-tree`.
+    DetectorIdentified(Option<IdentifiedAgent>),
+    /// Reply of `detector.classify-screen`.
+    DetectorVerdict(Option<ScreenVerdict>),
 }
 
 /// Runtime adapter for one guest instance. Implementations own the actual guest
@@ -439,6 +450,8 @@ enum ReplyKind {
     Menu,
     VirtualChildren,
     Service,
+    DetectorIdentify,
+    DetectorClassify,
 }
 
 fn reply_kind(call: &ExportCall) -> ReplyKind {
@@ -452,6 +465,8 @@ fn reply_kind(call: &ExportCall) -> ReplyKind {
         ExportCall::MenuItems(_) => ReplyKind::Menu,
         ExportCall::ListVirtualChildren { .. } => ReplyKind::VirtualChildren,
         ExportCall::ServiceHandle(_) => ReplyKind::Service,
+        ExportCall::DetectorIdentifyTree(_) => ReplyKind::DetectorIdentify,
+        ExportCall::DetectorClassifyScreen(_) => ReplyKind::DetectorClassify,
     }
 }
 
@@ -469,6 +484,11 @@ fn reply_matches(kind: ReplyKind, reply: &ExportReply) -> bool {
             | (ReplyKind::Menu, ExportReply::MenuEntries(_))
             | (ReplyKind::VirtualChildren, ExportReply::VirtualChildren(_))
             | (ReplyKind::Service, ExportReply::ServiceReply(_))
+            | (
+                ReplyKind::DetectorIdentify,
+                ExportReply::DetectorIdentified(_)
+            )
+            | (ReplyKind::DetectorClassify, ExportReply::DetectorVerdict(_))
     )
 }
 

@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 use ilium_plugin_sdk::generated::exports::detector::Classification;
 use ilium_plugin_sdk::generated::exports::detector::DetectorProcess;
 use ilium_plugin_sdk::generated::exports::detector::DetectorScreen;
+use ilium_plugin_sdk::generated::exports::detector::{
+    DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict,
+};
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::host::log::Level;
 use ilium_plugin_sdk::generated::types::events::Event;
@@ -335,6 +338,39 @@ impl Detector for AgentDetectServer {
             goal: screen_goal(&signature, &screen_text),
         }
     }
+
+    fn identify_tree(&mut self, processes: Vec<DetectorTreeProcess>) -> Option<IdentifiedAgent> {
+        identify_tree_processes(&processes)
+    }
+
+    fn classify_screen(&mut self, screen: ScreenRequest) -> Option<ScreenVerdict> {
+        batch::classify_screen(&screen)
+    }
+}
+
+/// The agent of a pid-level process tree (parents before children): the same rule as
+/// [`identify_processes`], a natively named process beats an interpreter wrapper and then the
+/// shallower, earlier process wins. The reply names the process that matched, so the kernel
+/// keys the agent's identity (goal ownership, session custody) on that exact process.
+fn identify_tree_processes(processes: &[DetectorTreeProcess]) -> Option<IdentifiedAgent> {
+    processes
+        .iter()
+        .enumerate()
+        .filter_map(|(position, process)| {
+            let names = identify::identifying_names(&process.name, &process.argv);
+            names
+                .iter()
+                .enumerate()
+                .find_map(|(index, candidate)| {
+                    signature_of_name(candidate).map(|id| (index > 0, id))
+                })
+                .map(|(inferred, id)| ((inferred, process.depth, position), (id, process.pid)))
+        })
+        .min_by_key(|(key, _)| *key)
+        .map(|(_, (signature, pid))| IdentifiedAgent {
+            signature: signature.to_string(),
+            pid,
+        })
 }
 
 /// What the panel remembers about one agent pane.
@@ -542,6 +578,79 @@ mod spec_tests {
     fn identify_returns_none_for_an_empty_process_list() {
         let mut server = AgentDetectServer;
         assert_eq!(server.identify(Vec::new()), None);
+    }
+
+    fn tree_process(pid: u32, depth: u16, name: &str, argv: &[&str]) -> DetectorTreeProcess {
+        DetectorTreeProcess {
+            pid,
+            parent_pid: pid.checked_sub(1),
+            depth,
+            started_at_unix_seconds: 1,
+            name: name.to_string(),
+            argv: argv.iter().map(|argument| argument.to_string()).collect(),
+        }
+    }
+
+    /// REQ: HST-452
+    #[test]
+    fn identify_tree_names_the_matching_process_and_prefers_a_native_name() {
+        let mut server = AgentDetectServer;
+        let tree = vec![
+            tree_process(10, 0, "zsh", &["zsh"]),
+            tree_process(11, 1, "node", &["node", "/usr/lib/claude/cli.js"]),
+            tree_process(12, 2, "codex", &["codex"]),
+        ];
+        assert_eq!(
+            server.identify_tree(tree),
+            Some(IdentifiedAgent {
+                signature: "codex".to_string(),
+                pid: 12,
+            })
+        );
+        assert_eq!(
+            server.identify_tree(vec![tree_process(10, 0, "zsh", &["zsh"])]),
+            None
+        );
+    }
+
+    /// REQ: HST-451
+    #[test]
+    fn classify_screen_answers_one_pane_and_refuses_an_unbounded_screen() {
+        let mut server = AgentDetectServer;
+        let screen = |pane: u64, signature: &str, text: &str| ScreenRequest {
+            pane,
+            generation: pane * 10,
+            signature: signature.to_string(),
+            text: text.to_string(),
+            cursor: None,
+            dimmed: Vec::new(),
+        };
+        let working = server
+            .classify_screen(screen(
+                1,
+                "codex",
+                "older transcript\nWorking (esc to interrupt)",
+            ))
+            .expect("a verdict");
+        assert_eq!((working.pane, working.generation), (1, 10));
+        assert_eq!(
+            working.turn,
+            ilium_plugin_sdk::generated::exports::detector::AgentTurn::Working
+        );
+        assert!(working
+            .evidence_line
+            .as_deref()
+            .is_some_and(|line| line.contains("esc to interrupt")));
+        let idle = server
+            .classify_screen(screen(3, "claude", "$ ready"))
+            .expect("a verdict");
+        assert_eq!(
+            idle.evidence,
+            ilium_plugin_sdk::generated::exports::detector::ActivityEvidence::NoActiveMarker
+        );
+        assert_eq!(server.classify_screen(screen(2, "", "no signature")), None);
+        let oversized = "x".repeat(batch::MAX_SCREEN_BYTES + 1);
+        assert_eq!(server.classify_screen(screen(4, "codex", &oversized)), None);
     }
 
     /// Manual: the page carries no bracket ID here

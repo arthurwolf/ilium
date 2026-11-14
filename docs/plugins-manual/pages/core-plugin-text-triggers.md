@@ -186,7 +186,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "rules",
         "title": "Text triggers"
       }
-    ]
+    ],
+    "topics": {
+      "publishes": [
+        "ilium.core.text-triggers/fired"
+      ]
+    }
   },
   "activation": [
     "startup",

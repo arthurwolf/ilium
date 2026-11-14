@@ -551,6 +551,8 @@ Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pa
 
 To close a worktree agent's pane from outside it, the same route as `ilium close-pane` is `POST /v1/ops` with `{"op":"close","pane":12,"worktree":"remove"}` (`keep`, `remove` or `remove-and-branch`). A refused removal returns HTTP 409 with `"code":"worktree-removal-refused"` and the server's reasons in `"error"`; the worktree is then left for you to inspect. A removal the server does not confirm in time returns HTTP 409 with the code `unconfirmed`; check the worktree before retrying. See [Wrap up a worktree agent](worktrees.md#wrap-up-a-worktree-agent).
 
+To ask a plugin service directly, `POST /v1/plugins/{plugin}/services/{name}/{method}` with the request as the JSON body. The server calls the service of the enabled server plugin that provides it and answers `{"ok":true,"reply":...}`. A missing or stopped provider returns HTTP 503, a request or reply that does not match the service schema returns 400, a provider that takes longer than five seconds returns 504, and a provider that fails or defers its answer returns 502. The method `describe` returns the service's schema.
+
 ## Reset forecasts
 
 The status bar can show when the providers' public, discretionary usage resets are announced. These come from public announcement feeds, not from your account.

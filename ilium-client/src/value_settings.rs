@@ -52,14 +52,6 @@ struct NumberSettingsValues<'a> {
 impl SettingsNumber {
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
         match tab {
-            SettingsTab::Inference
-                if crate::settings_ui::inference_rows(&app.inference_settings).get(row)
-                    == Some(&crate::app::InferenceRow::Field(
-                        crate::app::InferenceSettingField::RestructurePromptTokenLimit,
-                    )) =>
-            {
-                Some(Self::InferenceTokenBudget)
-            }
             SettingsTab::VoiceControl
                 if crate::voice_settings::VoiceRow::ALL.get(row)
                     == Some(&crate::voice_settings::VoiceRow::OutputVolume) =>

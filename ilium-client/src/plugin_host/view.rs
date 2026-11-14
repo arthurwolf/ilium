@@ -21,9 +21,9 @@ use ilium_plugin_api::generated::types::text::{
     TriState,
 };
 use ilium_plugin_api::generated::types::ui::{
-    ActionKind, ActionValue, ButtonRole, ChoiceStyle, NodeFlags, NumberSpec, NumberStyle,
-    ParagraphSpec, ProgressState, ScrollViewSpec, SplitSpec, TextAreaSpec, TextInputSpec, UiAction,
-    UiNode, UiTree, ViewTarget, Widget,
+    ActionKind, ActionValue, ButtonRole, ChoiceStyle, DropValue, NodeFlags, NumberSpec,
+    NumberStyle, ParagraphSpec, ProgressState, ScrollViewSpec, SplitSpec, TextAreaSpec,
+    TextInputSpec, TreeListSpec, UiAction, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_host::render::sanitize_plugin_text;
 use ratatui::layout::{Position, Rect};
@@ -136,7 +136,43 @@ pub(crate) struct Scene {
     pub inputs: Vec<InputSlot>,
     pub scrolls: Vec<ScrollSlot>,
     pub splits: Vec<SplitSlot>,
+    /// The items of the tree lists, each tied to the hit of its row.
+    pub tree_items: Vec<TreeItemSlot>,
+    /// The tree lists with a key, so a drop below the last item can land at the end.
+    pub tree_lists: Vec<TreeListSlot>,
 }
+
+/// One item of a `tree-list`, tied to the hit of its row.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TreeItemSlot {
+    /// Index into `Scene::hits`.
+    pub hit: usize,
+    /// The key of the list the item belongs to.
+    pub list: String,
+    pub id: String,
+    /// The place of the item in its list.
+    pub position: u32,
+    pub expandable: bool,
+    pub expanded: bool,
+    pub draggable: bool,
+    pub drop_target: bool,
+    /// The columns of the expander glyph (start, end); empty for an item that does not expand.
+    pub expander: (u16, u16),
+}
+
+/// A `tree-list` with a key.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TreeListSlot {
+    pub key: String,
+    pub area: Rect,
+    /// How many items the list holds.
+    pub count: u32,
+    /// The id of its last item, the target of a drop below the items.
+    pub last_id: Option<String>,
+}
+
+/// Longest wait between two clicks on one tree item that still makes a double click.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// A pointer drag in progress; it keeps what it needs, so moving needs no new scene.
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +195,16 @@ pub(crate) enum Drag {
         track: Rect,
         spec: NumberSpec,
     },
+    /// A `draggable` tree item held by the pointer. It becomes a drop only once the pointer
+    /// moved off the cell where it was pressed.
+    Item {
+        list: String,
+        id: String,
+        position: u32,
+        origin: Position,
+        /// Where the pointer is now, once it moved.
+        over: Option<Position>,
+    },
 }
 
 /// Where the keyboard cursor of a view sits (an index into `Scene::hits`), the contents of its
@@ -168,6 +214,8 @@ pub(crate) struct ViewCursor {
     pub focus: usize,
     pub states: WidgetStates,
     pub drag: Option<Drag>,
+    /// The tree item clicked last (list key, item id) and when, to tell a double click.
+    pub last_item_click: Option<(String, String, Instant)>,
 }
 
 /// Plugin text made safe to draw (shared with the popup host).
@@ -320,6 +368,8 @@ fn measure(tree: &UiTree, index: u32, width: u16, depth: usize) -> u16 {
         Widget::Table(table) => rows(table.rows.len()).saturating_add(1),
         Widget::Menu(menu) => rows(menu.items.len()),
         Widget::CheckList(list) => rows(list.items.len()),
+        // An empty tree list keeps one row, so a drag can still drop into it.
+        Widget::TreeList(list) => rows(list.items.len().max(1)),
         Widget::Choice(choice) => match choice.style {
             ChoiceStyle::Stepper => 1,
             ChoiceStyle::List | ChoiceStyle::Dialog => {
@@ -378,6 +428,7 @@ struct Mark {
     inputs: usize,
     scrolls: usize,
     splits: usize,
+    tree_lists: usize,
 }
 
 /// The display width of a text in cells.
@@ -467,6 +518,7 @@ impl Composer<'_> {
             inputs: self.scene.inputs.len(),
             scrolls: self.scene.scrolls.len(),
             splits: self.scene.splits.len(),
+            tree_lists: self.scene.tree_lists.len(),
         }
     }
 
@@ -521,6 +573,9 @@ impl Composer<'_> {
         for inner in &mut self.scene.splits[mark.splits..] {
             inner.area = window(inner.area).unwrap_or_default();
             inner.divider = window(inner.divider).unwrap_or_default();
+        }
+        for list in &mut self.scene.tree_lists[mark.tree_lists..] {
+            list.area = window(list.area).unwrap_or_default();
         }
     }
 
@@ -649,6 +704,85 @@ impl Composer<'_> {
     }
 
     /// A number: a stepper `‹ value ›` or a slider track, after the label and its leader.
+    /// A `tree-list`: one row per item in display order, indented by its depth, with an
+    /// expander for an expandable item, its icon, label, trailing text and badge. Each row
+    /// answers a click with `selected`; Enter and a double click send `activated`.
+    fn tree_list(&mut self, list: &TreeListSpec, key: &str, area: Rect, enabled: bool) {
+        if !key.is_empty() {
+            self.scene.tree_lists.push(TreeListSlot {
+                key: key.to_owned(),
+                area,
+                count: u32::try_from(list.items.len()).unwrap_or(u32::MAX),
+                last_id: list.items.last().map(|item| item.id.clone()),
+            });
+        }
+        let dim = Style::new().add_modifier(Modifier::DIM);
+        for (item, position) in list.items.iter().zip(0u32..) {
+            let row = rows(usize::try_from(position).unwrap_or(usize::MAX));
+            if row >= area.height {
+                break;
+            }
+            let indent = usize::from(item.depth.min(16)) * 2;
+            let expander = match (item.expandable, item.expanded) {
+                (false, _) => "",
+                (true, false) => "▸ ",
+                (true, true) => "▾ ",
+            };
+            let mut spans = vec![Span::raw(format!("{}{expander}", " ".repeat(indent)))];
+            if let Some(icon) = &item.icon {
+                spans.push(Span::raw(format!("{} ", clean(icon))));
+            }
+            spans.extend(styled(&item.label).spans);
+            if let Some(trailing) = &item.trailing {
+                spans.push(Span::raw("  "));
+                spans.extend(
+                    styled(trailing)
+                        .spans
+                        .into_iter()
+                        .map(|span| span.patch_style(dim)),
+                );
+            }
+            if let Some(badge) = &item.badge {
+                spans.push(Span::styled(format!(" [{}]", clean(badge)), dim));
+            }
+            let line = Line::from(spans);
+            let line = if enabled { line } else { line.patch_style(dim) };
+            self.text(area, row, line);
+            if !enabled {
+                continue;
+            }
+            let hit = self.hit(
+                area,
+                row,
+                key,
+                &item.id,
+                ActionKind::Selected,
+                Some(ActionValue::Text(item.id.clone())),
+            );
+            if let Some(hit) = hit {
+                let expander_start = area
+                    .x
+                    .saturating_add(u16::try_from(indent).unwrap_or(u16::MAX));
+                let expander_end = if item.expandable {
+                    expander_start.saturating_add(2)
+                } else {
+                    expander_start
+                };
+                self.scene.tree_items.push(TreeItemSlot {
+                    hit,
+                    list: key.to_owned(),
+                    id: item.id.clone(),
+                    position,
+                    expandable: item.expandable,
+                    expanded: item.expanded,
+                    draggable: item.draggable,
+                    drop_target: item.drop_target,
+                    expander: (expander_start, expander_end),
+                });
+            }
+        }
+    }
+
     fn number(&mut self, spec: &NumberSpec, key: &str, area: Rect, enabled: bool) {
         let seeded;
         let edit = match self.states.numbers.get(key) {
@@ -1030,7 +1164,18 @@ impl Composer<'_> {
                         .saturating_sub(top)
                         .saturating_sub(border.saturating_add(block.padding.bottom)),
                 );
-                self.stack(&node.children, inner, depth);
+                // A lone tree list fills its frame, so the empty rows below its items (or an
+                // empty list) still take a drop at the end.
+                let lone_list = match node.children.as_slice() {
+                    [only] => self::node(tree, *only)
+                        .is_some_and(|child| matches!(child.widget, Widget::TreeList(_))),
+                    _ => false,
+                };
+                if lone_list {
+                    self.place(node.children[0], inner, depth + 1);
+                } else {
+                    self.stack(&node.children, inner, depth);
+                }
             }
             Widget::Dialog(dialog) => {
                 let mut row = 0u16;
@@ -1359,6 +1504,7 @@ impl Composer<'_> {
                     self.hit(place, 0, &key, "", ActionKind::Activated, None);
                 }
             }
+            Widget::TreeList(list) => self.tree_list(list, &key, area, enabled),
             Widget::Number(number) => self.number(number, &key, area, enabled),
             Widget::TextInput(input) => self.text_input(input, &key, area, enabled),
             Widget::TextArea(spec) => self.text_area(spec, &key, area, enabled),
@@ -1483,6 +1629,29 @@ pub(crate) fn draw(frame: &mut Frame, scene: &Scene, cursor: &ViewCursor, focuse
     }
     for (area, line) in &scene.texts {
         frame.render_widget(Paragraph::new(line.clone()), *area);
+    }
+    // A tree item being dragged underlines the row it would land on.
+    if let Some(Drag::Item {
+        list,
+        id,
+        position,
+        over: Some(at),
+        ..
+    }) = &cursor.drag
+    {
+        if drop_target(scene, list, id, *position, *at).is_some() {
+            let row = scene
+                .tree_items
+                .iter()
+                .filter_map(|item| scene.hits.get(item.hit))
+                .map(|hit| hit.area)
+                .find(|area| area.contains(*at));
+            if let Some(row) = row {
+                frame
+                    .buffer_mut()
+                    .set_style(row, Style::new().add_modifier(Modifier::UNDERLINED));
+            }
+        }
     }
     if focused {
         let focused_slot = scene.inputs.iter().find(|slot| slot.hit == cursor.focus);
@@ -1763,10 +1932,170 @@ pub(crate) fn click(
     if scene.splits.iter().any(|slot| slot.hit == Some(index)) {
         return out;
     }
+    if let Some(item) = scene.tree_items.iter().find(|item| item.hit == index) {
+        click_tree_item(item, view, cursor, position, now, &mut out);
+        return out;
+    }
     if let Some(hit) = scene.hits.get(index) {
         out.push(action(view, hit));
     }
     out
+}
+
+/// The highlight of a tree list moved to the item that now has the cursor: it is `selected`.
+fn select_focused_item(
+    scene: &Scene,
+    view: &ViewTarget,
+    cursor: &ViewCursor,
+    out: &mut Vec<UiAction>,
+) {
+    if let Some(item) = scene
+        .tree_items
+        .iter()
+        .find(|item| item.hit == cursor.focus)
+    {
+        out.push(item_action(view, item, ActionKind::Selected));
+    }
+}
+
+/// The action of a tree item: sent under its list's key, naming the item.
+fn item_action(view: &ViewTarget, item: &TreeItemSlot, kind: ActionKind) -> UiAction {
+    UiAction {
+        view: view.clone(),
+        key: item.list.clone(),
+        action_id: item.id.clone(),
+        kind,
+        value: Some(ActionValue::Text(item.id.clone())),
+    }
+}
+
+/// A click on a tree item: the expander toggles it; elsewhere the item is selected, a second
+/// click within [`DOUBLE_CLICK`] activates it, and a draggable item starts a possible drag.
+fn click_tree_item(
+    item: &TreeItemSlot,
+    view: &ViewTarget,
+    cursor: &mut ViewCursor,
+    position: Position,
+    now: Instant,
+    out: &mut Vec<UiAction>,
+) {
+    if item.expandable && (item.expander.0..item.expander.1).contains(&position.x) {
+        out.push(item_action(view, item, ActionKind::Toggled));
+        cursor.last_item_click = None;
+        return;
+    }
+    out.push(item_action(view, item, ActionKind::Selected));
+    let double = cursor
+        .last_item_click
+        .as_ref()
+        .is_some_and(|(list, id, at)| {
+            *list == item.list
+                && *id == item.id
+                && now.saturating_duration_since(*at) <= DOUBLE_CLICK
+        });
+    if double {
+        out.push(item_action(view, item, ActionKind::Activated));
+        cursor.last_item_click = None;
+    } else {
+        cursor.last_item_click = Some((item.list.clone(), item.id.clone(), now));
+    }
+    if item.draggable {
+        cursor.drag = Some(Drag::Item {
+            list: item.list.clone(),
+            id: item.id.clone(),
+            position: item.position,
+            origin: position,
+            over: None,
+        });
+    }
+}
+
+/// Where a tree item held by the pointer would land at `at`: the key of the target list and
+/// the drop value. `None` when nothing accepts it there, or when it would land on itself.
+///
+/// The host decides the position. A tree item is one row, which has no top and bottom half,
+/// so the direction of the move decides instead: an item dropped on a later item of its own
+/// list lands after it, every other drop on an item lands before it. Below the last item of
+/// a list it lands at the end, with the last item (none for an empty list) as the target.
+fn drop_target(
+    scene: &Scene,
+    source_list: &str,
+    source_id: &str,
+    source_position: u32,
+    at: Position,
+) -> Option<(String, DropValue)> {
+    let on_item = scene.tree_items.iter().find(|item| {
+        scene
+            .hits
+            .get(item.hit)
+            .is_some_and(|hit| hit.area.contains(at))
+    });
+    if let Some(item) = on_item {
+        if !item.drop_target || (item.list == source_list && item.id == source_id) {
+            return None;
+        }
+        let index = if item.list == source_list && source_position < item.position {
+            item.position.saturating_add(1)
+        } else {
+            item.position
+        };
+        return Some((
+            item.list.clone(),
+            DropValue {
+                source_key: source_id.to_owned(),
+                target_key: item.id.clone(),
+                index,
+            },
+        ));
+    }
+    let list = scene
+        .tree_lists
+        .iter()
+        .find(|list| list.area.contains(at))?;
+    Some((
+        list.key.clone(),
+        DropValue {
+            source_key: source_id.to_owned(),
+            target_key: list.last_id.clone().unwrap_or_default(),
+            index: list.count,
+        },
+    ))
+}
+
+/// The button went up at `position`: a tree item that was dragged off its cell is dropped
+/// there (`dropped` under the target list's key); every other drag ends as [`release`] ends it.
+pub(crate) fn release_at(
+    scene: &Scene,
+    view: &ViewTarget,
+    cursor: &mut ViewCursor,
+    position: Position,
+) -> Vec<UiAction> {
+    let Some(Drag::Item {
+        list,
+        id,
+        position: source_position,
+        over,
+        ..
+    }) = cursor.drag.clone()
+    else {
+        return release(view, cursor);
+    };
+    cursor.drag = None;
+    if over.is_none() {
+        return Vec::new();
+    }
+    let Some((target_list, value)) = drop_target(scene, &list, &id, source_position, position)
+    else {
+        return Vec::new();
+    };
+    cursor.last_item_click = None;
+    vec![UiAction {
+        view: view.clone(),
+        key: target_list,
+        action_id: value.target_key.clone(),
+        kind: ActionKind::Dropped,
+        value: Some(ActionValue::Drop(value)),
+    }]
 }
 
 fn click_input(
@@ -1926,6 +2255,24 @@ pub(crate) fn drag(
                         Some(ActionValue::Number(value)),
                     ));
                 }
+            }
+        }
+        // The drop happens on release; moving only remembers where the pointer is.
+        Drag::Item {
+            list,
+            id,
+            position: item_position,
+            origin,
+            over,
+        } => {
+            if over.is_some() || position != origin {
+                cursor.drag = Some(Drag::Item {
+                    list,
+                    id,
+                    position: item_position,
+                    origin,
+                    over: Some(position),
+                });
             }
         }
     }
@@ -2150,6 +2497,22 @@ pub(crate) fn key(
             return out;
         }
     }
+    if let Some(item) = scene
+        .tree_items
+        .iter()
+        .find(|item| item.hit == cursor.focus)
+    {
+        let kind = match event.code {
+            KeyCode::Enter => Some(ActionKind::Activated),
+            KeyCode::Right if item.expandable && !item.expanded => Some(ActionKind::Toggled),
+            KeyCode::Left if item.expandable && item.expanded => Some(ActionKind::Toggled),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            out.push(item_action(view, item, kind));
+            return out;
+        }
+    }
     let viewport = keyboard_scroll(scene, cursor)
         .map_or(1, |slot| i32::from(slot.rows).saturating_sub(1).max(1));
     match event.code {
@@ -2158,6 +2521,7 @@ pub(crate) fn key(
                 scroll_keyboard(scene, view, cursor, 1, &mut out);
             } else {
                 focus_hit(scene, view, cursor, cursor.focus + 1, &mut out);
+                select_focused_item(scene, view, cursor, &mut out);
             }
         }
         KeyCode::Up | KeyCode::BackTab | KeyCode::Char('k') => {
@@ -2165,6 +2529,7 @@ pub(crate) fn key(
                 scroll_keyboard(scene, view, cursor, -1, &mut out);
             } else {
                 focus_hit(scene, view, cursor, cursor.focus - 1, &mut out);
+                select_focused_item(scene, view, cursor, &mut out);
             }
         }
         KeyCode::PageDown => scroll_keyboard(scene, view, cursor, viewport, &mut out),
@@ -2988,6 +3353,256 @@ mod tests {
         );
         cursor.focus = 1;
         assert!(paste(&scene, &view, &mut cursor, "x", now).is_none());
+    }
+
+    fn tree_list(items: &[(&str, bool)]) -> Widget {
+        Widget::TreeList(TreeListSpec {
+            items: items
+                .iter()
+                .map(
+                    |(id, expandable)| ilium_plugin_api::generated::types::ui::TreeItem {
+                        id: (*id).to_owned(),
+                        label: span(&format!("Item {id}")),
+                        expandable: *expandable,
+                        draggable: true,
+                        drop_target: true,
+                        ..Default::default()
+                    },
+                )
+                .collect(),
+            multi_select: false,
+        })
+    }
+
+    #[test]
+    fn a_tree_list_draws_one_row_per_item_and_a_click_selects_or_toggles_it() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let tree = column(vec![(
+            Some("cards"),
+            tree_list(&[("a", false), ("b", true)]),
+            vec![],
+        )]);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, Rect::new(0, 0, 30, 4), &cursor.states);
+        assert!(scene.skipped.is_empty(), "{:?}", scene.skipped);
+        assert_eq!(row_text(&scene, 0), "Item a");
+        assert_eq!(row_text(&scene, 1), "▸ Item b");
+        let now = Instant::now();
+        let selected = first(click(&scene, &view, &mut cursor, Position::new(5, 0), now));
+        assert_eq!(selected.key, "cards");
+        assert_eq!(selected.kind, ActionKind::Selected);
+        assert_eq!(selected.value, Some(ActionValue::Text("a".to_owned())));
+        let toggled = first(click(&scene, &view, &mut cursor, Position::new(0, 1), now));
+        assert_eq!(toggled.kind, ActionKind::Toggled);
+        assert_eq!(toggled.value, Some(ActionValue::Text("b".to_owned())));
+    }
+
+    #[test]
+    fn a_tree_item_activates_on_enter_or_a_double_click_and_the_arrows_select_and_expand() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let tree = column(vec![(
+            Some("cards"),
+            tree_list(&[("a", false), ("b", true)]),
+            vec![],
+        )]);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, Rect::new(0, 0, 30, 4), &cursor.states);
+        let now = Instant::now();
+        let at = Position::new(5, 0);
+        assert_eq!(click(&scene, &view, &mut cursor, at, now).len(), 1);
+        let twice = click(
+            &scene,
+            &view,
+            &mut cursor,
+            at,
+            now + Duration::from_millis(100),
+        );
+        assert_eq!(
+            twice.iter().map(|action| action.kind).collect::<Vec<_>>(),
+            [ActionKind::Selected, ActionKind::Activated]
+        );
+        let late = click(&scene, &view, &mut cursor, at, now + Duration::from_secs(5));
+        assert_eq!(late.len(), 1, "{late:?}");
+        let press = |code: KeyCode| KeyEvent::new(code, KeyModifiers::NONE);
+        let enter = first(key(&scene, &view, &mut cursor, press(KeyCode::Enter), now));
+        assert_eq!(enter.kind, ActionKind::Activated);
+        assert_eq!(enter.value, Some(ActionValue::Text("a".to_owned())));
+        let down = first(key(&scene, &view, &mut cursor, press(KeyCode::Down), now));
+        assert_eq!(down.kind, ActionKind::Selected);
+        assert_eq!(down.value, Some(ActionValue::Text("b".to_owned())));
+        let right = first(key(&scene, &view, &mut cursor, press(KeyCode::Right), now));
+        assert_eq!(right.kind, ActionKind::Toggled);
+        assert!(key(&scene, &view, &mut cursor, press(KeyCode::Left), now).is_empty());
+    }
+
+    #[test]
+    fn a_tree_item_dragged_onto_another_list_is_dropped_there() {
+        let view = ViewTarget::Pane(ilium_plugin_api::generated::types::NodeId(4));
+        let tree = column(vec![
+            (
+                Some("col-0"),
+                tree_list(&[("0.0", false), ("0.1", false), ("0.2", false)]),
+                vec![],
+            ),
+            (Some("col-1"), tree_list(&[("1.0", false)]), vec![]),
+        ]);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, Rect::new(0, 0, 30, 6), &cursor.states);
+        assert_eq!(row_text(&scene, 3), "Item 1.0");
+        let now = Instant::now();
+        // A press and a release on the same cell is a click, not a drop.
+        click(&scene, &view, &mut cursor, Position::new(3, 0), now);
+        assert!(release_at(&scene, &view, &mut cursor, Position::new(3, 0)).is_empty());
+        assert!(cursor.drag.is_none());
+        click(
+            &scene,
+            &view,
+            &mut cursor,
+            Position::new(3, 0),
+            now + Duration::from_secs(1),
+        );
+        let mut moved = Vec::new();
+        drag(&view, &mut cursor, Position::new(3, 3), &mut moved);
+        assert!(moved.is_empty(), "moving sends nothing: {moved:?}");
+        let dropped = first(release_at(&scene, &view, &mut cursor, Position::new(3, 3)));
+        assert_eq!(dropped.key, "col-1");
+        assert_eq!(dropped.kind, ActionKind::Dropped);
+        assert_eq!(
+            dropped.value,
+            Some(ActionValue::Drop(DropValue {
+                source_key: "0.0".to_owned(),
+                target_key: "1.0".to_owned(),
+                index: 0,
+            }))
+        );
+        assert!(cursor.drag.is_none());
+    }
+
+    #[test]
+    fn a_drop_in_its_own_list_lands_after_a_later_item_before_an_earlier_one_or_at_the_end() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let tree = UiTree {
+            version: 1,
+            root: 0,
+            nodes: vec![node(
+                Some("col-0"),
+                tree_list(&[("a", false), ("b", false), ("c", false)]),
+                vec![],
+            )],
+        };
+        let scene = compose(&tree, Rect::new(0, 0, 20, 6));
+        let drop_of = |from: u16, to: u16| {
+            let mut cursor = ViewCursor::default();
+            click(
+                &scene,
+                &view,
+                &mut cursor,
+                Position::new(2, from),
+                Instant::now(),
+            );
+            let mut moved = Vec::new();
+            drag(&view, &mut cursor, Position::new(2, to), &mut moved);
+            release_at(&scene, &view, &mut cursor, Position::new(2, to))
+                .into_iter()
+                .next()
+                .and_then(|action| action.value)
+        };
+        let dropped = |source: &str, target: &str, index: u32| {
+            Some(ActionValue::Drop(DropValue {
+                source_key: source.to_owned(),
+                target_key: target.to_owned(),
+                index,
+            }))
+        };
+        assert_eq!(drop_of(0, 2), dropped("a", "c", 3));
+        assert_eq!(drop_of(0, 0), None);
+        assert_eq!(drop_of(0, 5), dropped("a", "c", 3));
+        assert_eq!(drop_of(2, 0), dropped("c", "a", 0));
+        assert_eq!(drop_of(1, 1), None);
+    }
+
+    #[test]
+    fn a_framed_list_takes_a_drop_below_its_items_and_an_empty_one_takes_it_at_the_start() {
+        use ilium_plugin_api::generated::types::ui::{BlockSpec, BorderType, Borders, Padding};
+        let block = || {
+            Widget::Block(BlockSpec {
+                borders: Borders::ALL,
+                border_type: BorderType::Plain,
+                titles: Vec::new(),
+                padding: Padding::default(),
+                style: PluginStyle::default(),
+                border_style: PluginStyle::default(),
+            })
+        };
+        let columns = LayoutSpec {
+            direction: Direction::Horizontal,
+            constraints: Vec::new(),
+            flex: Flex::Start,
+            spacing: Spacing::Space(0),
+            margin: Margin::default(),
+        };
+        let tree = UiTree {
+            version: 1,
+            root: 0,
+            nodes: vec![
+                node(None, Widget::Layout(columns), vec![1, 2]),
+                node(None, block(), vec![3]),
+                node(None, block(), vec![4]),
+                node(
+                    Some("col-0"),
+                    tree_list(&[("0.0", false), ("0.1", false)]),
+                    vec![],
+                ),
+                node(Some("col-1"), tree_list(&[]), vec![]),
+            ],
+        };
+        let view = ViewTarget::Panel("panel".to_owned());
+        let scene = compose(&tree, Rect::new(0, 0, 30, 10));
+        let lists: Vec<(&str, Rect)> = scene
+            .tree_lists
+            .iter()
+            .map(|list| (list.key.as_str(), list.area))
+            .collect();
+        assert_eq!(
+            lists,
+            [
+                ("col-0", Rect::new(1, 1, 13, 8)),
+                ("col-1", Rect::new(16, 1, 13, 8))
+            ]
+        );
+        let drop_at = |at: Position| {
+            let mut cursor = ViewCursor::default();
+            click(
+                &scene,
+                &view,
+                &mut cursor,
+                Position::new(3, 1),
+                Instant::now(),
+            );
+            let mut moved = Vec::new();
+            drag(&view, &mut cursor, at, &mut moved);
+            release_at(&scene, &view, &mut cursor, at)
+                .into_iter()
+                .next()
+                .map(|action| (action.key, action.value))
+        };
+        let dropped = |key: &str, target: &str, index: u32| {
+            Some((
+                key.to_owned(),
+                Some(ActionValue::Drop(DropValue {
+                    source_key: "0.0".to_owned(),
+                    target_key: target.to_owned(),
+                    index,
+                })),
+            ))
+        };
+        assert_eq!(drop_at(Position::new(3, 7)), dropped("col-0", "0.1", 2));
+        assert_eq!(drop_at(Position::new(18, 4)), dropped("col-1", "", 0));
+        assert_eq!(
+            drop_at(Position::new(15, 4)),
+            None,
+            "the frame border takes no drop"
+        );
     }
 
     #[test]

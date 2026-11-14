@@ -1180,12 +1180,24 @@ async fn run_due_panes_with_hook(
                         .collect();
 
                     let observed_at_unix_millis = observation_unix_millis();
+                    // A detector plugin owns classification when one is active; the loop only
+                    // queues screens and reads cached verdicts (HST-450, HST-451).
+                    let detector_host = state
+                        .plugins
+                        .get()
+                        .filter(|host| host.detectors_active())
+                        .cloned();
                     let mut current_cached_screens = std::collections::HashSet::new();
                     let screen_snapshots: std::collections::HashMap<
                         NodeId,
                         ilium_pty::ScreenSnapshot,
                     > = {
                         let panes = state.panes.read().await;
+                        if let Some(host) = &detector_host {
+                            host.start_detection_cycle(
+                                &panes.keys().map(|pane_id| pane_id.0).collect(),
+                            );
+                        }
                         let mut snapshots =
                             std::collections::HashMap::with_capacity(identified_panes.len());
                         for pane in &identified_panes {
@@ -1255,39 +1267,96 @@ async fn run_due_panes_with_hook(
                                         cursor_position: (0, 0),
                                         dimmed_cells: Vec::new(),
                                     });
-                                let classification = classify_identity(
-                                    identity.as_ref(),
-                                    &screen_snapshot.text,
-                                    due_pane.confirmed_goal_owner.as_ref(),
-                                );
-                                let is_fresh = identity.as_ref().is_some_and(|identity| {
-                                    ilium_detect::is_fresh_agent_screen(
-                                        &identity.class,
-                                        &screen_snapshot.text,
-                                    )
-                                });
-                                let interstitial = identity.as_ref().and_then(|identity| {
-                                    ilium_detect::interstitial_prompt_response(
-                                        &identity.class,
-                                        &screen_snapshot.text,
-                                    )
-                                });
-                                let cache = ScreenClassificationCache {
-                                    screen_generation: screen_snapshot.generation,
-                                    request_generation: due_pane.request_generation,
-                                    identity: identity_key(identity.as_ref()),
-                                    input_goal_owner: due_pane.confirmed_goal_owner.clone(),
-                                    classification: classification.clone(),
-                                    is_fresh_agent_screen: is_fresh,
-                                    interstitial_prompt_response: interstitial,
+                                let plugin_evidence = match (&detector_host, identity.as_ref()) {
+                                    (Some(host), Some(identity)) => {
+                                        use crate::plugin_host::detector_verdicts;
+                                        host.request_screen_verdict(
+                                            detector_verdicts::screen_request(
+                                                due_pane.pane_id.0,
+                                                &identity.class,
+                                                &screen_snapshot,
+                                            ),
+                                        );
+                                        let signature =
+                                            detector_verdicts::signature_of_class(&identity.class);
+                                        let Some(cached) = host
+                                            .screen_verdict(due_pane.pane_id, &signature)
+                                            .filter(|cached| {
+                                                cached.verdict.generation
+                                                    <= screen_snapshot.generation
+                                            })
+                                        else {
+                                            // No verdict yet: no sample, the pane keeps its
+                                            // activity (HST-454).
+                                            return None;
+                                        };
+                                        Some((
+                                            identity,
+                                            cached.verdict.generation,
+                                            detector_verdicts::evidence_of(&cached),
+                                        ))
+                                    }
+                                    _ => None,
                                 };
-                                (
-                                    screen_snapshot.generation,
-                                    classification,
-                                    is_fresh,
-                                    interstitial,
-                                    cache,
-                                )
+                                if let Some((agent, generation, evidence)) = plugin_evidence {
+                                    let classification = reduce_screen_evidence(
+                                        agent,
+                                        evidence.activity,
+                                        evidence.goal,
+                                        due_pane.confirmed_goal_owner.as_ref(),
+                                    );
+                                    let cache = ScreenClassificationCache {
+                                        screen_generation: generation,
+                                        request_generation: due_pane.request_generation,
+                                        identity: identity_key(identity.as_ref()),
+                                        input_goal_owner: due_pane.confirmed_goal_owner.clone(),
+                                        classification: classification.clone(),
+                                        is_fresh_agent_screen: evidence.is_fresh_agent_screen,
+                                        interstitial_prompt_response: evidence
+                                            .interstitial_prompt_response,
+                                    };
+                                    (
+                                        generation,
+                                        classification,
+                                        evidence.is_fresh_agent_screen,
+                                        evidence.interstitial_prompt_response,
+                                        cache,
+                                    )
+                                } else {
+                                    let classification = classify_identity(
+                                        identity.as_ref(),
+                                        &screen_snapshot.text,
+                                        due_pane.confirmed_goal_owner.as_ref(),
+                                    );
+                                    let is_fresh = identity.as_ref().is_some_and(|identity| {
+                                        ilium_detect::is_fresh_agent_screen(
+                                            &identity.class,
+                                            &screen_snapshot.text,
+                                        )
+                                    });
+                                    let interstitial = identity.as_ref().and_then(|identity| {
+                                        ilium_detect::interstitial_prompt_response(
+                                            &identity.class,
+                                            &screen_snapshot.text,
+                                        )
+                                    });
+                                    let cache = ScreenClassificationCache {
+                                        screen_generation: screen_snapshot.generation,
+                                        request_generation: due_pane.request_generation,
+                                        identity: identity_key(identity.as_ref()),
+                                        input_goal_owner: due_pane.confirmed_goal_owner.clone(),
+                                        classification: classification.clone(),
+                                        is_fresh_agent_screen: is_fresh,
+                                        interstitial_prompt_response: interstitial,
+                                    };
+                                    (
+                                        screen_snapshot.generation,
+                                        classification,
+                                        is_fresh,
+                                        interstitial,
+                                        cache,
+                                    )
+                                }
                             };
                             let has_stable_session_owner =
                                 identity.as_ref().is_some_and(|identity| {
@@ -3709,68 +3778,12 @@ fn classify_identity(
     previous_goal_owner: Option<&ConfirmedGoalOwner>,
 ) -> IdentityClassification {
     match identity {
-        Some(identity) => {
-            let activity_classification =
-                ilium_detect::classify_activity_for_agent_detailed(&identity.class, screen_text);
-            let turn = activity_classification.turn;
-            let identity_owner = ConfirmedGoalOwner {
-                process_id: identity.pid,
-                process_started_at_unix_seconds: identity.started_at_unix_seconds,
-                agent_class: identity.class.clone(),
-                goal_state: ilium_core::GoalState::Active,
-                evidence_line: None,
-                evidence_rule: None,
-                evidence_pattern: None,
-            };
-            let goal_classification =
-                ilium_detect::goal_evidence_for_agent_detailed(&identity.class, screen_text);
-            let goal_was_retained = goal_classification.evidence
-                == ilium_detect::GoalEvidence::Unknown
-                && previous_goal_owner.is_some_and(|owner| {
-                    owner.process_id == identity_owner.process_id
-                        && owner.process_started_at_unix_seconds
-                            == identity_owner.process_started_at_unix_seconds
-                        && owner.agent_class == identity_owner.agent_class
-                });
-            let confirmed_goal_owner = match goal_classification.evidence {
-                ilium_detect::GoalEvidence::State(goal_state) => Some(ConfirmedGoalOwner {
-                    goal_state,
-                    evidence_line: goal_classification.matched_line.clone(),
-                    evidence_rule: goal_classification.matched_rule,
-                    evidence_pattern: goal_classification.matched_pattern,
-                    ..identity_owner.clone()
-                }),
-                ilium_detect::GoalEvidence::Inactive => None,
-                ilium_detect::GoalEvidence::Unknown
-                    if previous_goal_owner.is_some_and(|owner| {
-                        owner.process_id == identity_owner.process_id
-                            && owner.process_started_at_unix_seconds
-                                == identity_owner.process_started_at_unix_seconds
-                            && owner.agent_class == identity_owner.agent_class
-                    }) =>
-                {
-                    previous_goal_owner.cloned()
-                }
-                ilium_detect::GoalEvidence::Unknown => None,
-            };
-            let status = PaneStatus::Agent(AgentState {
-                class: identity.class.clone(),
-                turn,
-                goal: confirmed_goal_owner.as_ref().map(|owner| owner.goal_state),
-                completion_unread: false,
-            });
-            IdentityClassification {
-                status,
-                confirmed_goal_owner,
-                activity_evidence: Some(activity_classification.evidence),
-                activity_evidence_line: activity_classification.matched_line,
-                goal_evidence: Some(goal_classification.evidence),
-                goal_evidence_line: goal_classification.matched_line,
-                goal_evidence_rule: goal_classification.matched_rule,
-                goal_evidence_pattern: goal_classification.matched_pattern,
-                goal_was_retained,
-            }
-        }
+        Some(identity) => reduce_screen_evidence(
+            identity,
+            ilium_detect::classify_activity_for_agent_detailed(&identity.class, screen_text),
+            ilium_detect::goal_evidence_for_agent_detailed(&identity.class, screen_text),
+            previous_goal_owner,
+        ),
         None => IdentityClassification {
             status: PaneStatus::PlainShell,
             confirmed_goal_owner: None,
@@ -3782,6 +3795,72 @@ fn classify_identity(
             goal_evidence_pattern: None,
             goal_was_retained: false,
         },
+    }
+}
+
+/// The same reduction as [`classify_identity`] for screen evidence a detector plugin produced
+/// (`plugin_host::detector_verdicts`): goal ownership, retention and the semantic state follow
+/// one set of rules whichever classifier read the screen.
+fn reduce_screen_evidence(
+    identity: &ilium_detect::AgentIdentity,
+    activity_classification: ilium_detect::ActivityClassification,
+    goal_classification: ilium_detect::GoalClassification,
+    previous_goal_owner: Option<&ConfirmedGoalOwner>,
+) -> IdentityClassification {
+    let turn = activity_classification.turn;
+    let identity_owner = ConfirmedGoalOwner {
+        process_id: identity.pid,
+        process_started_at_unix_seconds: identity.started_at_unix_seconds,
+        agent_class: identity.class.clone(),
+        goal_state: ilium_core::GoalState::Active,
+        evidence_line: None,
+        evidence_rule: None,
+        evidence_pattern: None,
+    };
+    let goal_was_retained = goal_classification.evidence == ilium_detect::GoalEvidence::Unknown
+        && previous_goal_owner.is_some_and(|owner| {
+            owner.process_id == identity_owner.process_id
+                && owner.process_started_at_unix_seconds
+                    == identity_owner.process_started_at_unix_seconds
+                && owner.agent_class == identity_owner.agent_class
+        });
+    let confirmed_goal_owner = match goal_classification.evidence {
+        ilium_detect::GoalEvidence::State(goal_state) => Some(ConfirmedGoalOwner {
+            goal_state,
+            evidence_line: goal_classification.matched_line.clone(),
+            evidence_rule: goal_classification.matched_rule,
+            evidence_pattern: goal_classification.matched_pattern,
+            ..identity_owner.clone()
+        }),
+        ilium_detect::GoalEvidence::Inactive => None,
+        ilium_detect::GoalEvidence::Unknown
+            if previous_goal_owner.is_some_and(|owner| {
+                owner.process_id == identity_owner.process_id
+                    && owner.process_started_at_unix_seconds
+                        == identity_owner.process_started_at_unix_seconds
+                    && owner.agent_class == identity_owner.agent_class
+            }) =>
+        {
+            previous_goal_owner.cloned()
+        }
+        ilium_detect::GoalEvidence::Unknown => None,
+    };
+    let status = PaneStatus::Agent(AgentState {
+        class: identity.class.clone(),
+        turn,
+        goal: confirmed_goal_owner.as_ref().map(|owner| owner.goal_state),
+        completion_unread: false,
+    });
+    IdentityClassification {
+        status,
+        confirmed_goal_owner,
+        activity_evidence: Some(activity_classification.evidence),
+        activity_evidence_line: activity_classification.matched_line,
+        goal_evidence: Some(goal_classification.evidence),
+        goal_evidence_line: goal_classification.matched_line,
+        goal_evidence_rule: goal_classification.matched_rule,
+        goal_evidence_pattern: goal_classification.matched_pattern,
+        goal_was_retained,
     }
 }
 

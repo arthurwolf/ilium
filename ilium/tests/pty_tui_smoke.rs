@@ -2257,7 +2257,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
     );
 
-    // Titles follows Voice control and Inference. Exercise both its keyboard
+    // Titles follows Voice control and LLM Instructions. Exercise both its keyboard
     // and mouse selector paths through the real rendered Settings screen.
     tui.write(&settings_tab_keys(
         ilium_client::app::SettingsTab::Sound,

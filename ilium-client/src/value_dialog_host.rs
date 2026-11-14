@@ -323,13 +323,8 @@ impl ValueDialogHost {
                 directory,
                 inference_revision: matches!(
                     field,
-                    crate::value_settings_choice::SettingsChoice::InferenceProvider
-                        | crate::value_settings_choice::SettingsChoice::TitleStyle
+                    crate::value_settings_choice::SettingsChoice::TitleStyle
                         | crate::value_settings_choice::SettingsChoice::CodexThreadNames
-                        | crate::value_settings_choice::SettingsChoice::KiloModel
-                        | crate::value_settings_choice::SettingsChoice::OllamaModel
-                        | crate::value_settings_choice::SettingsChoice::OpenAiModel
-                        | crate::value_settings_choice::SettingsChoice::AnthropicModel
                 )
                 .then_some(app.onboarding_revision),
             },

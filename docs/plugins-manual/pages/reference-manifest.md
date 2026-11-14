@@ -205,7 +205,7 @@ Each side has one object:
 |---|---|---|
 | [PKG-040] | `entry` MUST be `server.wasm` for `server`, `client.wasm` for `client` and `scene.wasm` for `scene`. | `manifest.entry-invalid` |
 | [PKG-041] | `world` MUST be `ilium:server/base@0.1.0` for `server`, `ilium:client/base@0.1.0` for `client` and `ilium:anim/base@0.1.0` for `scene`. | `manifest.schema` |
-| [PKG-042] | [ABI-018] `exports` lists only the optional exports of that side, once each, from the table below. The required exports (`lifecycle` and `handler`, and `renderer` for a scene) are never listed. Default: the empty list. | `manifest.schema` |
+| [PKG-042] | [ABI-018] `exports` lists only the optional exports of that side, once each, from the table below. The required exports (`lifecycle` and `handler` for a server or client, `lifecycle` and `renderer` for a scene) are never listed; a scene lists `handler` when it has one. Default: the empty list. | `manifest.schema` |
 | [PKG-043] | [ABI-006] The list MUST equal the optional exports that the component really has. Both a missing and an extra name are refused. | `manifest.exports-mismatch` |
 | [PKG-044] | A side that lists `hook-handler` MUST have at least one extension with a `handler` on that side. A side with such extensions MUST list it. | `manifest.exports-mismatch` |
 | [PKG-045] | A manifest with `data_version` above 1 MUST list `migrator` in `exports` for each of its `server` and `client` components (a `scene` component has no `migrator`), and each of those components MUST export it. A component with nothing to migrate exports a `migrator` that returns `ok`. Checked at stage 6 with `manifest.exports-mismatch` (rule LIF-278). | `manifest.exports-mismatch` |
@@ -225,6 +225,7 @@ Each side has one object:
 | `token-provider` | no | yes | no | `languages` (needs `editor.read`) |
 | `hook-handler` | yes | yes | no | `extensions` entries with a `handler` |
 | `migrator` | yes | yes | no | Data migration when `data_version` rises |
+| `handler` | required | required | yes | Events between frames for a scene (audio frames, request completions, job progress); fragment `with-handler` |
 
 This table is the only list of optional exports. Pages that show a shorter list show the exports that matter for their topic. The worlds and the WIT fragments are in [Exports](/pages/api-exports/) and [Worlds and sides](/pages/worlds-and-sides/).
 
@@ -850,7 +851,7 @@ Security keys: `data_use` ([SEC-267]), `security_contact` ([SEC-268]) and the di
 - **[PKG-035]** The installer MUST refuse this input with `manifest.files-order`, `manifest.file-*`: `files` lists every entry except `manifest.json` and `signature`, sorted in archive order, with no path twice..
 - **[PKG-040]** `entry` MUST be `server.wasm` for `server`, `client.wasm` for `client` and `scene.wasm` for `scene`.
 - **[PKG-041]** `world` MUST be `ilium:server/base@0.1.0` for `server`, `ilium:client/base@0.1.0` for `client` and `ilium:anim/base@0.1.0` for `scene`.
-- **[PKG-042]** The installer MUST refuse this input with `manifest.schema`: [ABI-018] `exports` lists only the optional exports of that side, once each, from the table below. The required exports (`lifecycle` and `handler`, and `renderer` for a scene) are never listed. Default: the empty list..
+- **[PKG-042]** The installer MUST refuse this input with `manifest.schema`: [ABI-018] `exports` lists only the optional exports of that side, once each, from the table below. The required exports (`lifecycle` and `handler` for a server or client, `lifecycle` and `renderer` for a scene) are never listed; a scene lists `handler` when it has one. Default: the empty list..
 - **[PKG-043]** The list MUST equal the optional exports that the component really has. Both a missing and an extra name are refused.
 - **[PKG-044]** A side that lists `hook-handler` MUST have at least one extension with a `handler` on that side. A side with such extensions MUST list it.
 - **[PKG-045]** The following MUST hold. A manifest with `data_version` above 1 MUST list `migrator` in `exports` for each of its `server` and `client` components (a `scene` component has no `migrator`), and each of those components MUST export it. A component with nothing to migrate exports a `migrator` that returns `ok`. Checked at stage 6 with `manifest.exports-mismatch` (rule LIF-278).

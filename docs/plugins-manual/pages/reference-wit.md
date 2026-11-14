@@ -2305,8 +2305,26 @@ interface detector {
   record detector-screen { columns: u16, rows: list<string>, cursor-row: u16, title: option<string>, revision: u64 }
   record detector-process { name: string, argv: list<string> }
   record classification { activity: agent-activity, objective: option<string>, goal: option<string> }
+  /// One process below a pane's shell, parents before children. depth 0 is the shell itself.
+  record detector-tree-process { pid: u32, parent-pid: option<u32>, depth: u16, started-at-unix-seconds: u64, name: string, argv: list<string> }
+  /// The agent a process tree runs: the signature id and the process that matched it.
+  record identified-agent { signature: string, pid: u32 }
+  record screen-cell { row: u16, column: u16 }
+  /// One identified pane's screen. generation names the frame; text is the plain screen text.
+  record screen-request { pane: u64, generation: u64, signature: string, text: string, cursor: option<screen-cell>, dimmed: list<screen-cell> }
+  /// The provider turn phase. waiting-subagents and settling read as working to the user.
+  enum agent-turn { working, waiting-approval, waiting-subagents, settling, idle }
+  /// The predicate that selected the turn.
+  enum activity-evidence { interrupt-marker, generic-live-status, claude-live-status, codex-live-status, background-wait, background-task-wait, confirmation-prompt, selection-prompt, folder-trust-prompt, no-active-marker }
+  /// A goal phase, inactive (no goal), or unknown (the goal row was not visible).
+  enum goal-evidence { active, paused, blocked, usage-limited, reached, inactive, unknown }
+  record screen-verdict { pane: u64, generation: u64, signature: string, turn: agent-turn, evidence: activity-evidence, evidence-line: option<string>, goal: goal-evidence, goal-line: option<string>, goal-rule: option<string>, goal-pattern: option<string>, fresh-screen: bool, interstitial-response: option<string>, prompt-ready: bool }
   identify: func(processes: list<detector-process>) -> option<string>;
   classify: func(signature: string, screen: detector-screen) -> classification;
+  /// Names the agent of one pane from its pid-level process tree.
+  identify-tree: func(processes: list<detector-tree-process>) -> option<identified-agent>;
+  /// Classifies one identified pane's screen. None, or a verdict for another pane or frame, keeps the pane's activity.
+  classify-screen: func(screen: screen-request) -> option<screen-verdict>;
 }
 ```
 
@@ -2622,7 +2640,10 @@ world base {
 }
 
 world with-jobs { export ilium:exports/job-runner@0.1.0; }
+world with-handler { export ilium:exports/handler@0.1.0; }
 ```
+
+On the scene side `handler` is an optional fragment, not part of the base: a scene that reads audio frames, request completions or job progress as events lists `handler` in its manifest `exports`, and the host delivers each batch between two frames. The submissions it returns are ignored, because a scene submits no intents. A scene without the fragment polls `take-response`, `take-output` and `next-frame` instead.
 
 The umbrella identity is `ilium:plugin@0.1.0`. It is not a WIT package. It is the value of the manifest `api` field and of the `ilium:api-version` custom section, and the host compares it before linking [ABI-021].
 

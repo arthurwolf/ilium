@@ -263,6 +263,13 @@ impl PluginSceneFactory {
         })
         .to_string();
         let limits = ResolvedLimits(Default::default());
+        // The paths of the scene's `picker` rows, lent in row order as read-only `picked/<n>`
+        // scopes (opened by `fs.read:picked`).
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let picked = self
+            .declaration
+            .controls
+            .picked_paths(values, home.as_deref());
         // Each instance gets its own imports, job book and event queue, built from the scene
         // grants only; `http` never waits inside a frame.
         let equipped = self.services.equip(
@@ -271,6 +278,7 @@ impl PluginSceneFactory {
                 granted: &self.granted,
                 manifest: &self.manifest,
                 observer,
+                picked: &picked,
             },
             &self.engine,
             &self.compiled,

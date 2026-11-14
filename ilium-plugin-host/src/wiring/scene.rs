@@ -9,8 +9,11 @@
 //!   use (`wiring::import_provider`, `wave_two::equip`), so the private `package`, `data` and
 //!   `cache` scopes of the plugin, its storage buckets, the ffmpeg-backed video decoder and the
 //!   sound devices are the ones the plugin's client side sees. A scene gets no `project` scope,
-//!   no picker, no clipboard and no agent folders; the one extra read-only scope is
-//!   [`MINECRAFT_SAVES_SCOPE`], opened by `fs.read:minecraft-saves`;
+//!   no picker, no clipboard and no agent folders; the extra read-only scopes are
+//!   [`MINECRAFT_SAVES_SCOPE`] and [`MINECRAFT_JAVA_SCOPE`] (`fs.read:minecraft-saves`,
+//!   `fs.read:minecraft-java`) and, per instance, one read-only `picked/<n>` scope for each
+//!   folder or file of a settings row the scene declared with the `picker` keyword (opened by
+//!   `fs.read:picked`; a scene never calls `pick` itself);
 //! - `http` that never waits inside a frame (`take-response` reports a running fetch as not
 //!   ready), and `jobs`, whose `start` queues a job that [`SceneBackground`] runs in a fresh job
 //!   instance of the same component on a worker thread; the job instance gets waiting `http`
@@ -44,7 +47,7 @@ use crate::imports::codec::CodecImport;
 use crate::imports::env::{ImportEnv, RequestIds, SessionCounters};
 use crate::imports::fonts::FontsImport;
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
-use crate::imports::geocode::GeocodeImport;
+use crate::imports::geocode::{GeocodeBackend, GeocodeImport};
 use crate::imports::gpu::GpuImport;
 use crate::imports::http::HttpImport;
 use crate::imports::jobs::{JobBook, JobsImport, QueuedJob};
@@ -101,6 +104,9 @@ pub struct SceneBackendInputs {
     pub minecraft_saves: Option<PathBuf>,
     /// The Minecraft Java folder, the root of [`MINECRAFT_JAVA_SCOPE`]; `None` leaves it closed.
     pub minecraft_java: Option<PathBuf>,
+    /// The place and address search behind `geocode`; `None` answers every request with no
+    /// place.
+    pub geocode: Option<Arc<dyn GeocodeBackend>>,
 }
 
 /// What every scene instance of one client is equipped from. Cloning shares the id allocator
@@ -115,6 +121,8 @@ pub struct SceneImportServices {
     ids: RequestIds,
     session: SessionCounters,
     next_instance: Arc<AtomicU64>,
+    /// The provider of `geocode`, shared by every instance (each keeps its own requests).
+    geocode: Option<Arc<dyn GeocodeBackend>>,
 }
 
 impl std::fmt::Debug for SceneImportServices {
@@ -142,6 +150,7 @@ impl SceneImportServices {
         if let Some(java) = inputs.minecraft_java {
             read_only.insert(MINECRAFT_JAVA_SCOPE.to_owned(), java);
         }
+        let geocode = inputs.geocode;
         let backends = Backends {
             audio: inputs.audio,
             media: inputs.media,
@@ -158,6 +167,7 @@ impl SceneImportServices {
         };
         Self {
             disk: Some(disk),
+            geocode,
             ..Self::without_disk(log)
         }
     }
@@ -171,6 +181,7 @@ impl SceneImportServices {
             ids: RequestIds::new(),
             session: SessionCounters::new(),
             next_instance: Arc::new(AtomicU64::new(1)),
+            geocode: None,
         }
     }
 
@@ -201,7 +212,8 @@ impl SceneImportServices {
         };
         let env = ImportEnv::for_instance(&context);
         let book = JobBook::new();
-        let mut imports = self.base_set(&context, request.observer);
+        let lent_picks = lent_picks(request.picked);
+        let mut imports = self.base_set(&context, request.observer, &lent_picks);
         // A scene draws inside a render frame: its fetches never block it.
         imports.http = Some(Box::new(HttpImport::new(env.clone()).without_waiting()));
         imports.jobs = Some(Box::new(JobsImport::new(
@@ -222,6 +234,7 @@ impl SceneImportServices {
                 context,
                 book,
                 observer: request.observer,
+                lent_picks,
                 engine: Arc::clone(engine),
                 compiled: compiled.clone(),
                 limits: limits.clone(),
@@ -231,8 +244,14 @@ impl SceneImportServices {
     }
 
     /// Everything but `jobs` (and the frame-bound `http` of the render instance); restricted to
-    /// the interfaces of the scene world, not yet to the grants.
-    fn base_set(&self, context: &InstanceContext, observer: Option<(f64, f64)>) -> ImportSet {
+    /// the interfaces of the scene world, not yet to the grants. `lent_picks` are this
+    /// instance's read-only `picked/<n>` scopes and their roots.
+    fn base_set(
+        &self,
+        context: &InstanceContext,
+        observer: Option<(f64, f64)>,
+        lent_picks: &AgentScopes,
+    ) -> ImportSet {
         let env = ImportEnv::for_instance(context);
         let mut set = ImportSet {
             log: Some(Box::new(SinkLog::new(
@@ -244,13 +263,23 @@ impl SceneImportServices {
             codec: Some(Box::new(CodecImport)),
             fonts: Some(Box::new(FontsImport::default())),
             gpu: Some(Box::new(GpuImport)),
-            geocode: Some(Box::new(GeocodeImport::default())),
+            geocode: Some(Box::new(match &self.geocode {
+                Some(backend) => GeocodeImport::with_backend(Arc::clone(backend)),
+                None => GeocodeImport::default(),
+            })),
             location: Some(Box::new(ObserverLocation::new(env.clone(), observer))),
             http: Some(Box::new(HttpImport::new(env))),
             ..ImportSet::default()
         };
         if let Some(disk) = &self.disk {
-            let provider = import_provider(disk.clone());
+            let mut disk = disk.clone();
+            // A folder or file that does not exist (any more) leaves its scope closed.
+            disk.backends.agent_scopes.extend(
+                lent_picks
+                    .iter()
+                    .map(|(scope, root)| (scope.clone(), root.clone())),
+            );
+            let provider = import_provider(disk);
             provider(context, &mut set);
         }
         keep_scene_interfaces(&mut set);
@@ -275,6 +304,20 @@ pub struct SceneInstanceRequest<'a> {
     pub manifest: &'a Value,
     /// The observer position (latitude, longitude) of the shared location row.
     pub observer: Option<(f64, f64)>,
+    /// The folders and files of the scene's `picker` settings rows, in row order: path `n` is
+    /// lent as the read-only scope `picked/<n>`, opened by `fs.read:picked`.
+    pub picked: &'a [PathBuf],
+}
+
+/// The read-only `picked/<n>` scopes of one instance. A path that is not absolute is left out,
+/// and the others keep their row index.
+fn lent_picks(picked: &[PathBuf]) -> AgentScopes {
+    picked
+        .iter()
+        .enumerate()
+        .filter(|(_, root)| root.is_absolute())
+        .map(|(index, root)| (format!("picked/{index}"), root.clone()))
+        .collect()
 }
 
 /// The equipment of one scene instance.
@@ -316,6 +359,8 @@ pub struct SceneBackground {
     context: InstanceContext,
     book: JobBook,
     observer: Option<(f64, f64)>,
+    /// The instance's lent `picked/<n>` scopes, lent to its job instances too.
+    lent_picks: AgentScopes,
     engine: Arc<PluginEngine>,
     compiled: CompiledComponent,
     limits: ResolvedLimits,
@@ -411,7 +456,9 @@ impl SceneBackground {
             .get(&LimitKey::JobMemoryMib)
             .map_or(job.memory_mib, |ceiling| (*ceiling).min(job.memory_mib));
         limits.0.insert(LimitKey::MemoryMib, memory_mib);
-        let mut set = self.services.base_set(&self.context, self.observer);
+        let mut set = self
+            .services
+            .base_set(&self.context, self.observer, &self.lent_picks);
         set.jobs = Some(Box::new(JobsImport::for_job(
             ImportEnv::for_instance(&self.context),
             self.book.clone(),
@@ -523,6 +570,7 @@ mod tests {
                 granted: &granted,
                 manifest,
                 observer,
+                picked: &[],
             },
             &engine,
             &compiled,
@@ -722,6 +770,133 @@ mod tests {
         assert!(fs
             .read(path(MINECRAFT_SAVES_SCOPE, "World/level.dat"), 0, 1024)
             .is_err());
+    }
+
+    /// A provider that knows one place for every text.
+    struct OnePlace;
+
+    impl GeocodeBackend for OnePlace {
+        fn search(
+            &self,
+            query: &ilium_plugin_api::generated::host::geocode::GeocodeQuery,
+        ) -> Result<Vec<ilium_plugin_api::generated::types::geo::GeoPlace>, String> {
+            Ok(vec![ilium_plugin_api::generated::types::geo::GeoPlace {
+                point: ilium_plugin_api::generated::types::geo::GeoPoint {
+                    lat: 52.37,
+                    lon: 4.89,
+                },
+                label: query.text.clone(),
+                country_code: None,
+                kind: None,
+            }])
+        }
+
+        fn reverse(
+            &self,
+            _point: ilium_plugin_api::generated::types::geo::GeoPoint,
+        ) -> Result<Vec<ilium_plugin_api::generated::types::geo::GeoPlace>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn the_client_geocoder_answers_the_geocode_import_of_every_instance() {
+        use ilium_plugin_api::generated::host::geocode::{GeocodeQuery, HostGeocode};
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let services = SceneImportServices::new(
+            scratch.path(),
+            StorageContext::default(),
+            Arc::new(NullLogSink),
+            SceneBackendInputs {
+                geocode: Some(Arc::new(OnePlace)),
+                ..SceneBackendInputs::default()
+            },
+        );
+        for plugin in ["test.first", "test.second"] {
+            let mut imports =
+                equip(&services, plugin, &["location.geocode"], &Value::Null, None).imports;
+            let geocode = imports.geocode.as_mut().expect("geocode linked");
+            let request = geocode
+                .search(GeocodeQuery {
+                    text: "Amsterdam".to_owned(),
+                    near: None,
+                    limit: 3,
+                    language: None,
+                })
+                .expect("accepted");
+            let deadline = Instant::now() + std::time::Duration::from_secs(5);
+            let places = loop {
+                if let Some(places) = geocode.take_places(request) {
+                    break places;
+                }
+                assert!(Instant::now() < deadline, "{plugin}: no answer");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert_eq!(places.len(), 1);
+            assert_eq!(places[0].label, "Amsterdam");
+        }
+    }
+
+    #[test]
+    fn paths_of_picker_rows_become_read_only_picked_scopes() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let pictures = scratch.path().join("Pictures");
+        std::fs::create_dir_all(&pictures).expect("picture folder");
+        std::fs::write(pictures.join("cat.png"), b"png").expect("picture");
+        let services = SceneImportServices::new(
+            &scratch.path().join("data"),
+            StorageContext::default(),
+            Arc::new(NullLogSink),
+            SceneBackendInputs::default(),
+        );
+        let engine = engine();
+        let compiled = engine.compile(&EMPTY_COMPONENT).expect("component");
+        // Row 1 is relative: left out, and row 2 keeps its index.
+        let picked = vec![
+            pictures.clone(),
+            PathBuf::from("Pictures"),
+            pictures.join("cat.png"),
+        ];
+        let equip_with = |granted: &[&str]| {
+            let granted: Vec<String> = granted.iter().map(|grant| (*grant).to_owned()).collect();
+            services.equip(
+                &SceneInstanceRequest {
+                    plugin: "test.images",
+                    granted: &granted,
+                    manifest: &Value::Null,
+                    observer: None,
+                    picked: &picked,
+                },
+                &engine,
+                &compiled,
+                &ResolvedLimits(Default::default()),
+            )
+        };
+        let equipped = equip_with(&["fs.read:picked"]);
+        assert_eq!(
+            equipped.background.lent_picks.keys().collect::<Vec<_>>(),
+            vec!["picked/0", "picked/2"]
+        );
+        let mut imports = equipped.imports;
+        let fs = imports.fs.as_mut().expect("fs linked");
+        let listed: Vec<String> = fs
+            .list_dir(path("picked/0", ""), 16)
+            .expect("folder listed")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert_eq!(listed, vec!["cat.png".to_owned()]);
+        assert_eq!(
+            fs.read(path("picked/2", ""), 0, 1024)
+                .expect("picked file read"),
+            b"png".to_vec()
+        );
+        assert!(fs
+            .write(path("picked/0", "cat.png"), Vec::new(), WriteMode::Replace)
+            .is_err());
+        let mut refused = equip_with(&["fs.read:cache"]).imports;
+        let fs = refused.fs.as_mut().expect("fs linked");
+        assert!(fs.read(path("picked/0", "cat.png"), 0, 1024).is_err());
     }
 
     #[test]

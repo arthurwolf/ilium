@@ -73,10 +73,12 @@ use crate::wasm_guest::WasmGuest;
 
 pub mod cli;
 pub mod cross_side;
+pub mod detectors;
 pub mod durable_timers;
 pub mod events_feed;
 mod hooks;
 mod jobs;
+pub mod kernel_calls;
 pub(crate) use jobs::{declared_jobs, job_error_of};
 pub mod pending_events;
 #[cfg(test)]
@@ -1189,16 +1191,7 @@ impl HostRuntime {
         let mut failures = Vec::new();
         let pending = lock(&self.services).take_pending();
         for call in pending {
-            let provider = self
-                .plugins
-                .iter()
-                .find(|(_, record)| {
-                    crate::imports::services::provided_services(&record.manifest)
-                        .iter()
-                        .any(|name| *name == call.service)
-                })
-                .map(|(plugin, _)| plugin.clone());
-            let Some(provider) = provider else {
+            let Some(provider) = self.service_provider(&call.service) else {
                 lock(&self.services).fail(
                     &call,
                     PluginError::new(ErrorCode::NotFound, "no plugin provides that service"),

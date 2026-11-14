@@ -9,13 +9,17 @@
   "scene": {
     "entry": "scene.wasm",
     "world": "ilium:anim/base@0.1.0",
-    "exports": []
+    "exports": [
+      "handler"
+    ]
   },
   "capabilities": {
     "scene": [
       "media.video",
       "location.observer",
       "gpu.kernels",
+      "audio.capture",
+      "audio.loopback",
       "http:services.swpc.noaa.gov",
       "http:lichess.org",
       "http:earthquake.usgs.gov",
@@ -7100,6 +7104,447 @@
               "title": "Colour tint",
               "help": "Tint each cell with the satellite's own colours (true colour where the source has them) instead of one ink colour.",
               "default": false
+            }
+          }
+        }
+      },
+      {
+        "id": "spectrum",
+        "title": "Audio spectrum",
+        "family": "media",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string",
+              "order": 0,
+              "title": "Audio source",
+              "help": "System output shows what is playing right now. On Windows and macOS it uses loopback capture; older macOS needs a virtual device such as BlackHole (use Named device).",
+              "enum": [
+                "system_output",
+                "microphone",
+                "named_device"
+              ],
+              "enum_titles": [
+                "System output (loopback)",
+                "Default microphone / input",
+                "Named device"
+              ],
+              "default": "system_output"
+            },
+            "device_name": {
+              "type": "string",
+              "order": 1,
+              "title": "Device name",
+              "help": "Linux: a PulseAudio/PipeWire source name (see `pactl list short sources`, add .monitor for an output). Windows/macOS: part of the device name.",
+              "default": "",
+              "visible_when": {
+                "key": "input",
+                "in": [
+                  "named_device"
+                ]
+              }
+            },
+            "style": {
+              "type": "string",
+              "order": 2,
+              "title": "Style",
+              "help": "Bars, mirrored bars, a thin spectrum line, a filled area, the raw waveform, a radial spectrum, a scrolling spectrogram, or bass-pulse rings.",
+              "enum": [
+                "bars",
+                "mirrored_bars",
+                "line",
+                "area",
+                "waveform",
+                "radial",
+                "spectrogram",
+                "pulse_rings"
+              ],
+              "enum_titles": [
+                "Bars",
+                "Mirrored bars",
+                "Spectrum line",
+                "Filled area",
+                "Waveform (oscilloscope)",
+                "Radial",
+                "Spectrogram",
+                "Pulse rings"
+              ],
+              "default": "bars"
+            },
+            "orientation": {
+              "type": "string",
+              "order": 3,
+              "title": "Orientation",
+              "help": "The edge the spectrum grows from.",
+              "enum": [
+                "bottom_up",
+                "top_down",
+                "left_to_right",
+                "right_to_left"
+              ],
+              "enum_titles": [
+                "Bottom up",
+                "Top down",
+                "Left to right",
+                "Right to left"
+              ],
+              "default": "bottom_up",
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "waveform",
+                  "spectrogram"
+                ]
+              }
+            },
+            "color_mode": {
+              "type": "string",
+              "order": 4,
+              "title": "Colors",
+              "help": "Mono uses the global ink color. Rainbow colors by frequency, Heat and Blue-white by height or intensity.",
+              "enum": [
+                "mono",
+                "rainbow",
+                "heat",
+                "ice"
+              ],
+              "enum_titles": [
+                "Mono ink",
+                "Rainbow",
+                "Heat",
+                "Blue-white"
+              ],
+              "default": "mono"
+            },
+            "band_scale": {
+              "type": "string",
+              "order": 5,
+              "title": "Frequency scale",
+              "help": "Spacing of the bands: logarithmic matches music, mel matches hearing, linear shows treble in detail.",
+              "enum": [
+                "log",
+                "mel",
+                "linear"
+              ],
+              "enum_titles": [
+                "Logarithmic",
+                "Mel",
+                "Linear"
+              ],
+              "default": "log",
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "bands": {
+              "type": "integer",
+              "order": 6,
+              "title": "Bands",
+              "help": "Number of frequency bands analysed.",
+              "minimum": 8,
+              "maximum": 128,
+              "step": 4,
+              "default": 48,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "min_frequency": {
+              "type": "integer",
+              "order": 7,
+              "title": "Lowest frequency",
+              "help": "Left edge of the spectrum.",
+              "minimum": 20,
+              "maximum": 1000,
+              "step": 10,
+              "unit": " Hz",
+              "default": 40,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "max_frequency": {
+              "type": "integer",
+              "order": 8,
+              "title": "Highest frequency",
+              "help": "Right edge of the spectrum.",
+              "minimum": 2000,
+              "maximum": 20000,
+              "step": 500,
+              "unit": " Hz",
+              "default": 16000,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "fft_size": {
+              "type": "string",
+              "order": 9,
+              "title": "FFT size",
+              "help": "Longer windows resolve low notes better but react a little slower.",
+              "enum": [
+                "2048",
+                "4096"
+              ],
+              "enum_titles": [
+                "2048 (quicker response)",
+                "4096 (finer bass)"
+              ],
+              "default": "2048",
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "tilt": {
+              "type": "integer",
+              "order": 10,
+              "title": "Treble boost",
+              "help": "Compensates the natural roll-off of music so treble is visible.",
+              "minimum": 0,
+              "maximum": 6,
+              "step": 1,
+              "unit": " dB/oct",
+              "default": 3,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "auto_gain": {
+              "type": "boolean",
+              "order": 11,
+              "title": "Auto gain",
+              "help": "Follow the loudness so the display always fills the height. When on, only the span between floor and ceiling is used.",
+              "default": true
+            },
+            "floor_db": {
+              "type": "integer",
+              "order": 12,
+              "title": "Floor",
+              "help": "Level shown as zero height.",
+              "minimum": -100,
+              "maximum": -30,
+              "step": 5,
+              "unit": " dB",
+              "default": -60,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "ceiling_db": {
+              "type": "integer",
+              "order": 13,
+              "title": "Ceiling",
+              "help": "Level shown as full height (fixed gain only).",
+              "minimum": -30,
+              "maximum": 0,
+              "step": 2,
+              "unit": " dB",
+              "default": -10,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram",
+                  "pulse_rings"
+                ]
+              }
+            },
+            "sensitivity": {
+              "type": "integer",
+              "order": 14,
+              "title": "Sensitivity",
+              "help": "Multiplies the displayed height.",
+              "minimum": 25,
+              "maximum": 400,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "smoothing": {
+              "type": "integer",
+              "order": 15,
+              "title": "Smoothing",
+              "help": "How slowly bars fall back and how long peaks are held.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 60
+            },
+            "peak_hold": {
+              "type": "boolean",
+              "order": 16,
+              "title": "Peak markers",
+              "help": "Show a marker that rests at recent peaks, then falls.",
+              "default": true,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial"
+                ]
+              }
+            },
+            "mirror": {
+              "type": "boolean",
+              "order": 17,
+              "title": "Mirror",
+              "help": "Mirror the spectrum around the middle, with the bass at the centre.",
+              "default": false,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars",
+                  "line",
+                  "area",
+                  "radial",
+                  "spectrogram"
+                ]
+              }
+            },
+            "bar_width": {
+              "type": "integer",
+              "order": 18,
+              "title": "Bar width",
+              "help": "Width of each bar in Braille dots; 0 fits one bar per band.",
+              "minimum": 0,
+              "maximum": 8,
+              "step": 1,
+              "unit": " dots",
+              "default": 0,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars"
+                ]
+              }
+            },
+            "bar_gap": {
+              "type": "integer",
+              "order": 19,
+              "title": "Bar gap",
+              "help": "Space between bars.",
+              "minimum": 0,
+              "maximum": 4,
+              "step": 1,
+              "unit": " dots",
+              "default": 1,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "bars",
+                  "mirrored_bars"
+                ]
+              }
+            },
+            "spectrogram_speed": {
+              "type": "integer",
+              "order": 20,
+              "title": "Scroll speed",
+              "help": "How fast the spectrogram scrolls.",
+              "minimum": 10,
+              "maximum": 60,
+              "step": 5,
+              "unit": " dots/s",
+              "default": 30,
+              "visible_when": {
+                "key": "style",
+                "in": [
+                  "spectrogram"
+                ]
+              }
+            },
+            "refresh_rate": {
+              "type": "integer",
+              "order": 21,
+              "title": "Refresh rate",
+              "help": "Redraws per second. Higher is smoother and costs more CPU.",
+              "minimum": 10,
+              "maximum": 30,
+              "step": 2,
+              "unit": " fps",
+              "default": 24
             }
           }
         }

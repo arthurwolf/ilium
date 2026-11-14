@@ -256,6 +256,12 @@
                 "default": "dots-studio/dots-3-note-preview:free",
                 "kernel_tab": "inference",
                 "kernel_key": "kilo_gateway.model"
+              },
+              {
+                "type": "info",
+                "id": "kilo_privacy",
+                "title": "Privacy",
+                "text": "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training."
               }
             ]
           },
@@ -300,6 +306,7 @@
                 "key": "openai_api_key",
                 "title": "API key",
                 "default": "",
+                "secret": true,
                 "kernel_tab": "inference",
                 "kernel_key": "openai.api_key"
               },
@@ -331,6 +338,7 @@
                 "key": "anthropic_api_key",
                 "title": "API key",
                 "default": "",
+                "secret": true,
                 "kernel_tab": "inference",
                 "kernel_key": "anthropic.api_key"
               },
@@ -354,6 +362,7 @@
                 "key": "openrouter_api_key",
                 "title": "API key",
                 "default": "",
+                "secret": true,
                 "kernel_tab": "inference",
                 "kernel_key": "openrouter.api_key"
               },

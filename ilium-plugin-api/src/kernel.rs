@@ -200,6 +200,14 @@ pub trait AgentRead: Send + Sync {
         let _ = pane;
         None
     }
+
+    /// The prompt epoch of a terminal pane: how many submitted prompts the kernel recorded
+    /// for it, starting at 0 (capability-agent-read-prompts.md). `None` for a node that is not
+    /// a live terminal pane, or where this process does not record prompts.
+    fn prompt_epoch(&self, pane: NodeId) -> Option<u64> {
+        let _ = pane;
+        None
+    }
 }
 
 /// Session snapshots (`ilium:host/sessions`).

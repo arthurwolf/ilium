@@ -349,6 +349,8 @@ fn export_name(call: &ExportCall) -> &'static str {
         ExportCall::MenuItems(_) => "menu-items",
         ExportCall::ListVirtualChildren { .. } => "list-virtual-children",
         ExportCall::ServiceHandle(_) => "service-handle",
+        ExportCall::DetectorIdentifyTree(_) => "identify-tree",
+        ExportCall::DetectorClassifyScreen(_) => "classify-screen",
     }
 }
 
@@ -466,7 +468,8 @@ impl ExtWorld {
     pub fn uninstall(&mut self, plugin: &str) {
         if self.plugins.contains_key(plugin) {
             self.remove_plugin(plugin);
-            self.audit.push(audit_record(self.clock_ms, plugin, "uninstall"));
+            self.audit
+                .push(audit_record(self.clock_ms, plugin, "uninstall"));
         }
     }
 
@@ -482,7 +485,9 @@ impl ExtWorld {
 
     /// Whether a plugin is enabled.
     pub fn plugin_enabled(&self, plugin: &str) -> bool {
-        self.plugins.get(plugin).is_some_and(|record| record.enabled)
+        self.plugins
+            .get(plugin)
+            .is_some_and(|record| record.enabled)
     }
 
     /// Whether a plugin is installed.
@@ -555,7 +560,8 @@ impl ExtWorld {
         self.admit_hook_call()?;
         let payload: Value = serde_json::from_str(payload_json).unwrap_or(Value::Null);
         self.last_initial = payload.clone();
-        self.last_payloads.insert(point.to_string(), payload.clone());
+        self.last_payloads
+            .insert(point.to_string(), payload.clone());
         for entry in self.entries.iter().filter(|entry| entry.point == point) {
             if let Some(record) = self.plugins.get_mut(&entry.plugin) {
                 record.last_seen = payload.clone();
@@ -588,9 +594,7 @@ impl ExtWorld {
 
     /// The `request-completed` outcome delivered to `caller`.
     pub fn outcome(&self, caller: &str, request: RequestId) -> Option<Outcome> {
-        self.outcomes
-            .get(&(caller.to_string(), request.0))
-            .cloned()
+        self.outcomes.get(&(caller.to_string(), request.0)).cloned()
     }
 
     /// `extensions.take-reply`.
@@ -885,8 +889,10 @@ impl ExtWorld {
             .services
             .call(caller, service, payload_json.as_bytes().to_vec())?;
         let key = (caller.to_string(), id.0);
-        self.replies
-            .insert(key.clone(), Ok(String::from_utf8_lossy(&reply).into_owned()));
+        self.replies.insert(
+            key.clone(),
+            Ok(String::from_utf8_lossy(&reply).into_owned()),
+        );
         self.outcomes.insert(key, Outcome::Ok);
         Ok(id)
     }
@@ -977,8 +983,10 @@ impl ExtWorld {
                 format!("commands.set-state: {plugin} is not installed"),
             ));
         }
-        self.command_states
-            .insert((plugin.to_string(), command.to_string()), (enabled, checked));
+        self.command_states.insert(
+            (plugin.to_string(), command.to_string()),
+            (enabled, checked),
+        );
         Ok(())
     }
 
@@ -1108,7 +1116,9 @@ impl ExtWorld {
     pub fn fill_queue_with_never_dropped_events(&mut self, plugin: &str) {
         if let Some(record) = self.plugins.get_mut(plugin) {
             while record.queue.len() < QUEUE_CAPACITY {
-                record.queue.push_back(QueuedEvent::new("never-dropped", true));
+                record
+                    .queue
+                    .push_back(QueuedEvent::new("never-dropped", true));
             }
         }
     }
@@ -1117,7 +1127,9 @@ impl ExtWorld {
     pub fn fill_queue_with_drop_oldest_events(&mut self, plugin: &str) {
         if let Some(record) = self.plugins.get_mut(plugin) {
             while record.queue.len() < QUEUE_CAPACITY {
-                record.queue.push_back(QueuedEvent::new("drop-oldest", false));
+                record
+                    .queue
+                    .push_back(QueuedEvent::new("drop-oldest", false));
             }
         }
     }
@@ -1180,7 +1192,9 @@ impl ExtWorld {
 
     /// Whether a plugin declares a grant.
     pub fn declares(&self, plugin: &str, grant: &str) -> bool {
-        self.granted(plugin).iter().any(|item| item.as_str() == grant)
+        self.granted(plugin)
+            .iter()
+            .any(|item| item.as_str() == grant)
     }
 
     /// The contributions of a plugin.
@@ -1207,7 +1221,11 @@ impl ExtWorld {
         self.plugins
             .iter()
             .map(|(id, record)| {
-                let state = if record.enabled { "enabled" } else { "disabled" };
+                let state = if record.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
                 let activity = if record.active { "active" } else { "inactive" };
                 format!("{id} {state} {activity}")
             })
@@ -1596,9 +1614,9 @@ impl ExtWorld {
     }
 
     fn entry_of(&self, plugin: &str, point: &str, extension: &str) -> Option<&EntryRecord> {
-        self.entries
-            .iter()
-            .find(|entry| entry.plugin == plugin && entry.point == point && entry.extension == extension)
+        self.entries.iter().find(|entry| {
+            entry.plugin == plugin && entry.point == point && entry.extension == extension
+        })
     }
 
     fn manifest_strings(&self, plugin: &str, key: &str) -> Vec<String> {
@@ -1641,7 +1659,10 @@ impl ExtWorld {
                         .get("dynamic")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
-                    risk: point.get("risk").and_then(Value::as_str).map(str::to_string),
+                    risk: point
+                        .get("risk")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     deadline_ms: json_u32(point.get("deadline_ms")),
                     max_handlers: json_u32(point.get("max_handlers")),
                 });
@@ -1656,8 +1677,10 @@ impl ExtWorld {
                     point: json_str(item.get("point")),
                     plugin: plugin_id.clone(),
                     extension: json_str(item.get("id")),
-                    priority: u8::try_from(item.get("priority").and_then(Value::as_u64).unwrap_or(0))
-                        .unwrap_or(u8::MAX),
+                    priority: u8::try_from(
+                        item.get("priority").and_then(Value::as_u64).unwrap_or(0),
+                    )
+                    .unwrap_or(u8::MAX),
                     entry_json: item
                         .get("entry")
                         .and_then(Value::as_str)

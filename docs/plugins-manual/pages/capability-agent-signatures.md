@@ -46,12 +46,14 @@ Each `SignatureAction` has `id`, `keys` and `allowed_when`. The `allowed_when` l
 
 ## The detector export
 
-The `detector` export has two functions. The kernel calls them off the keystroke path.
+The `detector` export has four functions. The kernel calls them off the keystroke path.
 
 | Function | Input | Output | When the kernel calls it |
 |---|---|---|---|
 | `identify` | `list<detector-process>`, each with `name` and `argv` | The local signature id, or none | For each pane that has no identified signature, on every detection tick. |
 | `classify` | The signature id and a `detector-screen` (`columns`, `rows`, `cursor-row`, `title`, `revision`) | `classification`: `activity`, `objective`, `goal` | When the screen `revision` of an identified pane changes. |
+| `identify-tree` | `list<detector-tree-process>`: the pane's process tree with `pid`, `parent-pid`, `depth`, start time, `name` and `argv` | `identified-agent` (`signature`, `pid` of a process of that tree), or none | For a pane whose tree the kernel asks a detector to name. A `pid` outside the given tree is ignored. |
+| `classify-screen` | `screen-request`: `pane`, screen `generation`, `signature`, the screen `text`, the `cursor` cell and the `dimmed` cells | `screen-verdict`: turn, matching evidence and line, goal state with its rule and pattern, fresh-screen flag, interstitial response, prompt readiness; or none | When the screen generation of an identified pane changes. A verdict that names another pane, generation or signature is dropped. An interstitial response is sent to the pane only from a T1 detector. |
 
 The `activity` values are `none`, `working`, `idle`, `awaiting-approval`, `done` and `menu`. Before a pane is identified its activity is `none`. The `classify` function must be pure. It reads the snapshot it receives and returns a value, with no file or network access. Each export call has a 20 ms deadline. A missed deadline keeps the previous classification, emits no event and logs a warning. See [Detection loop](#detection-loop).
 
@@ -88,6 +90,7 @@ The Rust plugin implements the detector and the two required exports, `Lifecycle
 **Rust**
 
 ```rust
+use ilium_plugin_sdk::exports::{DetectorTreeProcess, IdentifiedAgent, ScreenRequest, ScreenVerdict};
 use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::exports::{Detector, Handler, Lifecycle};
 use ilium_plugin_sdk::types::tree::AgentActivity;
@@ -125,6 +128,14 @@ impl Detector for ExampleSignatures {
             }
         }
         Classification { activity, objective, goal: None }
+    }
+
+    fn identify_tree(&mut self, _processes: Vec<DetectorTreeProcess>) -> Option<IdentifiedAgent> {
+        None // `identify` above is enough for this example.
+    }
+
+    fn classify_screen(&mut self, _screen: ScreenRequest) -> Option<ScreenVerdict> {
+        None // The pane keeps the activity `classify` gave it.
     }
 }
 ```
@@ -284,7 +295,7 @@ The poll loop that walks processes and captures screens stays native in the serv
 - **Where.** The loop posts detector calls to the plugin executor of the server, never to the loop thread. A call is asynchronous: the loop does not wait, and it applies the result at its next tick.
 - **One call per pane.** `identify` takes one pane's process list and `classify` takes one pane's screen, so the loop makes one call per pane. It never batches panes into one call.
 - **Parallel across plugins, serial inside one.** Calls to one plugin run one after the other, as for every export. Calls to different plugins run in parallel on different executor threads.
-- **Order between detectors.** For an unidentified pane the loop asks the detectors in this order: bundled (T1) plugins first, then the others by plugin id. The first detector that returns a signature id wins, and the later ones are not asked for that pane. A pane that is identified is classified only by the detector whose signature identified it.
+- **Order between detectors.** For an unidentified pane the loop asks the detectors in this order: bundled (T1) plugins first, then the others by plugin id. The first detector that returns a signature id wins, and the later ones are not asked for that pane. A pane that is identified is classified only by the detector whose signature identified it. While the kernel's built-in table identifies the pane, `classify-screen` asks the detectors in the same order and the first verdict wins.
 - **Per-poll budget.** One poll cycle may spend at most **50 ms** of detector call time in total. The loop starts the cycle at a rotating pane, so every pane gets its turn. When the budget is spent, the remaining panes keep their last activity and are first in line in the next cycle.
 - **Slow detector.** The deadline of a call is soft (20 ms by default, key `detector_deadline_ms`, ceiling 50 ms for T1). A call that misses it keeps the previous classification, emits no event and is counted as a breach. The third breach in a row traps the plugin side, which counts as a failure. A slow detector can use the poll budget of one cycle, but it cannot delay another plugin's detector or the loop.
 - **Expected cost.** With 30 panes and a detector that takes 0.5 ms per pane (benchmark B8), a full cycle costs 15 ms of executor time. A cycle in which only screens that changed are classified costs less.

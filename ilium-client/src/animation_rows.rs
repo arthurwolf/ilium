@@ -713,7 +713,6 @@ impl AnimationRow {
             // dusk, Machine screen, Hex expedition, Stars overhead, Earth at night) keep the
             // topic numbers they had.
             Self::Scene(AnimationKind::Video) => "AN-15".to_owned(),
-            Self::Scene(AnimationKind::Spectrum) => "AN-16".to_owned(),
             Self::Scene(AnimationKind::Images) => "AN-17".to_owned(),
             Self::Scene(AnimationKind::PluginScene) => "AN-24".to_owned(),
             Self::Scene(kind) => {

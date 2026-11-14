@@ -4,7 +4,11 @@
 //! A scene declares only what is specific to it (CLAUDE.md, "Scene settings are only what is
 //! specific to the scene"): an `integer` or `number` property becomes a slider, a `boolean` a
 //! toggle, a `string` with `enum` a choice (`enum_titles` are the labels) and any other
-//! `string` a free text row. `title`, `help` (or `description`), `minimum`, `maximum`, `step`,
+//! `string` a free text row. A free text `string` with the `picker` keyword (`"file"` or
+//! `"directory"`) holds a path the user chose (a leading `~/` is the home folder); the `n`-th such
+//! row in row order is lent to the scene as the read-only `fs` scope `picked/<n>`, opened by
+//! `fs.read:picked` ([`SceneControlSchema::picked_paths`]). `title`, `help` (or `description`),
+//! `minimum`, `maximum`, `step`,
 //! `unit`, `default` and `order` shape the row; `visible_when` (`{"key": <choice property>,
 //! "in": [<enum string>, ...]}`) shows the row only while that choice has one of those values; properties without an `order` follow the
 //! ordered ones, alphabetically. The edited values live in the project settings
@@ -14,9 +18,13 @@
 use ilium_ambient::control::{Control, ControlValue};
 use ilium_ambient::external::{intern, SceneValues};
 use serde_json::{json, Map, Value};
+use std::path::{Path, PathBuf};
 
 /// Properties a scene may declare, at most; a manifest with more is cut here.
 const MAXIMUM_ROWS: usize = 64;
+
+/// The `picker` values of a `string` property that holds a path lent to the scene.
+const PICKER_KINDS: [&str; 2] = ["file", "directory"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RowKind {
@@ -48,6 +56,8 @@ struct Row {
     kind: RowKind,
     /// Shown only while the choice row `key` has one of the `enum` strings `values`.
     visible_when: Option<(String, Vec<String>)>,
+    /// A text row with the `picker` keyword: its path is lent to the scene as `picked/<n>`.
+    picker: bool,
 }
 
 /// The rows of one scene.
@@ -176,12 +186,18 @@ impl SceneControlSchema {
                 .collect();
             Some((controlling, values))
         });
+        let picker = matches!(kind, RowKind::Text { .. })
+            && property
+                .get("picker")
+                .and_then(Value::as_str)
+                .is_some_and(|picker| PICKER_KINDS.contains(&picker));
         Some(Row {
             key: key.to_owned(),
             label,
             help,
             kind,
             visible_when,
+            picker,
         })
     }
 
@@ -280,7 +296,12 @@ impl SceneControlSchema {
                         Control::choice(id, label, index, &options, help)
                     }
                     (RowKind::Text { .. }, ControlValue::Text(text)) => {
-                        Control::text(id, label, &text, "text", help)
+                        let hint = if row.picker {
+                            "folder or file path"
+                        } else {
+                            "text"
+                        };
+                        Control::text(id, label, &text, hint, help)
                     }
                     // `effective` returns the value kind of the row.
                     _ => Control::toggle(id, label, false, help),
@@ -349,6 +370,33 @@ impl SceneControlSchema {
             settings.insert(row.key.clone(), value);
         }
         Value::Object(settings)
+    }
+
+    /// The paths of the `picker` rows, one per row in row order (path `n` is lent as the scope
+    /// `picked/<n>`), with a leading `~/` expanded to `home`. A row that is empty, relative, or
+    /// starts with `~` while `home` is unknown keeps its slot as an empty path, which the host
+    /// leaves closed; a path that does not exist stays closed too.
+    pub(crate) fn picked_paths(&self, values: &SceneValues, home: Option<&Path>) -> Vec<PathBuf> {
+        self.rows
+            .iter()
+            .filter(|row| row.picker)
+            .map(|row| {
+                let ControlValue::Text(text) = Self::effective(row, values) else {
+                    return PathBuf::new();
+                };
+                let text = text.trim();
+                let expanded = match (text.strip_prefix("~/"), home) {
+                    (Some(rest), Some(home)) => Some(home.join(rest)),
+                    (None, Some(home)) if text == "~" => Some(home.to_path_buf()),
+                    (Some(_), None) => None,
+                    (None, None) if text == "~" => None,
+                    (None, _) => Some(PathBuf::from(text)),
+                };
+                expanded
+                    .filter(|path| path.is_absolute())
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 }
 
@@ -466,5 +514,70 @@ mod tests {
         assert_eq!(ids(&values), ["mode", "depth"]);
         assert_eq!(schema.settings_json(&values)["orphan"], json!(false));
         assert_eq!(schema.settings_json(&values)["depth"], json!(3));
+    }
+
+    #[test]
+    fn picker_rows_lend_their_paths_in_row_order() {
+        let schema = SceneControlSchema::from_schema(&json!({
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "picker": "directory", "order": 1},
+                "file": {"type": "string", "picker": "file", "order": 2},
+                "relative": {"type": "string", "picker": "directory", "order": 3},
+                "label": {"type": "string", "order": 4},
+                "odd": {"type": "string", "picker": "socket", "order": 5}
+            }
+        }));
+        let mut values = SceneValues::new();
+        for (key, text) in [
+            ("folder", "~/Pictures"),
+            ("file", "/srv/one.jpg"),
+            ("relative", "Pictures"),
+            ("label", "/not/a/picker/row"),
+            ("odd", "/not/a/picker/either"),
+        ] {
+            schema
+                .set_control(&mut values, key, ControlValue::Text(text.to_owned()))
+                .unwrap();
+        }
+        let home = PathBuf::from("/home/someone");
+        // The relative row keeps its slot (index 2) as an empty path.
+        assert_eq!(
+            schema.picked_paths(&values, Some(&home)),
+            vec![
+                PathBuf::from("/home/someone/Pictures"),
+                PathBuf::from("/srv/one.jpg"),
+                PathBuf::new(),
+            ]
+        );
+        // Without a home folder a `~/` path stays closed but keeps index 0.
+        assert_eq!(
+            schema.picked_paths(&values, None),
+            vec![
+                PathBuf::new(),
+                PathBuf::from("/srv/one.jpg"),
+                PathBuf::new()
+            ]
+        );
+        // The scene still receives the text as typed.
+        assert_eq!(schema.settings_json(&values)["folder"], json!("~/Pictures"));
+        let hints: Vec<&str> = schema
+            .controls(&values)
+            .iter()
+            .map(|row| match row.kind {
+                ilium_ambient::control::ControlKind::Text { hint } => hint,
+                _ => "",
+            })
+            .collect();
+        assert_eq!(
+            hints,
+            [
+                "folder or file path",
+                "folder or file path",
+                "folder or file path",
+                "text",
+                "text"
+            ]
+        );
     }
 }

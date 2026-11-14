@@ -703,7 +703,7 @@ mod tests {
         let mut app = App::new("budget-receipt-test".into(), project.path().to_path_buf());
         app.config_dir = Some(config.path().to_path_buf());
         app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Inference,
+            tab: SettingsTab::Appearance,
             selected_row: 2,
             scroll: 3,
             ..SettingsState::default()
@@ -739,7 +739,7 @@ mod tests {
         assert!(matches!(
             &app.mode,
             Mode::Settings(state)
-                if state.tab == SettingsTab::Inference
+                if state.tab == SettingsTab::Appearance
                     && state.selected_row == 2
                     && state.scroll == 3
         ));

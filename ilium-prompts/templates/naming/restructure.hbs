@@ -4,7 +4,7 @@ Organize terminals, agents, editors and boards by current work; title each item/
 Return one JSON object: "children" replaces the COMPLETE ordinary hierarchy; "animations" contains definitions and a required "project" pointer. Include every listed exact numeric id once, directly or nested; invent/duplicate/omit none.
 
 Every output node/container needs an "animation" definition-key string, even when disabled. Shapes (add that pointer):
-- pane: kind, id, title, short_title, icon, command_hint, optional recap
+- pane: kind, id, title, short_title, icon, command_hint
 - folder: kind, id, title, short_title, icon
 - group: kind, title, short_title, icon, children; new ordinary group, no id
 - existing_group: kind, id, children; existing name-fixed group, omit title/icon
@@ -20,7 +20,6 @@ Worktree rows marked kind="worktree", membership="immutable" and output="omit-wr
 
 Shell command_hint: identifiable running/last/output program plus one subcommand (git commit, cargo build, npm run) or essential flags (ps faux, ls -la), under20 characters; otherwise "". Exclude paths/arguments/quotes/commits/URLs/env/pipelines/redirections. No brackets or repetition in titles: Ilium prefixes it. Ignore prior [...] title prefixes. Other kinds: command_hint="".
 
-Recap: only for an item with <recap-evidence>, add "recap" to its pane: plain text, at most 40 words, saying what the agent is doing now, its goal, and any blocker or next step. Use only that evidence; never invent. Omit "recap" when the evidence is thin.
 {{#if entry_naming}}
 <custom-instructions purpose="entry_naming">
 {{entry_naming}}
@@ -76,9 +75,6 @@ Project and every-node pointers mandatory at either scope. Omit generation: clie
     <content>
 {{{content_extract}}}
     </content>
-    {{#if recap_evidence}}<recap-evidence>
-{{{recap_evidence}}}
-    </recap-evidence>{{/if}}
 </item>
 {{/each}}
 </items>

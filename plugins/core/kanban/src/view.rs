@@ -113,6 +113,21 @@ pub fn parse_column_key(key: &str) -> Option<usize> {
     key.strip_prefix(COLUMN_KEY_PREFIX)?.parse().ok()
 }
 
+/// The column a `dropped` action lands in: the list key `col-<index>` the host sends, or the
+/// long form `column-<index>`.
+pub fn parse_drop_column(key: &str) -> Option<usize> {
+    parse_column_key(key).or_else(|| key.strip_prefix("column-")?.parse().ok())
+}
+
+/// The card a drag carries: the item id `<column>.<card>` the host sends as `source-key`, or the
+/// long form `card-<column>-<card>`.
+pub fn parse_dragged_card(source: &str) -> Option<(usize, usize)> {
+    parse_card_id(source).or_else(|| {
+        let (column, card) = source.strip_prefix("card-")?.split_once('-')?;
+        Some((column.parse().ok()?, card.parse().ok()?))
+    })
+}
+
 fn span(text: impl Into<String>) -> Span {
     Span {
         text: text.into(),
@@ -500,6 +515,17 @@ mod tests {
         assert_eq!(parse_card_id("x.1"), None);
         assert_eq!(parse_column_key(&column_key(7)), Some(7));
         assert_eq!(parse_column_key("detail-title"), None);
+    }
+
+    #[test]
+    fn a_drop_names_its_column_and_card_in_the_short_or_the_long_form() {
+        assert_eq!(parse_drop_column("col-2"), Some(2));
+        assert_eq!(parse_drop_column("column-1"), Some(1));
+        assert_eq!(parse_drop_column("detail-body"), None);
+        assert_eq!(parse_dragged_card("0.3"), Some((0, 3)));
+        assert_eq!(parse_dragged_card("card-1-4"), Some((1, 4)));
+        assert_eq!(parse_dragged_card("card-x-4"), None);
+        assert_eq!(parse_dragged_card("column-1"), None);
     }
 
     #[test]

@@ -40,10 +40,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 let mut app = App::new("synthetic-ui-capture".to_owned(), fixture.clone());
                 app.config_dir = Some(fixture.clone());
                 app.set_screen_area(Rect::new(0, 0, width, height));
-                if tab == SettingsTab::Inference {
-                    app.inference_settings.selected_provider =
-                        ilium_inference::InferenceProviderKind::KiloGateway;
-                }
                 app.mode = ilium_client::app::Mode::Settings(SettingsState {
                     tab,
                     scroll,
@@ -70,7 +66,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     &path,
                     serde_json::to_vec(&json!({
                         "type": "artifact", "synthetic": true, "tab": format!("{tab:?}"),
-                        "provider": if tab == SettingsTab::Inference { Some("KiloGateway") } else { None },
                         "width": width, "height": height, "cells": cells, "requested_scroll": scroll,
                         "limitation": "Composed UI buffer; terminal font and live input are not tested",
                     }))?,
@@ -435,7 +430,7 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 configure_synthetic_terminals(&mut app, name, width, height)?;
             } else if name.starts_with("inference-") {
                 app.mode = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::Inference,
+                    tab: SettingsTab::Titles,
                     ..SettingsState::default()
                 });
                 // Always use an invented credential; never capture a real secret.

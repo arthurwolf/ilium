@@ -14,10 +14,12 @@
 
 mod cli_bridge;
 mod cross_session;
+pub(crate) mod detector_verdicts;
 mod facade;
 mod http_routes;
 pub(crate) mod pane_kinds;
 mod plugin_calls;
+mod prompt_epochs;
 mod remote;
 mod signatures;
 
@@ -34,6 +36,7 @@ use ilium_ipc::plugin::{
     OutcomeRecord, PluginEnvelope,
 };
 use ilium_ipc::ServerEvent;
+use ilium_plugin_api::generated::exports::detector::ScreenRequest;
 use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::MessageEvent;
 use ilium_plugin_api::generated::types::{
@@ -49,6 +52,7 @@ use ilium_plugin_host::imports::basic::BasicBackend;
 use ilium_plugin_host::imports::http_api::{HttpResponseSink, RoutedHttpApi};
 use ilium_plugin_host::lifecycle::StartMode;
 use ilium_plugin_host::runtime::cross_side::{RemoteMessage, REMOTE_ENVELOPE_PLUGIN};
+pub(crate) use ilium_plugin_host::runtime::kernel_calls::KernelCallError;
 use ilium_plugin_host::runtime::{
     CataloguePlugin, HostRuntime, ImportProvider, RuntimeConfig, RuntimeThread, ESSENTIAL_PLUGINS,
 };
@@ -318,6 +322,8 @@ pub(crate) struct PluginHostHandle {
     /// The runtime's journal, shared: client-side plugins write and read it through
     /// `ClientRequest::PluginCall` without a trip through the host thread.
     journal: ilium_plugin_host::imports::journal::JournalBook,
+    /// The detector plugins' cached screen verdicts the detection loop reads (HST-450).
+    detector_verdicts: Arc<detector_verdicts::DetectorVerdicts>,
 }
 
 /// The answer to a `PluginCall` when the server runs no plugin host.
@@ -480,6 +486,8 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
     facade.set_pane_kinds(Arc::clone(&pane_kinds));
     let catalogue = start.catalogue;
     let first = publisher.clone();
+    let detector_verdicts = Arc::new(detector_verdicts::DetectorVerdicts::default());
+    let first_detectors = Arc::clone(&detector_verdicts);
     // Loading compiles components; it runs on the host thread so `run()` is not held up.
     // In the slot before the first job runs, so a plugin can message itself while starting.
     let posted = runtime_slot.lock().ok().is_some_and(|mut slot| {
@@ -488,6 +496,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             log_errors("startup activation", runtime.activate_startup());
             log_errors("pump", runtime.pump());
             first.flush(runtime);
+            first_detectors.set_active(!runtime.detector_plugins().is_empty());
             tracing::info!(plugins = runtime.plugin_ids().len(), "plugin host started");
         })
     });
@@ -511,6 +520,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         pane_kinds,
         screen_changes: ScreenChanges::default(),
         journal,
+        detector_verdicts,
     }))
 }
 
@@ -530,14 +540,77 @@ impl PluginHostHandle {
     /// Queues work for the runtime and publishes what it changed. False when the host stopped.
     fn post(&self, job: impl FnOnce(&mut HostRuntime) + Send + 'static) -> bool {
         let publisher = self.publisher.clone();
+        let detectors = Arc::clone(&self.detector_verdicts);
         self.runtime.lock().ok().is_some_and(|slot| {
             slot.as_ref().is_some_and(|thread| {
                 thread.post(move |runtime| {
                     job(runtime);
                     publisher.flush(runtime);
+                    // A job can activate, disable or fail a detector plugin.
+                    detectors.set_active(!runtime.detector_plugins().is_empty());
                 })
             })
         })
+    }
+
+    /// Whether a detector plugin owns agent classification (capability-agent-signatures.md).
+    /// False means the kernel's built-in table classifies, as with no plugin host at all.
+    pub(crate) fn detectors_active(&self) -> bool {
+        self.detector_verdicts.is_active()
+    }
+
+    /// Hands one identified pane's screen to the detector plugins. Never waits: the screen is
+    /// queued and one coalesced runtime job runs `classify-screen` per pane (HST-450, HST-451).
+    pub(crate) fn request_screen_verdict(&self, screen: ScreenRequest) {
+        if !self.detector_verdicts.request(screen) {
+            return;
+        }
+        let verdicts = Arc::clone(&self.detector_verdicts);
+        let posted = self.post(move |runtime| loop {
+            let budget = verdicts.budget_left();
+            if budget.is_zero() {
+                // This tick spent its detector time; the next tick goes on (HST-453).
+                verdicts.end_cycle();
+                break;
+            }
+            let batch = verdicts.take_batch();
+            let budget_spent = !batch.is_empty() && {
+                let started = std::time::Instant::now();
+                let answered = runtime.classify_screens(batch, budget);
+                verdicts.spend(started.elapsed());
+                for failure in &answered.failures {
+                    tracing::warn!("detector classify-screen failed: {failure}");
+                }
+                verdicts.store(answered)
+            };
+            if budget_spent {
+                // The rest waits for the next detection tick (HST-453).
+                verdicts.end_cycle();
+                break;
+            }
+            if !verdicts.finish_round() {
+                break;
+            }
+        });
+        if !posted {
+            self.detector_verdicts.end_cycle();
+        }
+    }
+
+    /// The newest detector verdict of a pane for an agent signature; `None` is no sample.
+    pub(crate) fn screen_verdict(
+        &self,
+        pane: ilium_core::NodeId,
+        signature: &str,
+    ) -> Option<detector_verdicts::CachedVerdict> {
+        self.detector_verdicts.latest(pane.0, signature)
+    }
+
+    /// Starts one detection tick: the detector call budget is whole again (HST-453) and the
+    /// verdicts of panes that no longer exist are forgotten.
+    pub(crate) fn start_detection_cycle(&self, live: &std::collections::BTreeSet<u64>) {
+        self.detector_verdicts.start_cycle();
+        self.detector_verdicts.retain_panes(live);
     }
 
     /// True when at least one plugin registered an HTTP route.
@@ -628,25 +701,23 @@ impl PluginHostHandle {
         });
     }
 
-    /// Hands one `user-line-submitted` event to the plugins that hold `agent.read-prompts` and to
-    /// no other plugin: the line is what the user typed to an agent, so it is private to the
+    /// Records one prompt the kernel recorded for `pane` and hands its events to the plugins
+    /// that hold `agent.read-prompts` and to no other plugin: `input-submitted` with the new
+    /// prompt epoch when the pane runs an identified agent, then `user-line-submitted` when the
+    /// user typed it (EVT-040). The text is what was sent to an agent, so it is private to the
     /// plugins the user allowed to read prompts.
-    fn feed_user_line(&self, pane: ilium_core::NodeId, text: String) {
-        use ilium_plugin_api::generated::types::events::UserLineEvent;
+    fn feed_prompt(&self, pane: ilium_core::NodeId, text: String, has_agent: bool) {
         use ilium_plugin_api::generated::types::EpochMs;
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| {
                 u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
             });
-        let batch = vec![Event::UserLineSubmitted(UserLineEvent {
-            pane: NodeId(pane.0),
-            text,
-            at: EpochMs(at),
-        })];
+        let recorded = self.facade.record_prompt(NodeId(pane.0));
+        let batch = prompt_epochs::prompt_events(pane.0, text, recorded, has_agent, EpochMs(at));
         self.post(move |runtime| {
             log_errors(
-                "user-line-submitted delivery",
+                "prompt delivery",
                 runtime.broadcast_to_holders(&batch, &USER_LINE_GRANTS),
             );
             log_errors("pump", runtime.pump());
@@ -703,6 +774,48 @@ impl PluginHostHandle {
                 );
                 false
             }
+        }
+    }
+
+    /// Calls `method` of a plugin service for the kernel and waits up to `wait` for the
+    /// provider's immediate reply (key M3 of the workspace cuts). A kernel feature a plugin owns
+    /// asks it here and keeps its own behaviour when the error `is_unavailable` (no provider, or
+    /// the provider is disabled or stopped, or the host is stopping). The provider sees the
+    /// caller `ilium.kernel`; the intents it submitted while answering are routed before the
+    /// reply returns.
+    pub(crate) async fn call_service(
+        &self,
+        service: &str,
+        method: &str,
+        payload_json: String,
+        wait: Duration,
+    ) -> Result<String, KernelCallError> {
+        let (reply, result) = tokio::sync::oneshot::channel();
+        let service_name = service.to_owned();
+        let method_name = method.to_owned();
+        let posted = self.post(move |runtime| {
+            let (end, failures) =
+                runtime.call_service_as_kernel(&service_name, &method_name, &payload_json);
+            log_errors("kernel service call", failures);
+            log_errors("pump", runtime.pump());
+            let _ = reply.send(end);
+        });
+        if !posted {
+            return Err(KernelCallError::Unavailable(PluginError::new(
+                ErrorCode::Busy,
+                "the plugin host is stopping",
+            )));
+        }
+        match tokio::time::timeout(wait, result).await {
+            Ok(Ok(end)) => end,
+            Ok(Err(_)) => Err(KernelCallError::Unavailable(PluginError::new(
+                ErrorCode::Busy,
+                "the plugin host dropped the call",
+            ))),
+            Err(_) => Err(KernelCallError::Failed(PluginError::new(
+                ErrorCode::TimedOut,
+                format!("the provider did not answer within {wait:?}"),
+            ))),
         }
     }
 
@@ -1145,13 +1258,16 @@ pub(crate) fn spawn_feed(
                         batch.extend(node_events);
                         batch
                     }
-                    // The text of a line the user submitted to an agent reaches only the
-                    // plugins that hold `agent.read-prompts`; an emptied prompt is no line.
+                    // A recorded prompt moves the pane's prompt epoch; its text reaches only
+                    // the plugins that hold `agent.read-prompts`. An emptied prompt is none.
                     ServerEvent::PaneLastPromptChanged {
                         pane_id,
                         last_prompt: Some(text),
                     } => {
-                        host.feed_user_line(*pane_id, text.clone());
+                        let has_agent = views
+                            .get(&pane_id.0)
+                            .is_some_and(|view| view.agent.is_some());
+                        host.feed_prompt(*pane_id, text.clone(), has_agent);
                         Vec::new()
                     }
                     _ => Vec::new(),

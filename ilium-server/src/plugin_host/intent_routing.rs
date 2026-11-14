@@ -204,17 +204,11 @@ fn send_input_refusal(spec: &SendInputSpec) -> Option<Outcome> {
     if spec.mouse.is_some() {
         return Some(unsupported("send-input with mouse events"));
     }
-    if spec.if_current.is_some() {
-        return Some(unsupported("send-input with an if-current precondition"));
-    }
     if spec.lock_user_input {
         return Some(unsupported("send-input with lock-user-input"));
     }
     if spec.journal {
         return Some(unsupported("send-input with a journal entry"));
-    }
-    if spec.prompt_epoch.is_some() {
-        return Some(unsupported("send-input with a prompt epoch"));
     }
     if spec
         .raw
@@ -928,6 +922,9 @@ impl ServerFacade {
         if let Some(refusal) = send_input_refusal(&spec) {
             return refusal;
         }
+        if let Some(refusal) = self.input_state_refusal(&spec) {
+            return refusal;
+        }
         let pane_id = to_core(spec.pane);
         if let Some(raw) = spec.raw {
             return self.simple(ClientRequest::KeyInput {
@@ -937,9 +934,61 @@ impl ServerFacade {
             });
         }
         if spec.stages.is_empty() {
-            return self.simple(input_request(pane_id, spec.text, spec.delivery));
+            let submitted = spec.delivery == Delivery::Submitted;
+            let outcome = self.simple(input_request(pane_id, spec.text, spec.delivery));
+            if submitted && outcome == Outcome::Ok {
+                self.note_plugin_submission(spec.pane);
+            }
+            return outcome;
         }
-        self.send_stages(pane_id, spec.stages)
+        let submissions = spec
+            .stages
+            .iter()
+            .filter(|stage| stage.delivery == Delivery::Submitted)
+            .count();
+        let outcome = self.send_stages(pane_id, spec.stages);
+        if outcome == Outcome::Ok {
+            for _ in 0..submissions {
+                self.note_plugin_submission(spec.pane);
+            }
+        }
+        outcome
+    }
+
+    /// The `conflict` of a `send-input` whose `prompt-epoch` is stale or whose `if-current`
+    /// does not hold, checked in that order before any byte is written
+    /// (primitives-terminal-input.md). A stated epoch needs a live terminal pane.
+    fn input_state_refusal(&self, spec: &SendInputSpec) -> Option<Outcome> {
+        use crate::plugin_host::prompt_epochs::{precondition_failure, stale_epoch, PaneNow};
+        use ilium_plugin_api::generated::types::tree::AgentActivity;
+        use ilium_plugin_api::kernel::{PaneRead, TreeRead};
+        if spec.prompt_epoch.is_some() {
+            let Some(current) = self.current_prompt_epoch(spec.pane) else {
+                return Some(refused(
+                    ErrorCode::NotFound,
+                    "the pane is not a live terminal",
+                ));
+            };
+            if let Some(message) = stale_epoch(spec.prompt_epoch, current) {
+                return Some(refused(ErrorCode::Conflict, message));
+            }
+        }
+        let wanted = spec.if_current.as_ref()?;
+        let now = PaneNow {
+            activity: TreeRead::node(self, spec.pane)
+                .and_then(|node| node.agent)
+                .map_or(AgentActivity::None, |agent| agent.activity),
+            screen_revision: wanted
+                .screen_revision
+                .and_then(|_| PaneRead::screen_state(self, spec.pane))
+                .map(|state| state.revision),
+            foreground: wanted
+                .foreground
+                .as_ref()
+                .and_then(|_| PaneRead::foreground_process(self, spec.pane))
+                .map(|process| process.name),
+        };
+        precondition_failure(wanted, &now).map(|message| refused(ErrorCode::Conflict, message))
     }
 
     /// Writes the stages in order on the server's runtime, each after its delay. The intent
@@ -1592,6 +1641,19 @@ mod tests {
             ..base.clone()
         };
         assert!(send_input_refusal(&slow).is_some());
+        // The epoch and `if-current` are checked against the pane, not refused by shape.
+        let conditional = SendInputSpec {
+            prompt_epoch: Some(2),
+            if_current: Some(
+                ilium_plugin_api::generated::types::intents::InputPrecondition {
+                    activity: Some(ilium_plugin_api::generated::types::tree::AgentActivity::Idle),
+                    screen_revision: Some(7),
+                    foreground: Some("codex".to_owned()),
+                },
+            ),
+            ..base.clone()
+        };
+        assert!(send_input_refusal(&conditional).is_none());
         let locked = SendInputSpec {
             lock_user_input: true,
             ..base

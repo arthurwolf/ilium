@@ -15,7 +15,6 @@ fn context() -> LeafContext {
         filename: None,
         content_extract: "Working on Paris public transport maps".into(),
         automatic_content_fingerprint: 0,
-        recap_evidence: String::new(),
         agent_lookup: None,
     }
 }
@@ -29,13 +28,7 @@ fn semantic_contract_prompt_includes_every_concrete_animation() {
         .and_then(|(_, tail)| tail.split_once("</animation-catalog>"))
         .map(|(catalog, _)| catalog)
         .expect("every reorganization call includes the animation catalog");
-    for id in [
-        "video",
-        "spectrum",
-        "images",
-        "wikipedia",
-        "open_street_map",
-    ] {
+    for id in ["video", "images", "wikipedia", "open_street_map"] {
         assert!(
             catalog
                 .lines()
@@ -80,7 +73,7 @@ fn semantic_contract_rejects_invented_animation_instead_of_ignoring_it() {
 }
 
 fn valid_response() -> serde_json::Value {
-    serde_json::json!({"animations":{"definitions":[{"key":"map","recommendation":{"kind":"open_street_map","resources":"catalog","parameters":[{"id":"source","value":{"Index":0}},{"id":"place","value":{"Index":0}},{"id":"tour","value":{"Index":0}}]}},{"key":"snake","recommendation":{"kind":"spectrum","resources":"catalog","parameters":[{"id":"style","value":{"Index":1}}]}}],"project":"map"},"children":[{"kind":"group","title":"Paris work","animation":"map","children":[{"kind":"pane","id":1,"title":"Paris transport","animation":"snake"}]}]})
+    serde_json::json!({"animations":{"definitions":[{"key":"map","recommendation":{"kind":"open_street_map","resources":"catalog","parameters":[{"id":"source","value":{"Index":0}},{"id":"place","value":{"Index":0}},{"id":"tour","value":{"Index":0}}]}},{"key":"snake","recommendation":{"kind":"images","resources":"catalog","parameters":[{"id":"fit","value":{"Index":1}}]}}],"project":"map"},"children":[{"kind":"group","title":"Paris work","animation":"map","children":[{"kind":"pane","id":1,"title":"Paris transport","animation":"snake"}]}]})
 }
 fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructurePlan> {
     parse_restructure_response(
@@ -90,7 +83,6 @@ fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructu
         TitleStyle::Summarization,
         &RecommendationContext::default(),
     )
-    .map(|inference| inference.plan)
 }
 #[test]
 fn semantic_contract_resolves_project_group_and_leaf() {
@@ -103,7 +95,7 @@ fn semantic_contract_resolves_project_group_and_leaf() {
             .collect::<Vec<_>>(),
         vec![vec![0], vec![0, 0]]
     );
-    assert_eq!(plan.entries[1].recommendation.kind, "spectrum");
+    assert_eq!(plan.entries[1].recommendation.kind, "images");
     assert_eq!(plan.expected_animation_generation, 0);
 }
 #[test]
@@ -191,8 +183,7 @@ fn semantic_contract_preserves_fixed_groups_and_split_paths() {
         TitleStyle::Summarization,
         &context,
     )
-    .unwrap()
-    .plan;
+    .unwrap();
     assert_eq!(plan.expected_animation_generation, 7);
     assert_eq!(
         plan.entries

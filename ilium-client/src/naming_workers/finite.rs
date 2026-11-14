@@ -323,13 +323,12 @@ fn run_request(
                     }),
                 )
             });
-            let result = outcome.map(|inference| inference.plan);
             NamingWorkerEvent::Restructure(RestructureWorkerResult {
                 project_id,
                 title_observations,
                 inference_activity_revisions,
                 automatic_ai_decision: decision,
-                result,
+                result: outcome,
             })
         }
         #[cfg(test)]

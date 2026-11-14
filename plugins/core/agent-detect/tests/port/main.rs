@@ -12,5 +12,6 @@ mod detect_identity;
 mod detect_interstitial;
 mod kernel_ports;
 mod live_agent;
+mod screen_rules;
 mod status_chronology;
 mod tree_ui;

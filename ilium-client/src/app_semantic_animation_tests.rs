@@ -43,26 +43,34 @@ fn paris() -> AnimationRecommendation {
         ],
     )
 }
-/// The contrast value the recommendation `carpet(index)` selects.
+/// The motion strength the recommendation `carpet(index)` selects.
 fn contrast_for(index: usize) -> i32 {
     let mut settings = ilium_ambient::AmbientSettings::default();
     settings
         .set_control(
-            ilium_ambient::AmbientKind::Spectrum,
-            "sensitivity",
+            ilium_ambient::AmbientKind::Images,
+            "motion_strength",
             ControlValue::Number(contrast_value(index)),
         )
         .unwrap();
-    i32::try_from(settings.spectrum.sensitivity).unwrap_or(0)
+    i32::from(settings.images.motion_strength_percent)
 }
 fn contrast_value(index: usize) -> i32 {
-    100 + 10 * i32::try_from(index).unwrap_or(0)
+    10 + 5 * i32::try_from(index).unwrap_or(0)
 }
-/// A distinct Audio spectrum recommendation per `mode`, standing in for a scene with several looks.
+/// A distinct catalogue Images recommendation per `mode` (a slow zoom of the built-in picture
+/// at its own strength), standing in for a scene with several looks. The motion choice comes
+/// first, so a test can tamper with a choice label.
 fn carpet(mode: usize) -> AnimationRecommendation {
     recommendation(
-        AnimationKind::Spectrum,
-        vec![("sensitivity", ControlValue::Number(contrast_value(mode)))],
+        AnimationKind::Images,
+        vec![
+            ("motion", ControlValue::Index(0)),
+            (
+                "motion_strength",
+                ControlValue::Number(contrast_value(mode)),
+            ),
+        ],
     )
 }
 fn snapshot_recommendation(
@@ -200,8 +208,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(1)
     );
     fixture.app.select_node(fixture.group);
@@ -211,8 +219,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(0)
     );
     let mut virtual_path = fixture.app.path_to(fixture.group);
@@ -224,8 +232,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(0)
     );
     fixture.app.tree_state.select(Vec::new());
@@ -238,8 +246,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(5)
     );
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
@@ -277,8 +285,8 @@ fn semantic_cache_revalidates_snapshots_without_rebuilding_equivalent_hosts() {
             .last()
             .unwrap()
             .1
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(2)
     );
 }
@@ -454,8 +462,8 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .spectrum
-            .sensitivity as i32,
+            .images
+            .motion_strength_percent as i32,
         contrast_for(4)
     );
     let accepted = server_tree.clone();

@@ -237,9 +237,9 @@ pub fn live_status_evidence(
         None => {
             looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
         }
-        Some(AgentClass::Claude) => {
-            looks_like_live_status_line(screen_text).then_some(ActivityEvidence::ClaudeLiveStatus)
-        }
+        Some(AgentClass::Claude) => (looks_like_live_status_line(screen_text)
+            || claude_ascii_live_status_line(screen_text).is_some())
+        .then_some(ActivityEvidence::ClaudeLiveStatus),
         Some(AgentClass::Codex) => looks_like_codex_live_status_line(screen_text)
             .then_some(ActivityEvidence::CodexLiveStatus),
         Some(AgentClass::Antigravity | AgentClass::Other(_)) => None,
@@ -256,6 +256,11 @@ pub fn live_status_evidence(
 /// actually fired -- re-stating a predicate inline here is how the two copies
 /// drift apart.
 pub fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Option<String> {
+    if evidence == ActivityEvidence::ClaudeLiveStatus {
+        if let Some(line) = claude_ascii_live_status_line(screen_text) {
+            return Some(bounded_terminal_evidence(line));
+        }
+    }
     let line_matches_evidence: fn(&str) -> bool = match evidence {
         ActivityEvidence::InterruptMarker => is_interrupt_marker_line,
         ActivityEvidence::GenericLiveStatus | ActivityEvidence::ClaudeLiveStatus => {
@@ -431,7 +436,7 @@ pub fn is_agent_prompt_ready_at_cursor(
 /// because dialogs like this appear once, only at session (re)start, before
 /// any turn exists to classify. A new known dialog is a new entry in
 /// `INTERSTITIAL_PROMPTS`, not a new branch in an if/else chain -- same
-/// registry shape as the agent signature table.
+/// registry shape as `AgentSignature`.
 pub struct InterstitialPrompt {
     class: AgentClass,
     /// Every one of these substrings must appear in the bottom
@@ -667,7 +672,7 @@ impl GoalEvidenceRule {
         match self {
             Self::CodexFooterGoalSegment => "rightmost Codex goal segment in the status footer below its composer",
             Self::CodexMetadataFooterWithoutGoal => "Codex metadata footer below its composer contains no goal segment",
-            Self::ClaudeGoalIndicator => "Claude /goal active indicator directly above its composer",
+            Self::ClaudeGoalIndicator => "Claude /goal active indicator anchored to its composer",
             Self::ClaudePausedNotice => "newest current-turn Claude goal notice starts with Goal paused",
             Self::ClaudeAchievedNotice => "newest current-turn Claude goal notice starts with Goal achieved",
             Self::ClaudeFailedNotice => "newest current-turn Claude goal notice starts with Goal could not be achieved",
@@ -886,18 +891,18 @@ pub fn is_codex_metadata_footer(normalized_footer: &str) -> bool {
 pub const CLAUDE_TURN_END_SEARCH_ROWS: usize = 30;
 
 /// Claude Code renders `◎ /goal active (2m)` right-aligned on the indicator
-/// row directly above the composer's top rule for as long as a goal is set.
+/// row above the composer, or below its permission-mode footer, while set.
 /// That row cannot express any other phase, so the closing notices of the
 /// current turn — the rows between the indicator and the last user prompt —
 /// refine it: `Goal paused · <reason>` while the indicator persists, and
 /// `Goal achieved` / `Goal could not be achieved` / `Goal cleared` once it is
 /// gone.
 pub fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
-    let Some(indicator_index) = claude_indicator_row_index(lines) else {
+    let Some((indicator_index, notice_anchor)) = claude_indicator_row_index(lines) else {
         return goal_classification(GoalEvidence::Unknown, None, None, None);
     };
     let indicator = lines[indicator_index];
-    let turn_end = claude_turn_end_goal_notice(lines, indicator_index);
+    let turn_end = claude_turn_end_goal_notice(lines, notice_anchor);
     if claude_indicator_shows_goal(indicator) {
         return match turn_end {
             Some((ClaudeGoalNotice::Paused(goal_state), line)) => goal_classification(
@@ -947,12 +952,25 @@ pub fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
     }
 }
 
-/// The row immediately above the rule that tops the last `❯` composer.
-pub fn claude_indicator_row_index(lines: &[&str]) -> Option<usize> {
+/// Locate the status row without allowing conversation text to act as chrome.
+pub fn claude_indicator_row_index(lines: &[&str]) -> Option<(usize, usize)> {
     let composer_index = (2..lines.len()).rev().find(|&index| {
         lines[index].trim_start().starts_with('❯') && is_horizontal_rule(lines[index - 1])
     })?;
-    Some(composer_index - 2)
+    let notice_anchor = composer_index - 2;
+    if lines
+        .get(composer_index + 1)
+        .is_some_and(|line| is_horizontal_rule(line))
+        && lines
+            .get(composer_index + 2)
+            .is_some_and(|line| line.contains("shift+tab to cycle"))
+        && lines.get(composer_index + 3).is_some_and(|line| {
+            line.trim_start().starts_with('◎') && claude_indicator_shows_goal(line)
+        })
+    {
+        return Some((composer_index + 3, notice_anchor));
+    }
+    Some((notice_anchor, notice_anchor))
 }
 
 pub fn is_horizontal_rule(line: &str) -> bool {
@@ -1262,11 +1280,36 @@ pub fn is_live_status_line(line: &str) -> bool {
     let mut characters = line.trim().chars();
     if !characters
         .next()
-        .is_some_and(|character| matches!(character, '·' | '✢' | '✳' | '∗' | '✻' | '✽'))
+        .is_some_and(|character| matches!(character, '·' | '✢' | '✳' | '✶' | '∗' | '✻' | '✽'))
     {
         return false;
     }
-    let body = characters.as_str();
+    is_live_status_body(characters.as_str())
+}
+
+/// ASCII `*` is also a Markdown bullet, so accept it only at Claude's
+/// composer boundary instead of anywhere in the transcript.
+pub fn claude_ascii_live_status_line(screen_text: &str) -> Option<&str> {
+    let lines: Vec<&str> = screen_text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    // The composer's top rule is the last rule followed by the `❯` prompt row
+    // (or, when the caller already cut the screen at the composer, the final
+    // line). Rules below the prompt row and footer chrome are skipped.
+    let top_rule = (1..lines.len()).rev().find(|&index| {
+        is_horizontal_rule(lines[index])
+            && match lines.get(index + 1) {
+                Some(next) => next.trim_start().starts_with('❯'),
+                None => !lines[index - 1].trim_start().starts_with('❯'),
+            }
+    })?;
+    let line = lines[top_rule - 1];
+    let body = line.trim().strip_prefix('*')?;
+    is_live_status_body(body).then_some(line)
+}
+
+pub fn is_live_status_body(body: &str) -> bool {
     if !body.starts_with(char::is_whitespace) {
         return false;
     }

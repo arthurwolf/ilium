@@ -406,33 +406,13 @@ mod tests {
         );
     }
     #[test]
-    fn ordinary_inference_catalog_and_exact_budget_preserve_credentials_and_save_durably() {
+    fn exact_inference_budget_preserves_credentials_and_saves_durably() {
         use crate::value_settings::SettingsNumber;
-        use crate::value_settings_choice::SettingsChoice;
         let directory = tempfile::tempdir().unwrap();
         let mut app = synthetic_app(directory.path());
         app.inference_settings.openai.api_key = "synthetic-kept-credential".into();
         app.inference_settings.selected_provider = Provider::KiloGateway;
         app.inference_settings.kilo_gateway.model = "authored/custom-kilo".into();
-        app.kilo_gateway_models = vec!["synthetic-kilo-a".into(), "synthetic-kilo-b".into()];
-        let (options, selected) = SettingsChoice::KiloModel.options(&app);
-        assert_eq!(options.len(), 3);
-        assert_eq!(selected, "authored/custom-kilo");
-        assert!(options.iter().any(|option| option.id == selected));
-        let (providers, _) = SettingsChoice::InferenceProvider.options(&app);
-        assert_eq!(providers.len(), Provider::ALL.len());
-        app.save_settings_choice(
-            SettingsChoice::KiloModel,
-            "synthetic-kilo-b",
-            directory.path().into(),
-            None,
-        )
-        .unwrap();
-        app.settle_filesystem_for_test();
-        assert!(matches!(
-            app.inference_save_state,
-            crate::filesystem::configurations::InferenceSaveState::Durable
-        ));
         let attempts = app.configuration_admission.attempts;
         assert!(app
             .save_settings_number(
@@ -461,7 +441,7 @@ mod tests {
         app.settle_filesystem_for_test();
         let saved = crate::config::load(directory.path()).unwrap().inference;
         assert_eq!(saved.restructure_prompt_token_limit, 123456);
-        assert_eq!(saved.kilo_gateway.model, "synthetic-kilo-b");
+        assert_eq!(saved.kilo_gateway.model, "authored/custom-kilo");
         assert_eq!(saved.openai.api_key, "synthetic-kept-credential");
         assert_eq!(
             SettingsNumber::InferenceTokenBudget
@@ -482,21 +462,32 @@ mod tests {
         let mut app = synthetic_app(directory.path());
         app.onboarding = None;
         app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
-            tab: crate::app::SettingsTab::Inference,
+            tab: crate::app::SettingsTab::Titles,
             selected_row: 0,
             ..crate::app::SettingsState::default()
         }));
-        app.begin_settings_choice_dialog(SettingsChoice::InferenceProvider);
+        let title_style = app.inference_settings.title_style;
+        app.begin_settings_choice_dialog(SettingsChoice::TitleStyle);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("catalog");
         };
         app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
         let attempts = app.configuration_admission.attempts;
         assert!(app
-            .commit_settings_choice_dialog(&mut host, &DialogOutcome::Choose("Ollama".into()))
+            .commit_settings_choice_dialog(
+                &mut host,
+                &DialogOutcome::Choose(
+                    if title_style == ilium_inference::TitleStyle::Labeling {
+                        "Summarization"
+                    } else {
+                        "Labeling"
+                    }
+                    .into()
+                )
+            )
             .is_err());
         assert_eq!(app.configuration_admission.attempts, attempts);
-        assert_eq!(app.inference_settings.selected_provider, Provider::OpenAi);
+        assert_eq!(app.inference_settings.title_style, title_style);
     }
 
     #[test]

@@ -904,7 +904,7 @@ const MANIFEST_SCHEMA: &str = r###"{
       "properties": {
         "entry": {"const": "scene.wasm"},
         "world": {"const": "ilium:anim/base@0.1.0"},
-        "exports": {"type": "array", "uniqueItems": true, "maxItems": 1, "items": {"enum": ["job-runner"]}}
+        "exports": {"type": "array", "uniqueItems": true, "maxItems": 2, "items": {"enum": ["job-runner", "handler"]}}
       }
     },
     "capabilities": {

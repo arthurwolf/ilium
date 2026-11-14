@@ -844,7 +844,7 @@ impl App {
                 view::drag(&target, &mut cursor, position, &mut moved);
                 moved
             }
-            MouseEventKind::Up(_) => view::release(&target, &mut cursor),
+            MouseEventKind::Up(_) => view::release_at(&scene, &target, &mut cursor, position),
             MouseEventKind::ScrollUp => view::wheel(&scene, &target, &mut cursor, position, -1),
             _ => view::wheel(&scene, &target, &mut cursor, position, 1),
         };

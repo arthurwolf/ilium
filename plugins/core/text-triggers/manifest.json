@@ -117,7 +117,12 @@
         "id": "rules",
         "title": "Text triggers"
       }
-    ]
+    ],
+    "topics": {
+      "publishes": [
+        "ilium.core.text-triggers/fired"
+      ]
+    }
   },
   "activation": [
     "startup",

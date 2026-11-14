@@ -86,7 +86,6 @@ pub fn fields(tab: SettingsTab) -> &'static [InstructionField] {
     match tab {
         SettingsTab::LlmInstructions => &InstructionField::ALL,
         SettingsTab::Titles => &[EntryNaming],
-        SettingsTab::Inference => &[Organization, SharedContext, ProjectNaming],
         SettingsTab::AgentMonitoring => &[AskForUpdate],
         _ => &[],
     }
@@ -335,14 +334,18 @@ mod tests {
     fn every_input_has_a_specific_location_and_the_shared_location() {
         assert_eq!(fields(SettingsTab::LlmInstructions), InstructionField::ALL);
         let mut specific = Vec::new();
-        for tab in [
-            SettingsTab::Titles,
-            SettingsTab::Inference,
-            SettingsTab::AgentMonitoring,
-        ] {
+        for tab in [SettingsTab::Titles, SettingsTab::AgentMonitoring] {
             specific.extend_from_slice(fields(tab));
         }
         specific.push(InstructionField::Voice); // existing VoiceControl custom-prompt row
+
+        // Organization, shared context and project naming live only in the
+        // shared LLM Instructions panel since the Inference tab became a plugin page.
+        specific.extend_from_slice(&[
+            InstructionField::Organization,
+            InstructionField::SharedContext,
+            InstructionField::ProjectNaming,
+        ]);
         for field in InstructionField::ALL {
             assert_eq!(specific.iter().filter(|f| **f == field).count(), 1);
         }

@@ -43,7 +43,6 @@ pub use wikipedia::WikipediaSettings;
 #[serde(rename_all = "snake_case")]
 pub enum AnimationKind {
     Video,
-    Spectrum,
     Images,
     /// A scene a plugin supplies (the Scene row picks which). A saved selection of a scene
     /// that moved into the Scenes plugin (`shoreline`, `moonlit_water`, `sleeping_ridge`,
@@ -51,7 +50,8 @@ pub enum AnimationKind {
     /// `quiet_pond` (once `breathing_mountain`), `dithered_waves`, `clouds` (Satellite clouds), `pipes`, `atlantic_dusk`,
     /// `machine_screen`, `hex_expedition`, and the quiet scenes such as `aurora`, `pollen` and
     /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`, `carpet` and `chess`, and the live data scenes `graph`,
-    /// `earthquakes`, `aircraft` and `boats`, and `night_lights` (Earth at night)) loads as this kind.
+    /// `earthquakes`, `aircraft` and `boats`, and `night_lights` (Earth at night), and `spectrum`
+    /// (Audio spectrum)) loads as this kind.
     #[default]
     #[serde(
         alias = "shoreline",
@@ -108,7 +108,8 @@ pub enum AnimationKind {
         alias = "graph",
         alias = "earthquakes",
         alias = "aircraft",
-        alias = "boats"
+        alias = "boats",
+        alias = "spectrum"
     )]
     PluginScene,
     Wikipedia,
@@ -117,9 +118,8 @@ pub enum AnimationKind {
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::Video,
-        Self::Spectrum,
         Self::Images,
         Self::PluginScene,
         Self::Wikipedia,
@@ -133,7 +133,6 @@ impl AnimationKind {
         match self {
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
             Self::Video => Some(AmbientKind::Video),
-            Self::Spectrum => Some(AmbientKind::Spectrum),
             Self::Images => Some(AmbientKind::Images),
             Self::PluginScene => Some(AmbientKind::Plugin),
             _ => None,

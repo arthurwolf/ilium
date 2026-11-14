@@ -15,6 +15,7 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
         "carpet" => crate::carpet::create(spec, env),
         "cube-clock" => crate::cube_clock::create(spec, env),
         "satellite-clouds" => crate::clouds::create(spec, env),
+        "spectrum" => crate::spectrum::create(spec, env),
         "dither-water" => crate::dither_water::create(spec, env),
         "fbm-clouds" => crate::fbm_clouds::create(spec, env),
         "hex-expedition" => crate::hex_expedition::create(spec, env),
