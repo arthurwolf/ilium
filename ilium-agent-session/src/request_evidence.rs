@@ -247,18 +247,17 @@ fn is_claude_injected_message(message: &str) -> bool {
         )
 }
 
+/// Start of the update request the Fleet plugin sends ("Ask for update"); a
+/// user-shaped history entry that begins with it is Ilium bookkeeping, not a task.
+const ASK_FOR_UPDATE_PREFIX: &str = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+
 /// Provider histories sometimes serialize slash bookkeeping or Ilium's own
 /// update request as user-shaped text without recording its IPC source. Such
 /// text cannot establish that the human asked the agent to do substantive
 /// work. A `/goal` with an objective is an authored task, however.
 fn is_non_task_control_text(message: &str) -> bool {
     let text = message.trim();
-    let update_template = ilium_prompts::agent::ASK_FOR_UPDATE;
-    let update_prefix = update_template
-        .split("{{#if")
-        .next()
-        .unwrap_or(update_template);
-    if !update_prefix.is_empty() && text.starts_with(update_prefix) {
+    if text.starts_with(ASK_FOR_UPDATE_PREFIX) {
         return true;
     }
 
@@ -380,7 +379,7 @@ mod tests {
             "/resume previous-session",
             "/goal clear",
             "/goal",
-            ilium_prompts::agent::ASK_FOR_UPDATE,
+            ASK_FOR_UPDATE_PREFIX,
         ] {
             assert_eq!(genuine_request_text(&AgentClass::Codex, &codex(text)), None);
             assert_eq!(
