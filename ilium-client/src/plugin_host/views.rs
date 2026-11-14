@@ -263,7 +263,7 @@ impl App {
                 continue;
             };
             let stored = store.read(&setting.plugin).unwrap_or_default();
-            rows.extend(rows_for(&setting.plugin, manifest, &stored));
+            rows.extend(rows_for(&setting.plugin, &manifest, &stored));
         }
         rows
     }
