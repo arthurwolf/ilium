@@ -11422,8 +11422,9 @@ impl App {
         if self.ui_settings.plugin_tree_ordering.is_some() {
             self.settings_set_manual_tree_order();
         }
-        // Ordering by cost is an automatic view too, so a direct move leaves it.
-        if self.cost_settings.sort_by_cost {
+        // Ordering by cost is an automatic view too, so a direct move leaves it (only while the
+        // Cost plugin applies it).
+        if self.cost_settings.sort_by_cost && self.cost_plugin_runs() {
             self.settings_adjust_cost_row(CostRow::SortByCost, 0);
         }
     }

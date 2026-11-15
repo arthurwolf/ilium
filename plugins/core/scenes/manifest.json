@@ -10,7 +10,8 @@
     "entry": "scene.wasm",
     "world": "ilium:anim/base@0.1.0",
     "exports": [
-      "handler"
+      "handler",
+      "job-runner"
     ]
   },
   "capabilities": {
@@ -35,13 +36,23 @@
       "fs.read:picked",
       "http:creator.nightcafe.studio",
       "http:images.unsplash.com",
-      "http:upload.wikimedia.org"
+      "http:upload.wikimedia.org",
+      "fs.read:cache",
+      "fs.write:cache",
+      "jobs.run"
     ]
   },
   "activation": [
     "scene:*"
   ],
   "contributes": {
+    "jobs": [
+      {
+        "kind": "fetch-to-cache",
+        "deadline_ms": 60000,
+        "memory_mib": 128
+      }
+    ],
     "scenes": [
       {
         "id": "waves",

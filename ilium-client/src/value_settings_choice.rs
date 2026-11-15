@@ -160,7 +160,7 @@ fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
         label: ordering.title.clone(),
         disabled_reason: None,
     }));
-    let selected = if app.cost_settings.sort_by_cost {
+    let selected = if app.cost_settings.sort_by_cost && app.cost_plugin_runs() {
         options.push(ChoiceOption {
             id: COST_TREE_ORDER_ID.into(),
             label: "Cost, most expensive first".into(),

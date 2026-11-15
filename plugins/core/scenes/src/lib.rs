@@ -11,6 +11,7 @@
 
 pub mod atlantic_dusk;
 pub mod box_machine;
+pub mod cache_fetch;
 pub mod carpet;
 pub mod classic;
 pub mod clouds;
@@ -54,7 +55,7 @@ use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{
-    ilium_plugin, Handler, Lifecycle, NativeRenderer, SceneField, SceneProgram,
+    ilium_plugin, Handler, JobRunner, Lifecycle, NativeRenderer, SceneField, SceneProgram,
 };
 use kit::raster::Raster;
 use kit::scene::{Frame, OccupancyMask, Scene, SceneEnv, SceneLocation};
@@ -67,8 +68,9 @@ pub const DITHERED_WAVES_ID: &str = "dithered-waves";
 
 /// The scene side of `ilium.core.scenes` (core-plugin-scenes.md, world `ilium:anim/base@0.1.0`).
 /// One value is one scene: the component glue builds it from the spec of a `scene-renderer`.
-// `handler` receives the audio chunks of the spectrum scene's recording (`audio-frames`).
-#[ilium_plugin(side = "scene", exports = ["handler"])]
+// `handler` receives the audio chunks of the spectrum scene's recording (`audio-frames`);
+// `job-runner` runs the background jobs a scene starts (`cache_fetch`, `fetch-to-cache`).
+#[ilium_plugin(side = "scene", exports = ["handler", "job-runner"])]
 pub struct ScenesScene {
     /// Id of the scene this value draws (`scene` of the spec); empty before a spec arrives.
     scene_id: String,
@@ -324,6 +326,22 @@ impl Handler for ScenesScene {
 impl Lifecycle for ScenesScene {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
         Ok(())
+    }
+}
+
+/// The background jobs of the scenes (`contributes.jobs`). Each runs in a fresh instance of the
+/// component, so it never touches the scene value: `fetch-to-cache` downloads one file into the
+/// `cache` scope in ranged chunks (`cache_fetch`).
+impl JobRunner for ScenesScene {
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        if kind == cache_fetch::FETCH_JOB {
+            cache_fetch::run_job(&input)
+        } else {
+            Err(PluginError::new(
+                ilium_plugin_sdk::types::errors::ErrorCode::InvalidArgument,
+                format!("ilium.core.scenes: unknown job kind {kind}"),
+            ))
+        }
     }
 }
 

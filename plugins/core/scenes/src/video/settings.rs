@@ -353,13 +353,13 @@ impl SceneSettings for VideoSettings {
                 i32::from(self.frame_rate),
                 FRAME_RATE,
                 " fps",
-                "Redraw rate. Lower values use less CPU in both ilium and ffmpeg.",
+                "Redraw rate. Lower values use less CPU.",
             ),
         ]
     }
 
     fn set_control(&mut self, id: &str, value: ControlValue) -> Result<bool, String> {
-        let changed = match id {
+        match id {
             "source" => {
                 Self::set_choice(&mut self.source, &value, "Source", VideoSource::from_index)
             }
@@ -390,8 +390,7 @@ impl SceneSettings for VideoSettings {
                 Self::set_number(&mut self.frame_rate, FRAME_RATE, &value, "Frame rate")
             }
             _ => Ok(false),
-        };
-        changed
+        }
     }
 }
 

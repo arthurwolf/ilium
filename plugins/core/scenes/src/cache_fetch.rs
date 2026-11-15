@@ -14,7 +14,9 @@
 //! finished file is read back through the `cache` scope (`fs.read:cache`), for example by
 //! `media.open-video`.
 
-use ilium_plugin_sdk::host::{EntryKind, HostClock, HostFs, HostHttp, HostJobs, HttpRequest, WriteMode};
+use ilium_plugin_sdk::host::{
+    EntryKind, HostClock, HostFs, HostHttp, HostJobs, HttpRequest, WriteMode,
+};
 use ilium_plugin_sdk::types::errors::ErrorCode;
 use ilium_plugin_sdk::types::net::Header;
 use ilium_plugin_sdk::types::paths::FsPath;
@@ -32,8 +34,9 @@ pub const CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 /// Total size the cached files may reach before the oldest are removed.
 pub const CACHE_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
-/// One run stops starting new chunks after this long (the job deadline is 60 s).
-pub const RUN_BUDGET_MILLIS: u64 = 40_000;
+/// One run stops starting new chunks after this long: with one chunk still answering (at most
+/// 25 s) it stays inside the 60 s job deadline.
+pub const RUN_BUDGET_MILLIS: u64 = 30_000;
 /// Timeout asked of one ranged request.
 const REQUEST_TIMEOUT_MILLIS: u32 = 20_000;
 /// A chunk that has not answered after this long fails the run.
@@ -203,8 +206,13 @@ fn discard(io: &mut dyn FetchIo, part: &str, message: String) -> Result<FetchRep
 pub fn run(io: &mut dyn FetchIo, request: &FetchRequest) -> Result<FetchReport, String> {
     check_name(&request.name)?;
     check_url(&request.url)?;
-    if request.expected_bytes.is_some_and(|bytes| bytes > MAX_FILE_BYTES) {
-        return Err(format!("files over {MAX_FILE_BYTES} bytes are not downloaded"));
+    if request
+        .expected_bytes
+        .is_some_and(|bytes| bytes > MAX_FILE_BYTES)
+    {
+        return Err(format!(
+            "files over {MAX_FILE_BYTES} bytes are not downloaded"
+        ));
     }
     if let Some(length) = io.length(&request.name) {
         return Ok(FetchReport {
@@ -216,7 +224,11 @@ pub fn run(io: &mut dyn FetchIo, request: &FetchRequest) -> Result<FetchReport, 
     let part = part_name(&request.name);
     let mut offset = io.length(&part).unwrap_or(0);
     if offset == 0 {
-        make_room(io, &request.name, request.expected_bytes.unwrap_or(CHUNK_BYTES))?;
+        make_room(
+            io,
+            &request.name,
+            request.expected_bytes.unwrap_or(CHUNK_BYTES),
+        )?;
     }
     let started = io.now_millis();
     let mut total = request.expected_bytes;
@@ -301,7 +313,11 @@ pub fn run(io: &mut dyn FetchIo, request: &FetchRequest) -> Result<FetchReport, 
     if let Some(pinned) = &request.sha256 {
         let digest = hash_file(io, &part, offset)?;
         if !digest.eq_ignore_ascii_case(pinned) {
-            return discard(io, &part, "the downloaded file failed its checksum".to_owned());
+            return discard(
+                io,
+                &part,
+                "the downloaded file failed its checksum".to_owned(),
+            );
         }
     }
     io.rename(&part, &request.name)?;
@@ -470,6 +486,8 @@ mod tests {
         requests: usize,
         cancelled: bool,
         removed: Vec<String>,
+        /// Large cached files known only by their listing (no bytes held).
+        listed_only: Vec<CachedFile>,
     }
 
     impl FakeIo {
@@ -484,6 +502,7 @@ mod tests {
                 requests: 0,
                 cancelled: false,
                 removed: Vec::new(),
+                listed_only: Vec::new(),
             }
         }
 
@@ -523,7 +542,13 @@ mod tests {
 
         fn remove(&mut self, name: &str) -> Result<(), String> {
             self.removed.push(name.to_owned());
-            self.files.remove(name).map(|_| ()).ok_or_else(|| "not found".to_owned())
+            let listed = self.listed_only.len();
+            self.listed_only.retain(|file| file.name != name);
+            if self.files.remove(name).is_some() || self.listed_only.len() < listed {
+                Ok(())
+            } else {
+                Err("not found".to_owned())
+            }
         }
 
         fn list(&mut self) -> Result<Vec<CachedFile>, String> {
@@ -535,6 +560,7 @@ mod tests {
                     length: bytes.len() as u64,
                     modified_millis: *modified,
                 })
+                .chain(self.listed_only.iter().cloned())
                 .collect())
         }
 
@@ -708,7 +734,14 @@ mod tests {
 
     #[test]
     fn names_and_addresses_are_checked() {
-        for bad in ["", "../x.mp4", "a/b.mp4", ".hidden", "x.mp4.part", "sp ace.mp4"] {
+        for bad in [
+            "",
+            "../x.mp4",
+            "a/b.mp4",
+            ".hidden",
+            "x.mp4.part",
+            "sp ace.mp4",
+        ] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
         assert!(check_name("germination-new-02.webm").is_ok());
@@ -724,16 +757,21 @@ mod tests {
     #[test]
     fn the_oldest_files_make_room_for_a_new_download() {
         let mut io = FakeIo::serving(remote(10));
-        let big = (CACHE_BUDGET_BYTES / 2) as usize;
-        io.files.insert("old.mp4".to_owned(), (vec![0; big], 1));
-        io.files.insert("newer.mp4".to_owned(), (vec![0; big], 2));
+        for (name, modified_millis) in [("newer.mp4", 2), ("old.mp4", 1)] {
+            io.listed_only.push(CachedFile {
+                name: name.to_owned(),
+                length: CACHE_BUDGET_BYTES / 2,
+                modified_millis,
+            });
+        }
         let incoming = FetchRequest {
             expected_bytes: Some(10),
             ..request("next.mp4")
         };
         assert!(run(&mut io, &incoming).expect("ok").done);
         assert_eq!(io.removed, ["old.mp4"]);
-        assert!(io.file("newer.mp4").is_some());
+        assert_eq!(io.listed_only.len(), 1);
+        assert_eq!(io.listed_only[0].name, "newer.mp4");
     }
 
     #[test]

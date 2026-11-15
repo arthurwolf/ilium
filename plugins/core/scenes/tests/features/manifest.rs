@@ -21,8 +21,13 @@ fn manifest_010_scene_side_only_with_base_world() {
     let m = manifest_value();
     assert_eq!(m["scene"]["entry"], "scene.wasm");
     assert_eq!(m["scene"]["world"], "ilium:anim/base@0.1.0");
-    // `handler` receives the audio chunks of the spectrum scene's recording.
-    assert_eq!(m["scene"]["exports"], json!(["handler"]));
+    // `handler` receives the audio chunks of the spectrum scene's recording; `job-runner` runs
+    // the `fetch-to-cache` downloads.
+    assert_eq!(m["scene"]["exports"], json!(["handler", "job-runner"]));
+    assert_eq!(
+        m["contributes"]["jobs"],
+        json!([{"kind": "fetch-to-cache", "deadline_ms": 60000, "memory_mib": 128}])
+    );
     for side in ["server", "client"] {
         assert!(m.get(side).is_none(), "no {side} side expected");
     }

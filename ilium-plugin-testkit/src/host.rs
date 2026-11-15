@@ -813,7 +813,7 @@ impl FakeHost {
                     let row_type = row.get("type").and_then(Value::as_str).unwrap_or("");
                     self.settings.declare(
                         key,
-                        ValueKind::of_row_type(row_type),
+                        ValueKind::of_row(row_type, row.get("default")),
                         row.get("default").cloned(),
                     );
                 }

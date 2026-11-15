@@ -43,6 +43,15 @@ impl ValueKind {
             _ => ValueKind::Any,
         }
     }
+
+    /// Kind of a manifest row from its type and default: a choice whose options are numbers
+    /// or number lists (presets) takes the kind of its default instead of text.
+    pub(crate) fn of_row(row_type: &str, default: Option<&Value>) -> ValueKind {
+        match (row_type, default) {
+            ("select" | "choice", Some(default)) if !default.is_string() => ValueKind::of(default),
+            _ => ValueKind::of_row_type(row_type),
+        }
+    }
 }
 
 /// Handle on the fake settings of a host.
