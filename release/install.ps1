@@ -131,16 +131,52 @@ function Get-IliumFreeSpace([string]$Root) {
     return $drive.AvailableFreeSpace
 }
 
-function Get-IliumUserPath { return [Environment]::GetEnvironmentVariable('Path', 'User') }
-function Set-IliumUserPath([AllowNull()][string]$Value) { [Environment]::SetEnvironmentVariable('Path', $Value, 'User') }
+function Get-IliumRegistryPath([Microsoft.Win32.RegistryKey]$Key) {
+    if ($null -eq $Key -or $Key.GetValueNames() -notcontains 'Path') { return $null }
+    $kind = $Key.GetValueKind('Path')
+    if ($kind -notin @([Microsoft.Win32.RegistryValueKind]::String, [Microsoft.Win32.RegistryValueKind]::ExpandString)) {
+        throw 'User PATH has an unsupported registry value kind.'
+    }
+    $value = $Key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    if ($value -isnot [string]) { throw 'User PATH is not a registry string.' }
+    return $value
+}
+function Set-IliumRegistryPath([Microsoft.Win32.RegistryKey]$Key, [AllowNull()][object]$Value) {
+    if ($null -eq $Key) { throw 'User environment registry key is unavailable.' }
+    if ($null -eq $Value) { $Key.DeleteValue('Path', $false); return }
+    if ($Value -isnot [string]) { throw 'User PATH is not a registry string.' }
+    $kind = [Microsoft.Win32.RegistryValueKind]::String
+    if ($Key.GetValueNames() -contains 'Path') {
+        $kind = $Key.GetValueKind('Path')
+        if ($kind -notin @([Microsoft.Win32.RegistryValueKind]::String, [Microsoft.Win32.RegistryValueKind]::ExpandString)) {
+            throw 'User PATH has an unsupported registry value kind.'
+        }
+    }
+    $Key.SetValue('Path', $Value, $kind)
+}
+function Get-IliumUserPath {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+    try { return Get-IliumRegistryPath $key }
+    finally { if ($null -ne $key) { $key.Dispose() } }
+}
+function Set-IliumUserPath([AllowNull()][object]$Value) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    if ($null -eq $key) {
+        if ($null -eq $Value) { return }
+        $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    }
+    try { Set-IliumRegistryPath $key $Value }
+    finally { $key.Dispose() }
+}
 function Test-IliumPathEntry([string]$Entry, [string]$Bin) {
     if (-not $Entry) { return $false }
     $expanded = [Environment]::ExpandEnvironmentVariables($Entry.Trim().Trim('"')).TrimEnd('\', '/')
     try { return [IO.Path]::GetFullPath($expanded).Equals($Bin, [StringComparison]::OrdinalIgnoreCase) }
     catch { return $false }
 }
-function Remove-IliumPathEntry([AllowNull()][string]$Value, [string]$Bin) {
+function Remove-IliumPathEntry([AllowNull()][object]$Value, [string]$Bin) {
     if ($null -eq $Value) { return $null }
+    if ($Value -isnot [string]) { throw 'User PATH is not a registry string.' }
     # Remove only the literal entry this installer inserted. Equivalent authored
     # entries (case, quoting, variables, trailing separators) remain authored.
     $parts = New-Object 'Collections.Generic.List[string]'
@@ -660,15 +696,21 @@ function Invoke-IliumInstall {
         Assert-IliumPlainPath $stateDirectory
         [IO.Directory]::CreateDirectory($stateDirectory) | Out-Null
         if (-not [IO.File]::Exists($statePath)) {
-            $initial = @{ schema=1; owner='ilium-windows-installer-1'; root=$root; bin=$bin; path_added=$false; previous='' }
+            $initial = @{ schema=1; owner='ilium-windows-installer-1'; root=$root; bin=$bin; path_added=$false; path_originally_absent=$false; previous='' }
             Write-IliumAtomic $statePath ($initial | ConvertTo-Json -Compress)
         }
         $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json
-        if ($state.schema -ne 1 -or $state.owner -cne 'ilium-windows-installer-1' -or $state.root -cne $root -or $state.bin -cne $bin -or $state.path_added -isnot [bool] -or ($state.previous -and -not (Test-IliumVersion $state.previous))) { throw 'Invalid installer ownership state or a changed BinDir; preserved.' }
+        if ($state.schema -ne 1 -or $state.owner -cne 'ilium-windows-installer-1' -or $state.root -cne $root -or $state.bin -cne $bin -or $state.path_added -isnot [bool] -or ($state.previous -and -not (Test-IliumVersion $state.previous)) -or
+            ($null -ne $state.PSObject.Properties['path_originally_absent'] -and $state.path_originally_absent -isnot [bool])) { throw 'Invalid installer ownership state or a changed BinDir; preserved.' }
         Recover-IliumTransaction $root $bin
         if ([IO.File]::Exists((Join-Path $stateDirectory 'transaction.json'))) { throw 'Transaction recovery is incomplete; retry before starting another operation.' }
         $oldState = [IO.File]::ReadAllText($statePath)
         $state = $oldState | ConvertFrom-Json
+        # Earlier preview state did not record absence. Preserve it without
+        # guessing; new insertions record their own exact starting condition.
+        if ($null -eq $state.PSObject.Properties['path_originally_absent']) {
+            $state | Add-Member -NotePropertyName path_originally_absent -NotePropertyValue $false
+        }
         $previous = ''
         if ([IO.File]::Exists($pointerPath)) {
             $pointer = [IO.File]::ReadAllText($pointerPath)
@@ -691,7 +733,10 @@ function Invoke-IliumInstall {
             }
             $userPath = Get-IliumUserPath
             $updatedPath = $userPath
-            if ($state.path_added) { $updatedPath = Remove-IliumPathEntry $userPath $bin }
+            if ($state.path_added) {
+                $updatedPath = Remove-IliumPathEntry $userPath $bin
+                if ($state.path_originally_absent -and $userPath -ceq $bin) { $updatedPath = $null }
+            }
             $oldPointer = ''; if ($previous) { $oldPointer = $previous + "`n" }
             $journal = @{schema=1; operation='uninstall'; ready=$false; bin=$bin; old_state=$oldState; old_pointer=$oldPointer;
                 quarantine=('uninstall-' + [guid]::NewGuid().ToString('N')); versions=@($ownedVersions); launchers=@($ownedLaunchers);
@@ -717,6 +762,7 @@ function Invoke-IliumInstall {
             }
             if ([IO.File]::Exists($pointerPath)) { [IO.File]::Delete($pointerPath) }
             $state.path_added = $false
+            $state.path_originally_absent = $false
             Write-IliumAtomic $statePath ($state | ConvertTo-Json -Compress)
             $journal.ready = $true
             Write-IliumAtomic (Join-Path $stateDirectory 'transaction.json') ($journal | ConvertTo-Json -Compress)
@@ -859,6 +905,7 @@ function Invoke-IliumInstall {
             $journal.path_applied = $true
             Write-IliumAtomic (Join-Path $stateDirectory 'transaction.json') ($journal | ConvertTo-Json -Compress)
             $state.path_added = $true
+            $state.path_originally_absent = $null -eq $userPath
         }
         if ($previous -and $previous -cne $Version) { $state.previous = $previous }
         Write-IliumAtomic $statePath ($state | ConvertTo-Json -Compress)

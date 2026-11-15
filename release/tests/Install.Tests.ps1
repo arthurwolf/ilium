@@ -1,6 +1,6 @@
 ﻿# Pester 5; invoke on Windows with both powershell.exe 5.1 and pwsh.exe.
-# Every write belongs to TestDrive. Network, User PATH and binary execution are
-# mocked at adapters; archive, hashes, locking and filesystem transactions are real.
+# Filesystem writes belong to TestDrive; registry integration cases use isolated
+# HKCU test keys. Network, the real User PATH and binary execution are mocked.
 BeforeAll {
     $installer = Join-Path $PSScriptRoot '../install.ps1'
     $tokens = $null; $parseErrors = $null
@@ -167,6 +167,42 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         $script:userPath | Should -Be $before
         Invoke-IliumInstall -Uninstall -InstallDir $script:root -BinDir $script:bin
         $script:userPath | Should -Be $before
+    }
+    It 'restores the original <Scenario> user PATH value and registry kind' -TestCases @(
+        @{Scenario='expandable with trailing separator'; Exists=$true; Kind='ExpandString'; Value='%USERPROFILE%\.cargo\bin;'; Appended=''},
+        @{Scenario='expandable with concurrent appended entry'; Exists=$true; Kind='ExpandString'; Value='%USERPROFILE%\.cargo\bin;'; Appended=';C:\authored'},
+        @{Scenario='absent'; Exists=$false; Kind=$null; Value=$null; Appended=''},
+        @{Scenario='empty'; Exists=$true; Kind='String'; Value=''; Appended=''}
+    ) {
+        param($Scenario, $Exists, $Kind, $Value, $Appended)
+        $subkey = 'Software\IliumInstallerTests\' + [guid]::NewGuid().ToString('N')
+        $script:pathKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subkey)
+        try {
+            if ($Exists) { $script:pathKey.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind) }
+            Mock Get-IliumUserPath { Get-IliumRegistryPath $script:pathKey }
+            Mock Set-IliumUserPath { param($Value) Set-IliumRegistryPath $script:pathKey $Value }
+
+            Install-TestVersion '1.0.0'
+            ($script:pathKey.GetValueNames() -contains 'Path') | Should -BeTrue
+            if ($Exists) { $script:pathKey.GetValueKind('Path').ToString() | Should -BeExactly $Kind }
+            $state = [IO.File]::ReadAllText((Join-Path $script:root 'installer-state/state.json')) | ConvertFrom-Json
+            $state.path_originally_absent | Should -Be (-not $Exists)
+            if ($Appended) {
+                $installedPath = $script:pathKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $script:pathKey.SetValue('Path', ($installedPath + $Appended), [Microsoft.Win32.RegistryValueKind]$Kind)
+            }
+
+            Invoke-IliumInstall -Uninstall -InstallDir $script:root -BinDir $script:bin
+            ($script:pathKey.GetValueNames() -contains 'Path') | Should -Be $Exists
+            if ($Exists) {
+                $script:pathKey.GetValueKind('Path').ToString() | Should -BeExactly $Kind
+                $script:pathKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) |
+                    Should -BeExactly ($Value + $Appended)
+            }
+        } finally {
+            $script:pathKey.Dispose()
+            [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($subkey)
+        }
     }
     It 'is idempotent and retains current plus previous on upgrade' {
         Install-TestVersion '1.0.0'
