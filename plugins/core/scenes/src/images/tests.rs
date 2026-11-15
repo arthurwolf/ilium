@@ -691,7 +691,7 @@ fn folders_without_pictures_say_so() {
 #[test]
 fn scanning_shows_progress_until_the_list_is_known() {
     let io = slideshow_io(&[("a.png", [255, 255, 255])], &[]);
-    let mut scene = scene_with(&slideshow_settings(), io);
+    let scene = scene_with(&slideshow_settings(), io);
     assert_eq!(scene.status().as_deref(), Some("Scanning folders..."));
     assert_eq!(scene.frames_per_second(), ACTIVE_FPS);
 }
