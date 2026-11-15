@@ -17,6 +17,7 @@ env:
   CARGO_INCREMENTAL: '0'
   RUST_BACKTRACE: '1'
   PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1' # Preserve native pipeline progress if the hosted runner is interrupted.
 jobs:
   native:
     runs-on: ubuntu-22.04-arm

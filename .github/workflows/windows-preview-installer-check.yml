@@ -36,6 +36,12 @@ jobs:
         Import-Module Pester -RequiredVersion 5.7.1 -Force
         $result = Invoke-Pester -Path release/tests/Install.Tests.ps1 -Output Detailed -PassThru
         if ($result.FailedCount -gt 0 -or $result.PassedCount -lt 1) { throw 'Windows PowerShell installer tests failed.' }
+    - name: Install pinned Pester for PowerShell 7
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
     - name: PowerShell 7 installer transaction and preview tests
       shell: pwsh
       run: |
