@@ -371,7 +371,7 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(lane=job_name):
                 caller = self.workflow['jobs'][job_name]
                 self.assertEqual(caller['uses'], './.github/workflows/' + filename)
-                self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7'")
+                self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && inputs.pages_phase == 'none'")
                 self.assertEqual(caller['permissions']['contents'], 'read')
                 workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(), Loader=yaml.BaseLoader)
                 self.assertEqual(set(workflow['on']), {'workflow_call'})
@@ -798,10 +798,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(commands, {'source', 'native', 'aggregate', 'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'baseline', 'recovery-ready', 'readback', 'recover'})
 
     def test_all_actions_are_sha_pinned_and_checkout_cannot_push(self):
-        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'linux-arm64-preview.yml', 'macos-preview.yml', 'macos-intel-preview.yml', 'windows-preview.yml')]
+        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'linux-arm64-preview.yml', 'macos-preview.yml', 'macos-intel-preview.yml', 'windows-preview.yml', 'windows-preview-installer-check.yml', 'preview-pages.yml')]
         for job in [*self.workflow['jobs'].values(), *[job for preview in previews for job in preview['jobs'].values()]]:
             if 'uses' in job:
-                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/linux-arm64-preview.yml', './.github/workflows/macos-preview.yml', './.github/workflows/macos-intel-preview.yml', './.github/workflows/windows-preview.yml'))
+                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/linux-arm64-preview.yml', './.github/workflows/macos-preview.yml', './.github/workflows/macos-intel-preview.yml', './.github/workflows/windows-preview.yml', './.github/workflows/windows-preview-installer-check.yml', './.github/workflows/preview-pages.yml'))
                 self.assertTrue((ROOT / job['uses']).is_file())
             for step in job.get('steps', []):
                 if 'uses' in step:
@@ -850,11 +850,13 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(permissions, {'contents': 'write'})
             elif name == 'ghcr-package':
                 self.assertEqual(permissions, {'contents': 'read', 'packages': 'write'})
+            elif name == 'preview-pages-qualification':
+                self.assertEqual(permissions, {'actions': 'read', 'contents': 'read'})
             else:
                 self.assertEqual(permissions, {'contents': 'read'})
             text = json.dumps(job)
             if 'CLOUDFLARE_API_TOKEN' in text:
-                self.assertIn(name, ('baseline', 'publish', 'latest', 'pages-preview', 'pages-production', 'recovery-ready', 'recover', 'complete'))
+                self.assertIn(name, ('baseline', 'publish', 'latest', 'pages-preview', 'pages-production', 'recovery-ready', 'recover', 'complete', 'preview-pages-route'))
             if name in ('native', 'source', 'candidate-installs'):
                 self.assertNotIn('secrets.', text)
         self.assertEqual(self.workflow['jobs']['qualify']['environment'], 'release-qualification')

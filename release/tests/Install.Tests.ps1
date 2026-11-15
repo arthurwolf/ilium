@@ -396,3 +396,35 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         Test-Path (Join-Path $destination 'ilium') | Should -BeFalse
     }
 }
+
+Describe 'Pinned Windows preview selection and checksum' {
+    It 'uses the published Windows preview only for a definite absence of a stable release' {
+        (Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases') | Should -Be '0.1.1-preview.6'
+        (Resolve-IliumLatestResponse 404 '') | Should -Be '0.1.1-preview.6'
+        (Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases/tag/v0.2.0') | Should -Be '0.2.0'
+        { Resolve-IliumLatestResponse 429 '' } | Should -Throw
+        { Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases/tag/v0.2.0-preview.1' } | Should -Throw
+        { Resolve-IliumLatestResponse 302 'https://evil.example/releases' } | Should -Throw
+    }
+    It 'accepts the published 17-asset checksum inventory only with the pinned Windows archive digest' {
+        $manifest = Join-Path $PSScriptRoot 'fixtures/windows-preview-6.SHA256SUMS'
+        (Get-IliumPreviewChecksum $manifest (Get-IliumTarget 'AMD64') '0.1.1-preview.6') |
+            Should -Be 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
+    }
+    It 'rejects modified, duplicate and missing preview checksum records' {
+        $manifest = Join-Path $PSScriptRoot 'fixtures/windows-preview-6.SHA256SUMS'
+        $content = [IO.File]::ReadAllText($manifest)
+        $selectedLine = $content.Split("`n") | Where-Object { $_ -match 'ilium-windows-x86_64\.zip' } | Select-Object -First 1
+        $withoutSelected = (($content.Split("`n") | Where-Object { $_ -and $_ -notmatch 'ilium-windows-x86_64\.zip' }) -join "`n") + "`n"
+        foreach ($changed in @(
+            $content.Replace('c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89', ('0' * 64)),
+            ($content + $selectedLine + "`n"),
+            $withoutSelected
+        )) {
+            $path = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '.txt')
+            [IO.File]::WriteAllText($path, $changed)
+            { Get-IliumPreviewChecksum $path (Get-IliumTarget 'AMD64') '0.1.1-preview.6' } | Should -Throw
+        }
+        { Get-IliumPreviewChecksum $manifest (Get-IliumTarget 'AMD64') '0.1.1-preview.5' } | Should -Throw '*not ready*'
+    }
+}

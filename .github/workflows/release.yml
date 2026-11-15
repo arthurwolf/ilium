@@ -1,5 +1,5 @@
 # Action commits read back from official GitHub tag refs on 2026-09-29.
-# workflow_dispatch is strictly nonpublishing except the explicit Linux preview publish input. Automatic native receipts replace
+# workflow_dispatch writes only with explicit Linux preview publication or Pages production inputs. Automatic native receipts replace
 # manual qualification. Latest activation precedes literal default-command tests
 # because those commands resolve /releases/latest; five default-preview installs
 # gate production deployment; five literal production commands gate completion.
@@ -21,6 +21,20 @@ name: Native release and installation
         required: false
         default: false
         type: boolean
+      pages_phase:
+        description: Explicit preview Pages phase; production is a separate manual dispatch
+        required: false
+        default: none
+        type: choice
+        options: [none, preview, production]
+      qualified_run_id:
+        description: Completed native preview.7 qualification run ID for a Pages phase
+        required: false
+        type: string
+      qualified_source_sha:
+        description: Full source commit of that native qualification run and immutable preview.7 release
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -50,19 +64,101 @@ jobs:
     with:
       release_tag: ${{ inputs.release_tag }}
   macos-intel-preview:
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && inputs.pages_phase == 'none'
     permissions:
       contents: read
     uses: ./.github/workflows/macos-intel-preview.yml
     with:
       release_tag: ${{ inputs.release_tag }}
   linux-arm64-preview:
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && inputs.pages_phase == 'none'
     permissions:
       contents: read
     uses: ./.github/workflows/linux-arm64-preview.yml
     with:
       release_tag: ${{ inputs.release_tag }}
+  windows-preview-installer-check:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && inputs.pages_phase == 'none'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-preview-installer-check.yml
+  preview-pages-qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && (inputs.pages_phase == 'preview' || inputs.pages_phase == 'production') && github.repository == 'arthurwolf/ilium' && github.ref == 'refs/heads/release/v0.1.1-preview.7'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Test the read-only preview qualification gate
+      run: python -m unittest release.tests.test_preview_qualification
+    - id: qualified_artifacts
+      name: Check the qualified run and immutable release before transferring artifacts
+      run: python release/scripts/preview_qualification.py run --run-id "$QUALIFIED_RUN_ID" --source-sha "$QUALIFIED_SOURCE_SHA" --current-sha "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      env: &preview_qualification_inputs
+        GH_TOKEN: ${{ github.token }}
+        QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
+        QUALIFIED_SOURCE_SHA: ${{ inputs.qualified_source_sha }}
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ steps.qualified_artifacts.outputs.native_macos_intel_id }}
+        merge-multiple: true
+        run-id: ${{ inputs.qualified_run_id }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/qualified/native-macos-intel
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ steps.qualified_artifacts.outputs.packages_macos_intel_id }}
+        merge-multiple: true
+        run-id: ${{ inputs.qualified_run_id }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/qualified/packages-macos-intel
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ steps.qualified_artifacts.outputs.native_linux_arm64_id }}
+        merge-multiple: true
+        run-id: ${{ inputs.qualified_run_id }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/qualified/native-linux-arm64
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ steps.qualified_artifacts.outputs.packages_linux_arm64_id }}
+        merge-multiple: true
+        run-id: ${{ inputs.qualified_run_id }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/qualified/packages-linux-arm64
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ steps.qualified_artifacts.outputs.windows_installer_id }}
+        merge-multiple: true
+        run-id: ${{ inputs.qualified_run_id }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/qualified/windows-installer
+    - name: Bind native receipts, source and published archive bytes
+      run: >-
+        python release/scripts/preview_qualification.py artifacts
+        --run-id "$QUALIFIED_RUN_ID" --source-sha "$QUALIFIED_SOURCE_SHA"
+        --current-sha "$GITHUB_SHA" --artifacts "$RUNNER_TEMP/qualified"
+      env: *preview_qualification_inputs
+  preview-pages-route:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.7' && (inputs.pages_phase == 'preview' || inputs.pages_phase == 'production') && github.repository == 'arthurwolf/ilium' && github.ref == 'refs/heads/release/v0.1.1-preview.7'
+    needs: [preview-pages-qualification]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/preview-pages.yml
+    with:
+      preview_tag: v0.1.1-preview.7
+      promote_production: ${{ inputs.pages_phase == 'production' }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   linux-preview:
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
     permissions:

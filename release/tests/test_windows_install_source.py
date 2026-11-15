@@ -8,6 +8,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class WindowsInstallerSourceTests(unittest.TestCase):
+    def test_published_windows_preview_archive_is_pinned(self):
+        source = (ROOT / 'release/install.ps1').read_text(encoding='utf-8-sig')
+        checksums = (ROOT / 'release/tests/fixtures/windows-preview-6.SHA256SUMS').read_text(encoding='ascii')
+        records = dict(line.split('  ', 1)[::-1] for line in checksums.splitlines())
+        self.assertEqual(len(records), 17)
+        self.assertIn("'0.1.1-preview.6'", source)
+        self.assertIn("'" + records['ilium-windows-x86_64.zip'] + "'", source)
+
     def test_generated_table_matches_authoritative_manifest(self):
         source = (ROOT / 'release/install.ps1').read_text(encoding='utf-8-sig')
         targets = tomllib.loads((ROOT / 'release/targets.toml').read_text())['target']

@@ -195,22 +195,62 @@ function Save-IliumDownload([string]$Url, [string]$Destination) {
     throw 'Download failed; requested release never falls back to latest.'
 }
 
+function Resolve-IliumLatestResponse([int]$StatusCode, [string]$Location) {
+    # GitHub redirects /latest to /releases (or returns 404) when no stable
+    # release exists. Only that definite absence selects the published preview.
+    if ($StatusCode -eq 404 -or
+        ($StatusCode -in @(301, 302, 303, 307, 308) -and
+         $Location -cin @('https://github.com/arthurwolf/ilium/releases',
+                         'https://github.com/arthurwolf/ilium/releases/',
+                         '/arthurwolf/ilium/releases', '/arthurwolf/ilium/releases/'))) {
+        return '0.1.1-preview.6'
+    }
+    if ($StatusCode -notin @(301, 302, 303, 307, 308) -or
+        $Location -cnotmatch '\Ahttps://github\.com/arthurwolf/ilium/releases/tag/v(.+)\z' -or
+        -not (Test-IliumVersion $Matches[1])) { throw 'Cannot resolve a valid latest stable release tag.' }
+    $resolved = $Matches[1]
+    if ($resolved.Contains('-')) { throw 'Latest stable release cannot be a prerelease.' }
+    return $resolved
+}
+
 function Get-IliumLatestVersion {
     # Resolve once, then fetch both assets from that exact tag. Repeating latest
     # for each asset could mix two releases during publication.
     $request = [Net.HttpWebRequest]::Create('https://github.com/arthurwolf/ilium/releases/latest')
     $request.AllowAutoRedirect = $false; $request.Timeout = 30000
     $request.UserAgent = 'Ilium-Installer/1'; $request.UseDefaultCredentials = $false
-    $response = $request.GetResponse()
+    $response = $null
+    try { $response = $request.GetResponse() }
+    catch [Net.WebException] {
+        if ($_.Exception.Response -isnot [Net.HttpWebResponse]) { throw }
+        $response = $_.Exception.Response
+    }
     try {
-        $location = $response.Headers['Location']
-        if ([int]$response.StatusCode -notin @(301, 302, 303, 307, 308) -or
-            $location -cnotmatch '\Ahttps://github\.com/arthurwolf/ilium/releases/tag/v(.+)\z' -or
-            -not (Test-IliumVersion $Matches[1])) { throw 'Cannot resolve a valid latest stable release tag.' }
-        $resolved = $Matches[1]
-        if ($resolved.Contains('-')) { throw 'Latest stable release cannot be a prerelease.' }
-        return $resolved
+        return Resolve-IliumLatestResponse ([int]$response.StatusCode) $response.Headers['Location']
     } finally { $response.Dispose() }
+}
+
+function Get-IliumPreviewChecksum([string]$Path, [hashtable]$Target, [string]$Version) {
+    # This prerelease predates the five-archive/AVAILABILITY contract. Its
+    # published manifest lists package formats as well as native archives.
+    $pinnedVersion = '0.1.1-preview.6'
+    $pinnedArchive = 'ilium-windows-x86_64.zip'
+    $pinnedHash = 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
+    if ($Version -cne $pinnedVersion -or $Target.archive -cne $pinnedArchive) {
+        throw 'This platform is not ready yet for the requested release.'
+    }
+    $content = [IO.File]::ReadAllText($Path)
+    if ($content.Length -gt 16384 -or -not $content.EndsWith("`n")) { throw 'Malformed preview checksum manifest.' }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $selected = $null
+    foreach ($line in $content.Substring(0, $content.Length - 1).Split("`n")) {
+        if ($line -cnotmatch '\A([0-9a-f]{64})  (ilium-[A-Za-z0-9._-]+)\z') { throw 'Malformed preview checksum record.' }
+        $hash = $Matches[1]; $name = $Matches[2]
+        if (-not $seen.Add($name)) { throw 'Duplicate preview checksum record.' }
+        if ($name -ceq $pinnedArchive) { $selected = $hash }
+    }
+    if ($selected -cne $pinnedHash) { throw 'Published preview archive checksum differs from the pinned Windows release.' }
+    return $pinnedHash
 }
 
 function Get-IliumChecksum([string]$Path, [hashtable]$Target) {
@@ -714,11 +754,15 @@ function Invoke-IliumInstall {
         $origin = 'https://github.com/arthurwolf/ilium/releases/download/v' + $Version
         $checksums = Join-Path $work 'SHA256SUMS'; $archive = Join-Path $work 'archive.zip'
         Save-IliumDownload ($origin + '/SHA256SUMS') $checksums
-        try { $expectedHash = Get-IliumChecksum $checksums $selected }
-        catch {
-            $availability = Join-Path $work 'AVAILABILITY'
-            Save-IliumDownload ($origin + '/AVAILABILITY') $availability
-            $expectedHash = Get-IliumPartialChecksum $checksums $availability $selected $Version
+        if ($Version -ceq '0.1.1-preview.6') {
+            $expectedHash = Get-IliumPreviewChecksum $checksums $selected $Version
+        } else {
+            try { $expectedHash = Get-IliumChecksum $checksums $selected }
+            catch {
+                $availability = Join-Path $work 'AVAILABILITY'
+                Save-IliumDownload ($origin + '/AVAILABILITY') $availability
+                $expectedHash = Get-IliumPartialChecksum $checksums $availability $selected $Version
+            }
         }
         Save-IliumDownload ($origin + '/' + $selected.archive) $archive
         $stage = 'checksum'

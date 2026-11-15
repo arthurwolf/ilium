@@ -1,0 +1,60 @@
+name: Preview Pages contracts
+on:
+  push:
+    paths:
+      - README.md
+      - Cargo.lock
+      - release/**
+      - ilium-animation-js/**
+      - ilium/src/**
+      - ilium-client/src/**
+      - ilium-platform/src/**
+      - .github/workflows/preview-pages-tests.yml
+      - release/scripts/preview_pages.py
+      - release/scripts/preview_qualification.py
+      - release/scripts/pages.py
+      - release/scripts/release_tool.py
+      - release/tests/test_preview_pages.py
+      - release/tests/test_preview_qualification.py
+      - .github/workflows/release.yml
+      - .github/workflows/preview-pages.yml
+      - release/linux-preview-pins.json
+  pull_request:
+    paths:
+      - README.md
+      - Cargo.lock
+      - release/**
+      - ilium-animation-js/**
+      - ilium/src/**
+      - ilium-client/src/**
+      - ilium-platform/src/**
+      - .github/workflows/preview-pages-tests.yml
+      - release/scripts/preview_pages.py
+      - release/scripts/preview_qualification.py
+      - release/scripts/pages.py
+      - release/scripts/release_tool.py
+      - release/tests/test_preview_pages.py
+      - release/tests/test_preview_qualification.py
+      - .github/workflows/release.yml
+      - .github/workflows/preview-pages.yml
+      - release/linux-preview-pins.json
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - run: python -m unittest release.tests.test_preview_pages release.tests.test_preview_qualification
+      - name: Run the complete release contract suite
+        run: |
+          sudo locale-gen en_US.UTF-8
+          python -m pip install PyYAML==6.0.2
+          python -m unittest discover -s release/tests -p 'test_*.py' -v
