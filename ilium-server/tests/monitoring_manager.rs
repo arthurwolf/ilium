@@ -1,8 +1,7 @@
 //! Scripted manager using a real server and an absolute-path fake agent fixture.
 use ilium_core::{AgentActivity, ROOT_ID};
 use ilium_ipc::{
-    read_frame, write_frame, ClientRequest, MonitoringFormat, MonitoringQuery, MonitoringView,
-    ServerEvent,
+    write_frame, ClientRequest, MonitoringFormat, MonitoringQuery, MonitoringView, ServerEvent,
 };
 use ilium_server::config::DetectionConfig;
 use ilium_test_fixtures::{install, FixtureBehavior};
@@ -38,10 +37,12 @@ async fn read(server: &TestServer, query: MonitoringQuery) -> serde_json::Value 
     )
     .await
     .unwrap();
-    let event: ServerEvent = tokio::time::timeout(Duration::from_secs(30), read_frame(&mut stream))
-        .await
-        .unwrap()
-        .unwrap();
+    // The detector may broadcast between connect and the server reading this
+    // request. Correlate the direct reply instead of assuming it is frame one.
+    let event = expect_event(&mut stream, Duration::from_secs(30), |event| {
+        matches!(event, ServerEvent::MonitoringEvents { request_id: 1, .. })
+    })
+    .await;
     let ServerEvent::MonitoringEvents {
         request_id: 1,
         result,
@@ -127,10 +128,10 @@ async fn monitoring_manager_follows_digests_drills_acknowledges_and_audits_a_liv
     .await
     .unwrap();
     std::fs::write(&marker, b"finish").unwrap();
-    let event: ServerEvent = tokio::time::timeout(Duration::from_secs(30), read_frame(&mut reader))
-        .await
-        .unwrap()
-        .unwrap();
+    let event = expect_event(&mut reader, Duration::from_secs(30), |event| {
+        matches!(event, ServerEvent::MonitoringEvents { request_id: 3, .. })
+    })
+    .await;
     let ServerEvent::MonitoringEvents {
         request_id: 3,
         result,
@@ -165,9 +166,16 @@ async fn monitoring_manager_follows_digests_drills_acknowledges_and_audits_a_liv
     )
     .await
     .unwrap();
+    let acknowledgement = expect_event(&mut ack, Duration::from_secs(30), |event| {
+        matches!(event, ServerEvent::MonitoringAck { request_id: 4, .. })
+    })
+    .await;
     assert!(matches!(
-        read_frame::<ServerEvent, _>(&mut ack).await.unwrap(),
-        ServerEvent::MonitoringAck { result: Ok(_), .. }
+        acknowledgement,
+        ServerEvent::MonitoringAck {
+            request_id: 4,
+            result: Ok(_)
+        }
     ));
     assert_eq!(
         read(&server, query(MonitoringView::Digest, None)).await["quiet"],
