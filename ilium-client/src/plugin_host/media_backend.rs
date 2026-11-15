@@ -13,13 +13,13 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ilium_plugin_api::generated::host::media::VideoInfo;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use ilium_plugin_host::imports::media::{DecodeRequest, FrameSource, MediaBackend};
+use ilium_plugin_host::imports::media::{DecodeRequest, FramePoll, FrameSource, MediaBackend};
 
 const FFMPEG_PROGRAM: &str = "ffmpeg";
 const FFPROBE_PROGRAM: &str = "ffprobe";
@@ -342,6 +342,20 @@ impl FrameSource for FfmpegRun {
                 ErrorCode::TimedOut,
                 "the decoder has no frame ready yet",
             )),
+        }
+    }
+
+    fn poll_frame(&mut self) -> Result<FramePoll, PluginError> {
+        let Some(frames) = &self.frames else {
+            return Ok(FramePoll::End);
+        };
+        match frames.try_recv() {
+            Ok(frame) => Ok(FramePoll::Frame(frame)),
+            Err(TryRecvError::Empty) => Ok(FramePoll::Pending),
+            Err(TryRecvError::Disconnected) => Ok(match self.finish()? {
+                Some(frame) => FramePoll::Frame(frame),
+                None => FramePoll::End,
+            }),
         }
     }
 }

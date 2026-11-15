@@ -27,6 +27,7 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
         "pi-digits" => crate::pi_digits::create(spec, env),
         "stars-overhead" => crate::stars::create(spec, env),
         "topographic-maps" => crate::topographic_maps::create(spec, env),
+        "video" => crate::video::create(spec, env),
         "wind" => crate::wind::create(spec, env),
         // The ten classic scenes (shoreline, moonlit water, ... quiet pond).
         id if crate::classic::IDS.contains(&id) => return crate::classic::create(id, spec, env),

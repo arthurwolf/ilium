@@ -67,6 +67,9 @@ impl App {
                 self.action_freeze_agent(node);
                 true
             }
+            ClientEffect::ScrollTerminal { node, rows_back } => {
+                self.plugin_scroll_terminal(node, rows_back)
+            }
             ClientEffect::ResolveSessionRecovery { restore } => {
                 self.answer_session_recovery(plugin, restore)
             }
@@ -198,6 +201,19 @@ impl App {
         true
     }
 
+    /// Scrolls a terminal pane's own view `rows_back` rows above its live screen; 0 returns to
+    /// the live tail. A node that is not a terminal pane is ignored.
+    fn plugin_scroll_terminal(&mut self, node: NodeId, rows_back: u16) -> bool {
+        let Some(super::PaneRuntime::Terminal(view)) = self.panes.get_mut(&node) else {
+            return false;
+        };
+        view.scroll_to_bottom();
+        if rows_back > 0 {
+            view.scroll_up(rows_back);
+        }
+        true
+    }
+
     fn plugin_focus_node(&mut self, plugin: &str, node: NodeId) -> bool {
         let Some(found) = self.tree.get(node) else {
             self.status_message = Some(format!("{plugin}: node {} is gone", node.0));
@@ -226,6 +242,10 @@ impl App {
         let mut changed = false;
         if let Some(table) = reload.animations {
             self.apply_plugin_animation_table(&table);
+            changed = true;
+        }
+        // Turning the Layout plugin off or on adds or removes the panel padding it owns.
+        if self.follow_padding_owner() {
             changed = true;
         }
         changed

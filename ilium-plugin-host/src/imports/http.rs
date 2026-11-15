@@ -166,8 +166,13 @@ fn grant_of(parsed: &ParsedUrl) -> String {
 }
 
 /// Checks the request shape and destination; returns the parsed URL. The destination must be
-/// covered by one of the plugin's `http:` grants.
-fn check_request(request: &HttpRequest, env: &ImportEnv) -> Result<ParsedUrl, PluginError> {
+/// covered by one of the plugin's `http:` grants, or be one of the `setting_hosts` lent to this
+/// instance from its `http:setting:<key>` grants (see [`HttpImport::with_setting_hosts`]).
+fn check_request(
+    request: &HttpRequest,
+    env: &ImportEnv,
+    setting_hosts: &[String],
+) -> Result<ParsedUrl, PluginError> {
     let parsed = parse_url(&request.url, &["http", "https"])?;
     if request.headers.len() > MAX_HEADERS {
         return Err(error(ErrorCode::InvalidArgument, "at most 64 headers"));
@@ -209,13 +214,48 @@ fn check_request(request: &HttpRequest, env: &ImportEnv) -> Result<ParsedUrl, Pl
             "plain http is only allowed to loopback",
         ));
     }
-    if !env.holds(&grant_of(&parsed)) {
+    let destination = grant_of(&parsed);
+    if !env.holds(&destination) && !setting_hosts.contains(&destination) {
         return Err(error(
             ErrorCode::NotPermitted,
             "no http grant covers this host",
         ));
     }
     Ok(parsed)
+}
+
+/// The destinations lent by setting values: for each `(key, value)` whose
+/// `http:setting:<key>` grant the instance holds, every `;`-separated item of the value that
+/// names an https URL or a bare host (an http URL only for loopback), as the grant string
+/// [`grant_of`] gives for it.
+fn setting_destinations(env: &ImportEnv, values: &[(String, String)]) -> Vec<String> {
+    let mut destinations = Vec::new();
+    for (key, value) in values {
+        if key.is_empty() || !env.holds(&format!("http:setting:{key}")) {
+            continue;
+        }
+        for item in value.split(';').map(str::trim).filter(|item| !item.is_empty()) {
+            if item.contains('*') {
+                continue;
+            }
+            let url = if item.contains("://") {
+                item.to_owned()
+            } else {
+                format!("https://{item}/")
+            };
+            let Ok(parsed) = parse_url(&url, &["http", "https"]) else {
+                continue;
+            };
+            if parsed.scheme == "http" && !parsed.is_loopback() {
+                continue;
+            }
+            let destination = grant_of(&parsed);
+            if !destinations.contains(&destination) {
+                destinations.push(destination);
+            }
+        }
+    }
+    destinations
 }
 
 /// The status line, headers and body reader of an answered request.
@@ -794,6 +834,9 @@ pub struct HttpImport {
     next_stream: u64,
     /// How long `take-response` waits for a fetch still in flight.
     patience: Duration,
+    /// Destinations (`http:<host>` or `http:<host>:<port>`) taken from the values of the
+    /// settings named by the instance's `http:setting:<key>` grants.
+    setting_hosts: Vec<String>,
 }
 
 impl Default for HttpImport {
@@ -821,7 +864,18 @@ impl HttpImport {
             streams: HashMap::new(),
             next_stream: 0,
             patience: TAKE_RESPONSE_PATIENCE,
+            setting_hosts: Vec::new(),
         }
+    }
+
+    /// An import that may also reach the hosts named by setting values (`http:setting:<key>`,
+    /// api-http-streams "Hosts from a setting"). `values` are `(key, value)` pairs; a value is
+    /// a URL, a host, or several of them separated by `;`. Only the keys of a held
+    /// `http:setting:<key>` grant count; a value with a wildcard, a path-only text or plain
+    /// http to a non-loopback host is ignored.
+    pub fn with_setting_hosts(mut self, values: &[(String, String)]) -> Self {
+        self.setting_hosts = setting_destinations(&self.env, values);
+        self
     }
 
     /// An import whose `take-response` never waits: a response that is not ready yet is
@@ -859,7 +913,7 @@ impl HttpImport {
 
 impl HostHttp for HttpImport {
     fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {
-        let parsed = check_request(&request, &self.env)?;
+        let parsed = check_request(&request, &self.env, &self.setting_hosts)?;
         if self.requests.len() >= PENDING_REQUEST_LIMIT {
             return Err(error(
                 ErrorCode::Busy,
@@ -918,7 +972,7 @@ impl HostHttp for HttpImport {
                 "max chunk must be 1 to 65536 bytes",
             ));
         }
-        let parsed = check_request(&request.request, &self.env)?;
+        let parsed = check_request(&request.request, &self.env, &self.setting_hosts)?;
         if self.open_streams() >= STREAMS_PER_PLUGIN_LIMIT {
             return Err(error(
                 ErrorCode::QuotaExceeded,
@@ -1569,5 +1623,43 @@ mod tests {
             max_chunk_bytes: 1024,
         };
         let _ = expect_ok(fixture.http().open_stream(stream));
+    }
+
+    #[test]
+    fn a_setting_value_lends_its_hosts_only_under_its_setting_grant() {
+        use super::{check_request, setting_destinations};
+        use crate::imports::env::ImportEnv;
+        let env = ImportEnv::unrestricted().with_grants(vec![
+            "http:setting:source".to_owned(),
+            "http:api.example.com".to_owned(),
+        ]);
+        let values = vec![
+            (
+                "source".to_owned(),
+                "https://media.example.org/clip.mp4; tiles.example.net:8443 ;*.bad.example; http://plain.example/x"
+                    .to_owned(),
+            ),
+            ("other".to_owned(), "https://elsewhere.example/".to_owned()),
+        ];
+        let lent = setting_destinations(&env, &values);
+        assert_eq!(
+            lent,
+            vec![
+                "http:media.example.org".to_owned(),
+                "http:tiles.example.net:8443".to_owned()
+            ]
+        );
+        let allowed = get("https://media.example.org/other.mp4".to_owned());
+        assert!(check_request(&allowed, &env, &lent).is_ok());
+        assert!(check_request(&allowed, &env, &[]).is_err());
+        let refused = get("https://elsewhere.example/".to_owned());
+        assert_eq!(
+            check_request(&refused, &env, &lent)
+                .expect_err("a key without its grant lends nothing")
+                .code,
+            ErrorCode::NotPermitted
+        );
+        let granted = get("https://api.example.com/v1".to_owned());
+        assert!(check_request(&granted, &env, &[]).is_ok());
     }
 }

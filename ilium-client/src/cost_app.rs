@@ -18,7 +18,15 @@ impl App {
         // partial peer set. This stack capture needs no unbounded UI Vec clone.
         let mut pane_ids = [NodeId(0); crate::cost_tracker::MAX_PANES + 1];
         let mut pane_count = 0;
-        if self.cost_settings.is_any_enabled() {
+        // A disabled Cost plugin tracks nothing, so the tree draws no spend indicators.
+        let switched_off;
+        let settings = if self.cost_plugin_runs() {
+            &self.cost_settings
+        } else {
+            switched_off = self.cost_settings.switched_off();
+            &switched_off
+        };
+        if settings.is_any_enabled() {
             for pane_id in self.tree.all_ids() {
                 if self.stats_agent_is_supported(pane_id) {
                     pane_ids[pane_count] = pane_id;
@@ -44,7 +52,7 @@ impl App {
 
         let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
         let input = TickInput {
-            settings: &self.cost_settings,
+            settings,
             tree: &self.tree,
             tree_version: self.tree_version,
             store: &self.session_stats,
@@ -72,11 +80,19 @@ impl App {
         }
         changed
     }
-    /// The tree order actually applied: cost ordering when the Agent Cost
-    /// tab's sort switch is on, then the plugin ordering the user chose when its plugin still
-    /// contributes it, otherwise the stored manual order.
+    /// Whether the Cost plugin, which owns the spend indicators and their Settings page, is
+    /// enabled. Without a plugin host no plugin state exists to consult, so it counts as on.
+    pub(crate) fn cost_plugin_runs(&self) -> bool {
+        self.wasm_plugins
+            .as_ref()
+            .is_none_or(|plugins| plugins.runs_plugin("ilium.core.cost"))
+    }
+
+    /// The tree order actually applied: cost ordering when the Cost plugin's sort switch is on
+    /// (and the plugin is enabled), then the plugin ordering the user chose when its plugin
+    /// still contributes it, otherwise the stored manual order.
     pub(crate) fn effective_tree_order(&self) -> crate::config::TreeOrder {
-        if self.cost_settings.sort_by_cost {
+        if self.cost_settings.sort_by_cost && self.cost_plugin_runs() {
             crate::config::TreeOrder::CostDescending
         } else if self.plugin_tree_ordering_in_effect() {
             crate::config::TreeOrder::PluginKey

@@ -59,7 +59,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "commands": [
       { "id": "compact", "title": "Compact agent context" },
       { "id": "history", "title": "Show agent debug history" },
-      { "id": "close-finished", "title": "Close finished agent" }
+      { "id": "close-finished", "title": "Close finished agent" },
+      { "id": "resume-goal", "title": "Resume the paused goal" }
     ],
     "tree_toolbar": [
       { "id": "compact", "icon": "arrows-minimize", "label": "Compact",
@@ -73,7 +74,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "id": "prompt", "placement": "banner", "applies_to": "agents" },
       { "id": "model", "placement": "header-text", "applies_to": "agents" },
       { "id": "recover", "placement": "footer-row", "applies_to": "agents" },
-      { "id": "finished", "placement": "footer-row", "applies_to": "agents" }
+      { "id": "finished", "placement": "footer-row", "applies_to": "agents" },
+      { "id": "goal", "placement": "footer-row", "applies_to": "agents" }
     ]
   },
   "capabilities": {
@@ -208,6 +210,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "close-finished",
         "title": "Close finished agent"
+      },
+      {
+        "id": "resume-goal",
+        "title": "Resume the paused goal"
       }
     ],
     "tree_toolbar": [
@@ -248,6 +254,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       },
       {
         "id": "finished",
+        "placement": "footer-row",
+        "applies_to": "agents"
+      },
+      {
+        "id": "goal",
         "placement": "footer-row",
         "applies_to": "agents"
       }

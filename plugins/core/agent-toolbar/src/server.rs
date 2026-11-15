@@ -104,6 +104,13 @@ impl AgentToolbarServer {
                 }),
                 format!("compact:{}", pane.0),
             )),
+            "goal-resume" => out.push(Submission::keyed(
+                Intent::AgentAction(AgentActionSpec {
+                    pane,
+                    action_id: "goal-resume".to_string(),
+                }),
+                format!("goal-resume:{}", pane.0),
+            )),
             "history" => out.push(history_reply(pane)),
             _ => {}
         }

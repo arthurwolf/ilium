@@ -298,9 +298,6 @@ impl App {
             ValueTarget::SettingsNumber {
                 field, directory, ..
             } => (directory.clone(), NumberReadTarget::Settings(*field)),
-            ValueTarget::Cost {
-                target, directory, ..
-            } => (directory.clone(), NumberReadTarget::Cost(target.clone())),
             _ => return,
         };
         let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
@@ -381,17 +378,15 @@ impl App {
         // A later destination, selected field or accepted
         // runtime change cannot be overwritten by this older read.
         let matches = match (&host.target, self.modal_stack.last()) {
-            (crate::value_dialog_host::ValueTarget::SettingsNumber { field, directory, .. }, Some(Mode::Settings(parent))) => {
+            (
+                crate::value_dialog_host::ValueTarget::SettingsNumber {
+                    field, directory, ..
+                },
+                Some(Mode::Settings(parent)),
+            ) => {
                 self.config_dir.as_ref() == Some(directory)
                     && field.snapshot(self).1 == read.runtime_value
                     && SettingsNumber::at(self, parent.tab, parent.selected_row) == Some(*field)
-            }
-            (crate::value_dialog_host::ValueTarget::Cost { target, directory, .. }, Some(Mode::Settings(parent))) => {
-                self.config_dir.as_ref() == Some(directory)
-                    && parent.tab == SettingsTab::Cost
-                    && crate::cost_settings::CostRow::rows(&self.cost_settings).get(parent.selected_row) == Some(&target.row)
-                    && target.dialog(&self.cost_settings).is_ok_and(|dialog| matches!(dialog,
-                        crate::value_dialog::ValueDialogState::Number(number) if number.draft.buf == read.runtime_value))
             }
             _ => false,
         };

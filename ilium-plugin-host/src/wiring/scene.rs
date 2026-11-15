@@ -213,9 +213,14 @@ impl SceneImportServices {
         let env = ImportEnv::for_instance(&context);
         let book = JobBook::new();
         let lent_picks = lent_picks(request.picked);
-        let mut imports = self.base_set(&context, request.observer, &lent_picks);
+        let setting_values = request.setting_values.to_vec();
+        let mut imports = self.base_set(&context, request.observer, &lent_picks, &setting_values);
         // A scene draws inside a render frame: its fetches never block it.
-        imports.http = Some(Box::new(HttpImport::new(env.clone()).without_waiting()));
+        imports.http = Some(Box::new(
+            HttpImport::new(env.clone())
+                .with_setting_hosts(&setting_values)
+                .without_waiting(),
+        ));
         imports.jobs = Some(Box::new(JobsImport::new(
             env,
             book.clone(),
@@ -235,6 +240,7 @@ impl SceneImportServices {
                 book,
                 observer: request.observer,
                 lent_picks,
+                setting_values,
                 engine: Arc::clone(engine),
                 compiled: compiled.clone(),
                 limits: limits.clone(),
@@ -245,12 +251,14 @@ impl SceneImportServices {
 
     /// Everything but `jobs` (and the frame-bound `http` of the render instance); restricted to
     /// the interfaces of the scene world, not yet to the grants. `lent_picks` are this
-    /// instance's read-only `picked/<n>` scopes and their roots.
+    /// instance's read-only `picked/<n>` scopes and their roots; `setting_values` are the
+    /// `(key, value)` pairs whose hosts its `http:setting:<key>` grants lend.
     fn base_set(
         &self,
         context: &InstanceContext,
         observer: Option<(f64, f64)>,
         lent_picks: &AgentScopes,
+        setting_values: &[(String, String)],
     ) -> ImportSet {
         let env = ImportEnv::for_instance(context);
         let mut set = ImportSet {
@@ -268,7 +276,9 @@ impl SceneImportServices {
                 None => GeocodeImport::default(),
             })),
             location: Some(Box::new(ObserverLocation::new(env.clone(), observer))),
-            http: Some(Box::new(HttpImport::new(env))),
+            http: Some(Box::new(
+                HttpImport::new(env).with_setting_hosts(setting_values),
+            )),
             ..ImportSet::default()
         };
         if let Some(disk) = &self.disk {
@@ -307,6 +317,10 @@ pub struct SceneInstanceRequest<'a> {
     /// The folders and files of the scene's `picker` settings rows, in row order: path `n` is
     /// lent as the read-only scope `picked/<n>`, opened by `fs.read:picked`.
     pub picked: &'a [PathBuf],
+    /// The `(key, value)` text settings of the scene: the hosts in the value of `key` are
+    /// reachable when the scene holds `http:setting:<key>` (api-http-streams "Hosts from a
+    /// setting"). Values of other keys lend nothing.
+    pub setting_values: &'a [(String, String)],
 }
 
 /// The read-only `picked/<n>` scopes of one instance. A path that is not absolute is left out,
@@ -361,6 +375,8 @@ pub struct SceneBackground {
     observer: Option<(f64, f64)>,
     /// The instance's lent `picked/<n>` scopes, lent to its job instances too.
     lent_picks: AgentScopes,
+    /// The setting values whose hosts `http:setting:<key>` lends, to its job instances too.
+    setting_values: Vec<(String, String)>,
     engine: Arc<PluginEngine>,
     compiled: CompiledComponent,
     limits: ResolvedLimits,
@@ -458,7 +474,12 @@ impl SceneBackground {
         limits.0.insert(LimitKey::MemoryMib, memory_mib);
         let mut set = self
             .services
-            .base_set(&self.context, self.observer, &self.lent_picks);
+            .base_set(
+                &self.context,
+                self.observer,
+                &self.lent_picks,
+                &self.setting_values,
+            );
         set.jobs = Some(Box::new(JobsImport::for_job(
             ImportEnv::for_instance(&self.context),
             self.book.clone(),
@@ -571,6 +592,7 @@ mod tests {
                 manifest,
                 observer,
                 picked: &[],
+                setting_values: &[],
             },
             &engine,
             &compiled,
@@ -866,6 +888,7 @@ mod tests {
                     manifest: &Value::Null,
                     observer: None,
                     picked: &picked,
+                    setting_values: &[],
                 },
                 &engine,
                 &compiled,

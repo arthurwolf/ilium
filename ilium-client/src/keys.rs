@@ -349,7 +349,7 @@ mod bounded_normal_paste_tests {
         );
 
         app.mode = Mode::AgentSetupPathPrompt(
-            crate::agent_feature_setup::AgentFeature::Chatroom,
+            ilium_instructions::AgentFeature::Chatroom,
             crate::text_prompt::TextPromptState::new(""),
         );
         assert!(
@@ -1091,7 +1091,7 @@ fn handle_location_picker_event(
 
 fn handle_agent_setup_path_prompt(
     app: &mut App,
-    feature: crate::agent_feature_setup::AgentFeature,
+    feature: ilium_instructions::AgentFeature,
     mut state: TextPromptState,
     event: &Event,
 ) {
@@ -1792,31 +1792,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
 
-    if state.tab == SettingsTab::Cost && app.cost_window_input.is_some() {
-        match key.code {
-            KeyCode::Esc => app.settings_cancel_cost_window_input(),
-            KeyCode::Backspace => {
-                if let Some(input) = &mut app.cost_window_input {
-                    input.pop();
-                }
-            }
-            KeyCode::Enter => app.settings_submit_cost_window_input(),
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && (character.is_ascii_alphanumeric() || matches!(character, '.' | ' ')) =>
-            {
-                if let Some(input) = &mut app.cost_window_input {
-                    if input.chars().count() < 16 {
-                        input.push(character);
-                    }
-                }
-            }
-            _ => {}
-        }
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
-
     if state.tab == SettingsTab::AgentMonitoring && app.agent_detection_signature_input.is_some() {
         match key.code {
             KeyCode::Esc => app.settings_cancel_custom_agent_signature(),
@@ -2444,80 +2419,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 return;
             }
         }
-        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Cost => {
-            state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Cost => {
-            let last = crate::cost_settings_ui::rows(app).len().saturating_sub(1);
-            state.selected_row = (state.selected_row + 1).min(last);
-        }
-        KeyCode::Enter | KeyCode::Char('*') | KeyCode::Char('+')
-            if state.tab == SettingsTab::Cost
-                && crate::cost_settings_ui::rows(app)
-                    .get(state.selected_row)
-                    .is_some_and(|row| {
-                        (app.cost_settings.number_spec(*row).is_some()
-                            && matches!(key.code, KeyCode::Enter | KeyCode::Char('*')))
-                            || (crate::value_cost::is_choice(*row)
-                                && matches!(key.code, KeyCode::Enter | KeyCode::Char('+')))
-                    }) =>
-        {
-            let row = crate::cost_settings_ui::rows(app)[state.selected_row];
-            app.mode = Mode::Settings(Box::new(state));
-            app.begin_cost_value_dialog(row);
-            return;
-        }
-        KeyCode::Char(character @ ('-' | '+'))
-            if state.tab == SettingsTab::Cost
-                && crate::cost_settings_ui::rows(app)
-                    .get(state.selected_row)
-                    .is_some_and(|row| app.cost_settings.number_spec(*row).is_some()) =>
-        {
-            let row = crate::cost_settings_ui::rows(app)[state.selected_row];
-            app.settings_adjust_cost_row(row, if character == '-' { -1 } else { 1 });
-        }
-        KeyCode::Left
-        | KeyCode::Char('h')
-        | KeyCode::Right
-        | KeyCode::Char('l')
-        | KeyCode::Enter
-        | KeyCode::Char(' ')
-            if state.tab == SettingsTab::Cost =>
-        {
-            let direction = match key.code {
-                KeyCode::Left | KeyCode::Char('h') => -1,
-                KeyCode::Right | KeyCode::Char('l') => 1,
-                _ => 0,
-            };
-            if let Some(row) = crate::cost_settings_ui::rows(app)
-                .get(state.selected_row)
-                .copied()
-            {
-                if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) {
-                    if let Some(target) = row.icon_target() {
-                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
-                        app.mode = Mode::Settings(Box::new(state));
-                        return;
-                    }
-                }
-                if row == crate::cost_settings::CostRow::SparklineWindow
-                    && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
-                {
-                    // Enter types an exact value; the arrows step the ladder.
-                    app.settings_begin_cost_window_input();
-                    app.mode = Mode::Settings(Box::new(state));
-                    return;
-                }
-                app.settings_adjust_cost_row(row, direction);
-                // Choosing a calibration swaps which parameter row follows
-                // it; keep the selection on the row the user acted on.
-                let rows = crate::cost_settings_ui::rows(app);
-                state.selected_row = rows
-                    .iter()
-                    .position(|candidate| *candidate == row)
-                    .unwrap_or_else(|| state.selected_row.min(rows.len().saturating_sub(1)));
-            }
-        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Debug => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -2804,16 +2705,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         let row_count = model.len();
         state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
         crate::animation_settings_ui::sync_scrolls(content_area, &model, &mut state);
-    }
-    if state.tab == SettingsTab::Cost {
-        let row_count = crate::cost_settings_ui::rows(app).len();
-        state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
-        state.scroll = crate::cost_settings_ui::scroll_for_selection(
-            app,
-            content_area,
-            state.selected_row,
-            state.scroll,
-        );
     }
     if state.tab == SettingsTab::Triggers {
         state.scroll = crate::trigger_settings_ui::scroll_for_selection(
@@ -3431,210 +3322,6 @@ mod indent_outdent_tests {
         assert!(app.trigger_settings.agent_finished_work.is_empty());
     }
 
-    fn press(app: &mut App, code: KeyCode) {
-        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-    }
-
-    #[test]
-    fn cost_star_retains_exact_number_after_disk_failure_then_retries_durably() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
-        let mut app = App::new("cost-value-test".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 50));
-        app.cost_settings.calibration = crate::cost_model::Calibration::Budget;
-        crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
-        let row = crate::cost_settings_ui::rows(&app)
-            .iter()
-            .position(|row| *row == crate::cost_settings::CostRow::Budget)
-            .unwrap();
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Cost,
-            selected_row: row,
-            ..SettingsState::default()
-        }));
-        press(&mut app, KeyCode::Char('*'));
-        app.settle_filesystem_for_test();
-        std::fs::write(&path, "[cost\n").unwrap();
-        let Mode::ValueDialog(host) = &mut app.mode else {
-            panic!("number dialog");
-        };
-        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
-            panic!("number");
-        };
-        number.draft = crate::text_prompt::TextPromptState::new("17.125");
-        press(&mut app, KeyCode::Enter);
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        app.settle_filesystem_for_test();
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("failed save retains modal");
-        };
-        assert!(!host.is_saving());
-        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
-            panic!("number");
-        };
-        assert_eq!(number.draft.buf, "17.125");
-        assert!(number.error.is_some());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[cost\n");
-        std::fs::write(&path, "[cost]\n").unwrap();
-        press(&mut app, KeyCode::Enter);
-        app.settle_filesystem_for_test();
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .cost
-                .budget_usd,
-            17.125
-        );
-    }
-
-    #[test]
-    fn cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view() {
-        use crate::cost_model::Calibration;
-        use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
-
-        let mut app = App::new("test".to_owned(), std::env::temp_dir());
-        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Cost,
-            ..SettingsState::default()
-        }));
-        let row_index = |app: &App, row: CostRow| {
-            crate::cost_settings_ui::rows(app)
-                .iter()
-                .position(|candidate| *candidate == row)
-                .unwrap()
-        };
-        let selected = |app: &App| match &app.mode {
-            Mode::Settings(state) => state.selected_row,
-            _ => panic!("settings should stay open"),
-        };
-
-        // The shared calibration selector steps to Budget and reveals its
-        // parameter row without moving selection away from the selector.
-        let calibration_row = row_index(&app, CostRow::Calibration(Calibration::OwnHistory));
-        for _ in 0..calibration_row {
-            press(&mut app, KeyCode::Down);
-        }
-        press(&mut app, KeyCode::Right);
-        assert_eq!(app.cost_settings.calibration, Calibration::Budget);
-        assert_eq!(selected(&app), calibration_row);
-        assert!(crate::cost_settings_ui::rows(&app).contains(&CostRow::Budget));
-
-        // Space toggles an option; Right on its visibility row flips it.
-        let sparkline = row_index(&app, CostRow::Display(CostDisplay::Sparkline));
-        while selected(&app) < sparkline {
-            press(&mut app, KeyCode::Down);
-        }
-        press(&mut app, KeyCode::Char(' '));
-        assert!(app.cost_settings.sparkline.enabled);
-        press(&mut app, KeyCode::Down);
-        press(&mut app, KeyCode::Right);
-        assert_eq!(
-            app.cost_settings.sparkline.visibility,
-            CostVisibility::Always
-        );
-
-        // Right/Left step a numeric row through its ladder.
-        let window = row_index(&app, CostRow::SparklineWindow);
-        while selected(&app) < window {
-            press(&mut app, KeyCode::Down);
-        }
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
-        press(&mut app, KeyCode::Right);
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 480);
-        press(&mut app, KeyCode::Left);
-        press(&mut app, KeyCode::Left);
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 240);
-
-        // Moving that far down scrolled the page so the row is visible.
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings should stay open");
-        };
-        assert!(state.scroll > 0, "the selection is below the first screen");
-    }
-
-    #[test]
-    fn cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo() {
-        use crate::cost_settings::CostRow;
-
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("test".to_owned(), directory.path().to_owned());
-        app.config_dir = Some(directory.path().to_owned());
-        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
-        let window_row = crate::cost_settings_ui::rows(&app)
-            .iter()
-            .position(|row| *row == CostRow::SparklineWindow)
-            .unwrap();
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Cost,
-            selected_row: window_row,
-            ..SettingsState::default()
-        }));
-
-        press(&mut app, KeyCode::Enter);
-        app.settle_filesystem_for_test();
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("exact window dialog");
-        };
-        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
-            panic!("numeric window draft");
-        };
-        assert_eq!(number.draft.buf, "360");
-        for _ in 0..3 {
-            press(&mut app, KeyCode::Backspace);
-        }
-        for character in "5x".chars() {
-            press(&mut app, KeyCode::Char(character));
-        }
-        press(&mut app, KeyCode::Enter);
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("typo keeps the dialog");
-        };
-        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
-            panic!("numeric window draft");
-        };
-        assert_eq!(number.draft.buf, "5x", "typo keeps the field");
-        assert!(
-            number.error.is_some(),
-            "invalid duration explains the failure"
-        );
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
-
-        press(&mut app, KeyCode::Backspace);
-        press(&mut app, KeyCode::Backspace);
-        for character in "10h".chars() {
-            press(&mut app, KeyCode::Char(character));
-        }
-        press(&mut app, KeyCode::Enter);
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        app.settle_filesystem_for_test();
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 600);
-        assert!(matches!(app.mode, Mode::Settings(_)), "settings stay open");
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .cost
-                .sparkline_window_minutes,
-            600,
-            "the native duration is saved as minutes"
-        );
-
-        press(&mut app, KeyCode::Enter);
-        app.settle_filesystem_for_test();
-        press(&mut app, KeyCode::Char('9'));
-        press(&mut app, KeyCode::Esc);
-        assert_eq!(
-            app.cost_settings.sparkline_window_minutes, 600,
-            "Esc cancels"
-        );
-        assert!(
-            matches!(app.mode, Mode::Settings(_)),
-            "Esc closed only the field"
-        );
-    }
-
     #[test]
     fn context_menu_keyboard_opens_order_submenu_and_applies_selection() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
@@ -3739,7 +3426,7 @@ mod indent_outdent_tests {
     fn setup_path_paste_never_submits_or_leaks_trailing_keys_into_settings() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::AgentSetupPathPrompt(
-            crate::agent_feature_setup::AgentFeature::Progress,
+            ilium_instructions::AgentFeature::Progress,
             TextPromptState::new(""),
         );
 

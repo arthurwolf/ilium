@@ -22,6 +22,10 @@ pub(crate) const FOCUS_NODE_COMMAND: &str = "kernel.focus-node";
 /// The kernel command that freezes an agent pane (`{"node": <id>}` or a bare id). It keeps the
 /// painted screen and queues the server's freeze, exactly like the pane's Freeze action.
 pub(crate) const FREEZE_AGENT_COMMAND: &str = "kernel.freeze-agent";
+/// The kernel command that scrolls a terminal pane's own view back into its scrollback:
+/// `{"node": <id>, "rows_back": <rows>}`. `rows_back` counts rows above the live screen, so 0
+/// shows the live tail again. The view clamps it to the scrollback it holds.
+pub(crate) const SCROLL_TERMINAL_COMMAND: &str = "kernel.scroll-terminal";
 /// Longest attention reason (reference-wit.md section 4.12).
 const MAXIMUM_ATTENTION_REASON_CHARACTERS: usize = 80;
 /// Longest toast title (reference-wit.md section 4.12).
@@ -64,6 +68,12 @@ pub(crate) enum ClientEffect {
     },
     /// Freeze an agent pane (`kernel.freeze-agent`): stop its process and keep its screen.
     FreezeAgent(ilium_core::NodeId),
+    /// Scroll a terminal pane's view `rows_back` rows above its live screen
+    /// (`kernel.scroll-terminal`); 0 returns to the live tail.
+    ScrollTerminal {
+        node: ilium_core::NodeId,
+        rows_back: u16,
+    },
     /// Set the order and visibility of the tree row slots (`kernel.set-tree-row-layout`).
     SetTreeRowLayout(crate::tree_row_layout::TreeRowLayout),
     /// Set the panel padding (`kernel.set-padding`).
@@ -261,8 +271,30 @@ pub(crate) fn focus_node_argument(arguments_json: &str) -> Option<ilium_core::No
     Some(ilium_core::NodeId(id))
 }
 
+/// The pane and row offset of a `kernel.scroll-terminal` invocation. A missing `rows_back` is 0
+/// (the live tail); one above `u16::MAX` is clamped, the view clamps it again to its scrollback.
+pub(crate) fn scroll_terminal_argument(arguments_json: &str) -> Option<(ilium_core::NodeId, u16)> {
+    let value: serde_json::Value = serde_json::from_str(arguments_json).ok()?;
+    let fields = value.as_object()?;
+    let node = ilium_core::NodeId(fields.get("node")?.as_u64()?);
+    let rows_back = fields
+        .get("rows_back")
+        .and_then(serde_json::Value::as_u64)
+        .map_or(0, |rows| u16::try_from(rows).unwrap_or(u16::MAX));
+    Some((node, rows_back))
+}
+
 fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
     match spec.command.as_str() {
+        SCROLL_TERMINAL_COMMAND => match scroll_terminal_argument(&spec.arguments_json) {
+            Some((node, rows_back)) => {
+                Classified::Effect(ClientEffect::ScrollTerminal { node, rows_back })
+            }
+            None => refused(
+                ErrorCode::InvalidArgument,
+                "kernel.scroll-terminal takes {\"node\": <id>, \"rows_back\": <rows>}",
+            ),
+        },
         FOCUS_NODE_COMMAND => match focus_node_argument(&spec.arguments_json) {
             Some(node) => Classified::Effect(ClientEffect::FocusNode(node)),
             None => refused(
@@ -451,6 +483,37 @@ mod tests {
             Path::new("/work/project"),
             Some(Path::new("/home/someone")),
         )
+    }
+
+    #[test]
+    fn scroll_terminal_reads_the_pane_and_the_rows_back() {
+        assert_eq!(
+            scroll_terminal_argument("{\"node\": 4, \"rows_back\": 120}"),
+            Some((ilium_core::NodeId(4), 120))
+        );
+        assert_eq!(
+            scroll_terminal_argument("{\"node\": 4}"),
+            Some((ilium_core::NodeId(4), 0))
+        );
+        assert_eq!(
+            scroll_terminal_argument("{\"node\": 4, \"rows_back\": 9999999}"),
+            Some((ilium_core::NodeId(4), u16::MAX))
+        );
+        assert_eq!(scroll_terminal_argument("4"), None);
+        assert_eq!(scroll_terminal_argument("{\"rows_back\": 1}"), None);
+        let intent = Intent::InvokeCommand(InvokeCommandSpec {
+            command: SCROLL_TERMINAL_COMMAND.to_owned(),
+            arguments_json: "{\"node\": 4, \"rows_back\": 7}".to_owned(),
+        });
+        assert!(matches!(
+            classify_here(intent),
+            Classified::Effect(ClientEffect::ScrollTerminal { rows_back: 7, .. })
+        ));
+        let bad = Intent::InvokeCommand(InvokeCommandSpec {
+            command: SCROLL_TERMINAL_COMMAND.to_owned(),
+            arguments_json: "[]".to_owned(),
+        });
+        assert!(matches!(classify_here(bad), Classified::Refused(_)));
     }
 
     #[test]

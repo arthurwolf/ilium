@@ -10,3 +10,5 @@
 ## Re-check of the foundation against the tree (2026-11-14): what still blocks the moves
 
 - `tree_layout_settings.rs` is deleted: the plugin's `tree-layout` popup edits the layout (see `src/tree_layout_dialog.rs`). The Icons page opens it with `L`.
+
+- Padding frame-draw consumers: DONE. The kernel keeps the value types and their resolution (`ilium-client/src/padding.rs`); the tree panel (`tree_ui.rs vertical_sections`) and every pane viewport (`App::pane_viewports`) read them through `App::padding_for`, which returns no padding while the Layout plugin is off (`App::follow_padding_owner` re-applies it on the tick when the plugin is turned off or on).

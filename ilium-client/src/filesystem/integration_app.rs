@@ -1,8 +1,8 @@
 use super::integrations::{FeatureTarget, IntegrationIntent, Maintenance};
 use super::ordered::WriteCompletion;
-use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
 use crate::app::{AgentSetupTargetStatus, App, Mode};
 use ilium_execution::JobOutcome;
+use ilium_instructions::{AgentFeature, FeatureSetupStatus};
 use std::{path::Path, sync::Arc};
 
 impl App {

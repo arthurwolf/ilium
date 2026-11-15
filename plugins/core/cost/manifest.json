@@ -35,7 +35,9 @@
       "extensions.provide:ilium.core.cost/quota-sources"
     ],
     "client": [
-      "ui.panels"
+      "ui.panels",
+      "settings.write-kernel:reset-planning",
+      "settings.write-kernel:agent-cost"
     ]
   },
   "activation": [
@@ -226,6 +228,732 @@
                     "title": "Human (rounded)"
                   }
                 ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "tab",
+        "id": "agent-cost",
+        "title": "Agent Cost",
+        "sections": [
+          {
+            "id": "cost-measure",
+            "title": "Measure",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "metric",
+                "title": "Measure",
+                "description": "Estimated dollars at API list prices, or percentage points of the plan's rate-limit window used up while the agent ran.",
+                "default": "dollars",
+                "options": [
+                  {
+                    "value": "dollars",
+                    "title": "API dollars"
+                  },
+                  {
+                    "value": "quota",
+                    "title": "Plan quota"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "metric"
+              },
+              {
+                "type": "choice",
+                "key": "quota_window",
+                "title": "Quota window",
+                "description": "Which Codex rate-limit window the quota figures follow.",
+                "default": "primary",
+                "options": [
+                  {
+                    "value": "primary",
+                    "title": "Short window"
+                  },
+                  {
+                    "value": "secondary",
+                    "title": "Long window"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "quota_window"
+              }
+            ]
+          },
+          {
+            "id": "cost-rating",
+            "title": "Rating",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "calibration",
+                "title": "Rate against",
+                "description": "How \"a lot\" is decided: fixed thresholds, the median of the open agents, percentiles of your past sessions, a per-agent budget, or the current spend rate.",
+                "default": "own_history",
+                "options": [
+                  {
+                    "value": "fixed_bands",
+                    "title": "Fixed bands"
+                  },
+                  {
+                    "value": "peer_relative",
+                    "title": "Relative to open agents"
+                  },
+                  {
+                    "value": "own_history",
+                    "title": "Relative to your history"
+                  },
+                  {
+                    "value": "budget",
+                    "title": "Budget"
+                  },
+                  {
+                    "value": "burn_rate",
+                    "title": "Burn rate"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "calibration"
+              },
+              {
+                "type": "choice",
+                "key": "fixed_cuts",
+                "title": "Fixed bands (dollars)",
+                "description": "The totals at which the fixed-band level steps up under the dollar metric.",
+                "default": [
+                  1.0,
+                  5.0,
+                  20.0,
+                  50.0
+                ],
+                "options": [
+                  {
+                    "value": [
+                      0.25,
+                      1.0,
+                      4.0,
+                      10.0
+                    ],
+                    "title": "0.25 / 1 / 4 / 10 $"
+                  },
+                  {
+                    "value": [
+                      0.5,
+                      2.0,
+                      8.0,
+                      25.0
+                    ],
+                    "title": "0.5 / 2 / 8 / 25 $"
+                  },
+                  {
+                    "value": [
+                      1.0,
+                      5.0,
+                      20.0,
+                      50.0
+                    ],
+                    "title": "1 / 5 / 20 / 50 $"
+                  },
+                  {
+                    "value": [
+                      2.0,
+                      10.0,
+                      40.0,
+                      100.0
+                    ],
+                    "title": "2 / 10 / 40 / 100 $"
+                  },
+                  {
+                    "value": [
+                      5.0,
+                      25.0,
+                      100.0,
+                      250.0
+                    ],
+                    "title": "5 / 25 / 100 / 250 $"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "fixed_cuts"
+              },
+              {
+                "type": "choice",
+                "key": "quota_fixed_cuts",
+                "title": "Fixed bands (quota)",
+                "description": "The fixed-band steps under the quota metric, in percentage points of plan quota.",
+                "default": [
+                  1.0,
+                  3.0,
+                  8.0,
+                  20.0
+                ],
+                "options": [
+                  {
+                    "value": [
+                      0.5,
+                      2.0,
+                      5.0,
+                      12.0
+                    ],
+                    "title": "0.5 / 2 / 5 / 12 %"
+                  },
+                  {
+                    "value": [
+                      1.0,
+                      3.0,
+                      8.0,
+                      20.0
+                    ],
+                    "title": "1 / 3 / 8 / 20 %"
+                  },
+                  {
+                    "value": [
+                      2.0,
+                      6.0,
+                      15.0,
+                      35.0
+                    ],
+                    "title": "2 / 6 / 15 / 35 %"
+                  },
+                  {
+                    "value": [
+                      5.0,
+                      12.0,
+                      30.0,
+                      60.0
+                    ],
+                    "title": "5 / 12 / 30 / 60 %"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "quota_fixed_cuts"
+              },
+              {
+                "type": "choice",
+                "key": "burn_cuts",
+                "title": "Burn-rate bands (dollars)",
+                "description": "The rates at which the burn-rate level steps up, in dollars per hour.",
+                "default": [
+                  0.5,
+                  2.0,
+                  5.0,
+                  15.0
+                ],
+                "options": [
+                  {
+                    "value": [
+                      0.25,
+                      1.0,
+                      3.0,
+                      8.0
+                    ],
+                    "title": "0.25 / 1 / 3 / 8 $/h"
+                  },
+                  {
+                    "value": [
+                      0.5,
+                      2.0,
+                      5.0,
+                      15.0
+                    ],
+                    "title": "0.5 / 2 / 5 / 15 $/h"
+                  },
+                  {
+                    "value": [
+                      1.0,
+                      4.0,
+                      10.0,
+                      30.0
+                    ],
+                    "title": "1 / 4 / 10 / 30 $/h"
+                  },
+                  {
+                    "value": [
+                      2.0,
+                      8.0,
+                      20.0,
+                      60.0
+                    ],
+                    "title": "2 / 8 / 20 / 60 $/h"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "burn_cuts"
+              },
+              {
+                "type": "choice",
+                "key": "quota_burn_cuts",
+                "title": "Burn-rate bands (quota)",
+                "description": "The burn-rate steps under the quota metric, in percentage points per hour.",
+                "default": [
+                  1.0,
+                  4.0,
+                  10.0,
+                  20.0
+                ],
+                "options": [
+                  {
+                    "value": [
+                      0.5,
+                      2.0,
+                      5.0,
+                      10.0
+                    ],
+                    "title": "0.5 / 2 / 5 / 10 %/h"
+                  },
+                  {
+                    "value": [
+                      1.0,
+                      4.0,
+                      10.0,
+                      20.0
+                    ],
+                    "title": "1 / 4 / 10 / 20 %/h"
+                  },
+                  {
+                    "value": [
+                      2.0,
+                      8.0,
+                      20.0,
+                      40.0
+                    ],
+                    "title": "2 / 8 / 20 / 40 %/h"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "quota_burn_cuts"
+              },
+              {
+                "type": "number",
+                "key": "budget_usd",
+                "title": "Budget per agent",
+                "description": "The dollars one agent may use before it counts as over budget.",
+                "default": 10.0,
+                "minimum": 0.01,
+                "maximum": 1000000.0,
+                "integer": false,
+                "unit": "$",
+                "steps": [
+                  1.0,
+                  2.0,
+                  5.0,
+                  10.0,
+                  20.0,
+                  50.0,
+                  100.0,
+                  200.0,
+                  500.0,
+                  1000.0
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "budget_usd"
+              },
+              {
+                "type": "number",
+                "key": "quota_budget_percent",
+                "title": "Quota budget per agent",
+                "description": "The percent of the plan window one agent may use before it counts as over budget.",
+                "default": 10.0,
+                "minimum": 0.1,
+                "maximum": 1000000.0,
+                "integer": false,
+                "unit": "%",
+                "steps": [
+                  1.0,
+                  2.0,
+                  5.0,
+                  10.0,
+                  20.0,
+                  30.0,
+                  50.0,
+                  75.0,
+                  100.0
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "quota_budget_percent"
+              },
+              {
+                "type": "number",
+                "key": "history_days",
+                "title": "History window",
+                "description": "How many days of past sessions are read to learn what is normal for you.",
+                "default": 90,
+                "minimum": 1,
+                "maximum": 3650,
+                "unit": "days",
+                "steps": [
+                  7,
+                  14,
+                  30,
+                  60,
+                  90,
+                  180,
+                  365,
+                  730
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "history_days"
+              }
+            ]
+          },
+          {
+            "id": "cost-indicators",
+            "title": "Indicators",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "level_glyph_enabled",
+                "title": "Level glyph",
+                "description": "One coloured height glyph per agent, green for cheap to red for expensive.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "level_glyph.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "level_glyph_visibility",
+                "title": "Level glyph: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "level_glyph.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "level_dollars_enabled",
+                "title": "Level glyph and amount",
+                "description": "The level glyph followed by the exact amount: estimated dollars, or percent of plan quota under the quota metric.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "level_dollars.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "level_dollars_visibility",
+                "title": "Level glyph and amount: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "level_dollars.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "meter_enabled",
+                "title": "Five-cell meter",
+                "description": "Five cells that fill as an agent gets more expensive.",
+                "default": true,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "meter.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "meter_visibility",
+                "title": "Five-cell meter: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "meter.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "sparkline_enabled",
+                "title": "Burn sparkline",
+                "description": "Spend over the sparkline window as a row of bars, one per time slice.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "sparkline.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "sparkline_visibility",
+                "title": "Burn sparkline: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "sparkline.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "group_totals_enabled",
+                "title": "Group and project totals",
+                "description": "Project and group rows show the sum of everything beneath them.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "group_totals.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "group_totals_visibility",
+                "title": "Group and project totals: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "group_totals.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "detail_card_enabled",
+                "title": "Detail card",
+                "description": "A card beside the tree with one agent's full cost breakdown.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "detail_card.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "detail_card_visibility",
+                "title": "Detail card: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "detail_card.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "header_total_enabled",
+                "title": "Total line above the tree",
+                "description": "The total estimated spend of every agent in the tree's title.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "header_total.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "header_total_visibility",
+                "title": "Total line above the tree: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "header_total.visibility"
+              },
+              {
+                "type": "toggle",
+                "key": "burn_marker_enabled",
+                "title": "Burn spike marker",
+                "description": "An arrow beside an agent's indicator while it spends at least twice as fast as it has lately.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "burn_marker.enabled"
+              },
+              {
+                "type": "choice",
+                "key": "burn_marker_visibility",
+                "title": "Burn spike marker: shown",
+                "default": "hover",
+                "options": [
+                  {
+                    "value": "always",
+                    "title": "Always"
+                  },
+                  {
+                    "value": "hover",
+                    "title": "While hovering"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "burn_marker.visibility"
+              },
+              {
+                "type": "number",
+                "key": "sparkline_window_minutes",
+                "title": "Sparkline window",
+                "description": "How much time the burn sparkline covers.",
+                "default": 360,
+                "minimum": 1,
+                "maximum": 525600,
+                "unit": "min",
+                "steps": [
+                  5,
+                  10,
+                  15,
+                  30,
+                  45,
+                  60,
+                  90,
+                  120,
+                  180,
+                  240,
+                  360,
+                  480,
+                  720,
+                  1080,
+                  1440,
+                  2880,
+                  4320,
+                  10080,
+                  20160,
+                  43200
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "sparkline_window_minutes"
+              },
+              {
+                "type": "number",
+                "key": "sparkline_cells",
+                "title": "Sparkline width",
+                "description": "How many time slices the burn sparkline has.",
+                "default": 8,
+                "minimum": 4,
+                "maximum": 24,
+                "unit": "cells",
+                "steps": [
+                  4,
+                  6,
+                  8,
+                  10,
+                  12,
+                  16,
+                  20,
+                  24
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "sparkline_cells"
+              },
+              {
+                "type": "toggle",
+                "key": "sort_by_cost",
+                "title": "Sort tree by cost",
+                "description": "Order every group and project by descending spend.",
+                "default": false,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "sort_by_cost"
+              }
+            ]
+          },
+          {
+            "id": "cost-medals",
+            "title": "Spending medals",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "medals_enabled",
+                "title": "Spending medals",
+                "description": "Gold, silver and bronze beside the agents that used the most tokens recently. The glyphs are chosen in Settings > Icons.",
+                "default": true,
+                "kernel_tab": "agent-cost",
+                "kernel_key": "medals_enabled"
+              },
+              {
+                "type": "number",
+                "key": "medal_window_minutes",
+                "title": "Medal period",
+                "description": "The rolling token-spend period used to award medals.",
+                "default": 720,
+                "minimum": 1,
+                "maximum": 525600,
+                "unit": "min",
+                "steps": [
+                  5,
+                  10,
+                  15,
+                  30,
+                  45,
+                  60,
+                  90,
+                  120,
+                  180,
+                  240,
+                  360,
+                  480,
+                  720,
+                  1080,
+                  1440,
+                  2880,
+                  4320,
+                  10080,
+                  20160,
+                  43200
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "medal_window_minutes"
+              },
+              {
+                "type": "choice",
+                "key": "medal_scope",
+                "title": "Medal scope",
+                "description": "One podium across all agents, or one podium per provider.",
+                "default": "global",
+                "options": [
+                  {
+                    "value": "global",
+                    "title": "All agents"
+                  },
+                  {
+                    "value": "per_provider",
+                    "title": "Per provider"
+                  }
+                ],
+                "kernel_tab": "agent-cost",
+                "kernel_key": "medal_scope"
               }
             ]
           }

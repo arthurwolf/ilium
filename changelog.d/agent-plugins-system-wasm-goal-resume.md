@@ -1,0 +1,2 @@
+### Changed
+- Resuming a paused Codex goal moved out of the kernel into the `ilium.core.agent-toolbar` plugin. The plugin shows a "Resume goal" footer row while the pane's goal is paused and removes it when the goal changes or the agent leaves; a click types `/goal resume` through the `goal-resume` agent action. The kernel no longer paints the `/goal resume` text in the Codex footer as a link, so disabling the plugin removes the button.

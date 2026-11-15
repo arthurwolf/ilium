@@ -174,3 +174,87 @@ fn cor_030_client_never_writes_the_agent_cost_tab() {
         "{writes:?}"
     );
 }
+
+/// The Agent Cost tab is the plugin's own Settings page: every `[cost]` key the built-in tab
+/// edited is a row bound to the `agent-cost` kernel tab, and every default is among the row's
+/// options or inside its bounds.
+///
+/// REQ: COR-030, F-040
+#[test]
+fn cor_030_the_agent_cost_tab_binds_every_cost_key() {
+    let manifest = manifest_value();
+    let tab = manifest["contributes"]["settings"]
+        .as_array()
+        .expect("settings")
+        .iter()
+        .find(|item| item["kind"] == "tab" && item["id"] == "agent-cost")
+        .expect("Agent Cost tab")
+        .clone();
+    assert_eq!(tab["title"], "Agent Cost");
+    let rows: Vec<serde_json::Value> = tab["sections"]
+        .as_array()
+        .expect("sections")
+        .iter()
+        .flat_map(|section| section["rows"].as_array().expect("rows").clone())
+        .collect();
+    let mut bound: Vec<String> = Vec::new();
+    for row in &rows {
+        assert_eq!(row["kernel_tab"], "agent-cost", "row {}", row["key"]);
+        bound.push(row["kernel_key"].as_str().expect("kernel key").to_owned());
+        match row["type"].as_str().expect("type") {
+            "choice" => assert!(
+                row["options"]
+                    .as_array()
+                    .expect("options")
+                    .iter()
+                    .any(|option| option["value"] == row["default"]),
+                "default of {} among its options",
+                row["key"]
+            ),
+            "number" => {
+                let value = row["default"].as_f64().expect("number default");
+                assert!(row["minimum"].as_f64().expect("minimum") <= value);
+                assert!(value <= row["maximum"].as_f64().expect("maximum"));
+            }
+            "toggle" => assert!(row["default"].is_boolean()),
+            other => panic!("unexpected row type {other}"),
+        }
+    }
+    let mut expected: Vec<String> = [
+        "metric",
+        "quota_window",
+        "calibration",
+        "fixed_cuts",
+        "quota_fixed_cuts",
+        "burn_cuts",
+        "quota_burn_cuts",
+        "budget_usd",
+        "quota_budget_percent",
+        "history_days",
+        "sparkline_window_minutes",
+        "sparkline_cells",
+        "sort_by_cost",
+        "medals_enabled",
+        "medal_window_minutes",
+        "medal_scope",
+    ]
+    .iter()
+    .map(|key| (*key).to_owned())
+    .collect();
+    for display in [
+        "level_glyph",
+        "level_dollars",
+        "meter",
+        "sparkline",
+        "group_totals",
+        "detail_card",
+        "header_total",
+        "burn_marker",
+    ] {
+        expected.push(format!("{display}.enabled"));
+        expected.push(format!("{display}.visibility"));
+    }
+    bound.sort();
+    expected.sort();
+    assert_eq!(bound, expected);
+}

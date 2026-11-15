@@ -1,9 +1,10 @@
 //! Best-effort reconstruction of a command line typed into an interactive
 //! shell. This module is deliberately pure: PTY ownership, foreground-job
-//! checks, and tree updates remain in the server's input handler.
+//! checks, and tree updates remain in the server's input handler. The input
+//! handler reports a rebuilt shell line to plugins (`user-line-submitted`);
+//! what a line means, for example a pane title, is the titles plugin's rule.
 
 const MAX_TRACKED_COMMAND_CHARS: usize = 4096;
-const MAX_TITLE_CHARS: usize = 80;
 
 /// Stateful command-line observer for one shell PTY. It understands the
 /// common line-editing bytes ilium currently forwards and fails closed for
@@ -73,15 +74,6 @@ impl TrackedSubmission {
 }
 
 impl ShellCommandTracker {
-    /// Incorporates input that was successfully written to the shell. The
-    /// returned title is the latest completed, non-empty command in `bytes`.
-    pub fn observe(&mut self, bytes: &[u8]) -> Option<String> {
-        self.observe_submission(bytes)
-            .and_then(|submission| submission.text)
-            .map(|text| normalize_title(&text))
-            .filter(|title| !title.is_empty())
-    }
-
     /// Incorporates successfully-written input and returns the latest
     /// semantic submission, preserving full tracked text for debug history.
     pub fn observe_submission(&mut self, bytes: &[u8]) -> Option<TrackedSubmission> {
@@ -382,23 +374,24 @@ fn escape_sequence_len(bytes: &[u8]) -> usize {
     bytes.len()
 }
 
-fn normalize_title(command: &str) -> String {
-    let compact = command.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = compact.chars();
-    let mut title = String::new();
-    for (count, ch) in (&mut chars).enumerate() {
-        if count >= MAX_TITLE_CHARS {
-            title.push('…');
-            break;
-        }
-        title.push(ch);
-    }
-    title
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The latest complete, non-empty line of `bytes` with its whitespace compacted: what the
+    /// input handler hands to plugins, without the plugin's title rules.
+    trait ObserveLine {
+        fn observe(&mut self, bytes: &[u8]) -> Option<String>;
+    }
+
+    impl ObserveLine for ShellCommandTracker {
+        fn observe(&mut self, bytes: &[u8]) -> Option<String> {
+            self.observe_submission(bytes)
+                .and_then(|submission| submission.text)
+                .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|line| !line.is_empty())
+        }
+    }
 
     #[test]
     fn commits_the_latest_complete_command_across_input_frames() {
@@ -429,21 +422,6 @@ mod tests {
             tracker.observe(b"echo safe\r"),
             Some("echo safe".to_string())
         );
-    }
-
-    #[test]
-    fn normalizes_whitespace_and_truncates_by_characters() {
-        let mut tracker = ShellCommandTracker::default();
-        assert_eq!(
-            tracker.observe("  echo   café  \r".as_bytes()),
-            Some("echo café".to_string())
-        );
-
-        let long_command = format!("{}\r", "é".repeat(MAX_TITLE_CHARS + 1));
-        let title = tracker
-            .observe(long_command.as_bytes())
-            .expect("command title");
-        assert_eq!(title, format!("{}…", "é".repeat(MAX_TITLE_CHARS)));
     }
 
     #[test]

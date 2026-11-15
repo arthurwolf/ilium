@@ -16,6 +16,7 @@ mod cli_bridge;
 mod cross_session;
 pub(crate) mod detector_verdicts;
 mod facade;
+mod history;
 mod http_routes;
 pub(crate) mod pane_kinds;
 mod plugin_calls;
@@ -38,7 +39,7 @@ use ilium_ipc::plugin::{
 use ilium_ipc::ServerEvent;
 use ilium_plugin_api::generated::exports::detector::ScreenRequest;
 use ilium_plugin_api::generated::host::log::Level;
-use ilium_plugin_api::generated::types::events::MessageEvent;
+use ilium_plugin_api::generated::types::events::{MessageEvent, UserLineEvent};
 use ilium_plugin_api::generated::types::{
     ErrorCode, Event, Intent, NodeId, Outcome, PluginError, PluginId, PluginSide,
 };
@@ -65,6 +66,15 @@ use cli_bridge::{CliInvocation, CliRoutes};
 use facade::{RuntimeSlot, ServerFacade};
 use http_routes::{HttpCalls, HttpRoutes};
 pub(crate) use http_routes::{PluginRequest, Reply, MAX_REQUEST_BODY_BYTES};
+
+/// The wall clock as milliseconds since the Unix epoch, for the `at` stamp of an event.
+fn epoch_millis_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
+}
 
 /// How long plugins get to deactivate when the server stops (contract section 2.2).
 const SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
@@ -708,16 +718,34 @@ impl PluginHostHandle {
     /// plugins the user allowed to read prompts.
     fn feed_prompt(&self, pane: ilium_core::NodeId, text: String, has_agent: bool) {
         use ilium_plugin_api::generated::types::EpochMs;
-        let at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| {
-                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-            });
+        let at = epoch_millis_now();
         let recorded = self.facade.record_prompt(NodeId(pane.0));
         let batch = prompt_epochs::prompt_events(pane.0, text, recorded, has_agent, EpochMs(at));
         self.post(move |runtime| {
             log_errors(
                 "prompt delivery",
+                runtime.broadcast_to_holders(&batch, &USER_LINE_GRANTS),
+            );
+            log_errors("pump", runtime.pump());
+        });
+    }
+
+    /// Hands one line the user submitted at the prompt of a plain shell pane to the plugins
+    /// that hold `agent.read-prompts`, as `user-line-submitted` (primitives-terminal-reads.md).
+    /// The kernel's input tracker owns the PTY bytes: it rebuilds the line from the editing
+    /// keys, and only reports a line it could rebuild exactly, while the shell (not a running
+    /// program) owns the terminal. What the line means, for example a pane title, is the
+    /// plugin's decision. A shell line carries no prompt epoch and no `input-submitted`.
+    pub(crate) fn feed_shell_line(&self, pane: ilium_core::NodeId, text: String) {
+        use ilium_plugin_api::generated::types::EpochMs;
+        let batch = vec![Event::UserLineSubmitted(UserLineEvent {
+            pane: NodeId(pane.0),
+            text,
+            at: EpochMs(epoch_millis_now()),
+        })];
+        self.post(move |runtime| {
+            log_errors(
+                "shell line delivery",
                 runtime.broadcast_to_holders(&batch, &USER_LINE_GRANTS),
             );
             log_errors("pump", runtime.pump());

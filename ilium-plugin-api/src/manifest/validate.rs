@@ -2587,6 +2587,10 @@ fn check_settings_rows(
                             "visible_when",
                             "scope",
                             "applies",
+                            // A row of a frozen kernel tab's owner edits that tab's own table
+                            // (`settings.write-kernel:<tab>`).
+                            "kernel_tab",
+                            "kernel_key",
                         ]
                         .contains(&key.as_str()))
                     || (!has_value && kind != "preview" && key == "id");

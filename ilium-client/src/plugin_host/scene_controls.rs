@@ -398,6 +398,22 @@ impl SceneControlSchema {
             })
             .collect()
     }
+
+    /// The `(key, value)` pairs of the text rows that are not pickers. The host lends the
+    /// hosts in a value only to a scene holding `http:setting:<key>` for that key, so passing
+    /// every text row opens nothing by itself.
+    pub(crate) fn setting_values(&self, values: &SceneValues) -> Vec<(String, String)> {
+        self.rows
+            .iter()
+            .filter(|row| !row.picker)
+            .filter_map(|row| match Self::effective(row, values) {
+                ControlValue::Text(text) if !text.trim().is_empty() => {
+                    Some((row.key.clone(), text.trim().to_owned()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

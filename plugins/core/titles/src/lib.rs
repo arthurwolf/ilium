@@ -1,17 +1,19 @@
 //! Core plugin `ilium.core.titles` (manual page core-plugin-titles.md).
 //!
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! implementing the lifecycle, the handler and the exports its manifest lists. The server side
+//! already names a plain shell pane after the command the user ran (`shell_title`).
 
 pub mod shell_title;
 pub mod thread_name;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::host::HostTree;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
 
 /// The server side of `ilium.core.titles` (core-plugin-titles.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -25,8 +27,20 @@ impl Lifecycle for TitlesServer {
 }
 
 impl Handler for TitlesServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        let mut submissions = Vec::new();
+        for event in batch {
+            // A line the user submitted at a shell prompt names the pane after the command. The
+            // kernel reports only lines it rebuilt exactly while the shell owns the terminal.
+            if let Event::UserLineSubmitted(line) = event {
+                let has_agent = api.get(line.pane).is_some_and(|view| view.agent.is_some());
+                submissions.extend(shell_title::rename_for_line(
+                    line.pane, &line.text, has_agent,
+                ));
+            }
+        }
+        submissions
     }
 }
 

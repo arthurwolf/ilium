@@ -319,7 +319,7 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 );
             } else if name == "agent-setup-path-prompt" {
                 app.mode = ilium_client::app::Mode::AgentSetupPathPrompt(
-                    ilium_client::agent_feature_setup::AgentFeature::Progress,
+                    ilium_instructions::AgentFeature::Progress,
                     ilium_client::text_prompt::TextPromptState::new(
                         "/synthetic/agent-instructions.md",
                     ),

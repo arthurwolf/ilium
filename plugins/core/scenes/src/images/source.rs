@@ -200,10 +200,26 @@ pub enum Progress {
     Done,
 }
 
+/// Which files a [`Discovery`] keeps, and how its messages name them.
+#[derive(Debug, Clone, Copy)]
+pub struct FileKind {
+    /// True for a file name the walk keeps.
+    pub accept: fn(&str) -> bool,
+    /// Plural noun of the messages ("pictures", "videos").
+    pub noun: &'static str,
+}
+
+/// The pictures of the slideshow.
+pub const PICTURES: FileKind = FileKind {
+    accept: is_image_name,
+    noun: "pictures",
+};
+
 /// The folder walk of the slideshow, advanced a few folders per call.
 pub struct Discovery {
     queue: VecDeque<(usize, String, usize)>,
     recursive: bool,
+    kind: FileKind,
     entries: Vec<Entry>,
     notes: Vec<String>,
     listed: usize,
@@ -222,14 +238,20 @@ pub struct Discovered {
 }
 
 impl Discovery {
-    /// Walks each `(scope, label)` folder; `recursive` descends into sub-folders.
+    /// Walks each `(scope, label)` folder for pictures; `recursive` descends into sub-folders.
     pub fn new(roots: &[(usize, String)], recursive: bool) -> Self {
+        Self::of_kind(roots, recursive, PICTURES)
+    }
+
+    /// Walks each `(scope, label)` folder for the files of `kind`.
+    pub fn of_kind(roots: &[(usize, String)], recursive: bool, kind: FileKind) -> Self {
         Self {
             queue: roots
                 .iter()
                 .map(|(scope, _)| (*scope, String::new(), 0))
                 .collect(),
             recursive,
+            kind,
             entries: Vec::new(),
             notes: Vec::new(),
             listed: 0,
@@ -246,6 +268,15 @@ impl Discovery {
 
     /// Lists up to a few folders. `Done` once the queue is empty or a cap was hit.
     pub fn step(&mut self, io: &mut dyn ImageIo) -> Progress {
+        self.step_listing(&mut |scope, path| io.list_dir(scope, path))
+    }
+
+    /// [`Discovery::step`] over any folder lister: `list(scope, path)` answers the items of
+    /// folder `path` of scope `picked/<scope>`.
+    pub fn step_listing(
+        &mut self,
+        list: &mut dyn FnMut(usize, &str) -> Result<Vec<DirItem>, String>,
+    ) -> Progress {
         for _ in 0..DIRECTORIES_PER_STEP {
             let Some((scope, path, depth)) = self.queue.pop_front() else {
                 return Progress::Done;
@@ -256,7 +287,7 @@ impl Discovery {
                 return Progress::Done;
             }
             self.listed += 1;
-            let items = match io.list_dir(scope, &path) {
+            let items = match list(scope, &path) {
                 Ok(items) => items,
                 Err(message) => {
                     if depth == 0 {
@@ -281,9 +312,10 @@ impl Discovery {
                             self.queue.push_back((scope, relative, depth + 1));
                         }
                     }
-                    ItemKind::File if is_image_name(&item.name) => {
+                    ItemKind::File if (self.kind.accept)(&item.name) => {
                         if self.entries.len() >= MAX_FILES {
-                            self.note("more than 20000 pictures: the rest are left out".to_owned());
+                            let noun = self.kind.noun;
+                            self.note(format!("more than 20000 {noun}: the rest are left out"));
                             self.queue.clear();
                             return Progress::Done;
                         }
@@ -315,7 +347,7 @@ impl Discovery {
                 .then_with(|| left.name.cmp(&right.name))
         });
         let error = if self.roots == 0 {
-            Some("Choose a folder of pictures".to_owned())
+            Some(format!("Choose a folder of {}", self.kind.noun))
         } else if self.failed_roots == self.roots {
             Some(
                 self.notes
@@ -324,7 +356,7 @@ impl Discovery {
                     .unwrap_or_else(|| "The folder could not be read".to_owned()),
             )
         } else if self.entries.is_empty() {
-            Some("No pictures found in the chosen folders".to_owned())
+            Some(format!("No {} found in the chosen folders", self.kind.noun))
         } else {
             None
         };

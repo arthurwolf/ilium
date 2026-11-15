@@ -718,17 +718,22 @@ impl App {
     /// `config.toml`: the client state that mirrors that table is reloaded from the file, so
     /// the workers that read it (titles, restructure, onboarding) see the new value at once.
     fn kernel_setting_changed(&mut self, tab: &str) {
-        if tab != "inference" {
+        if tab != "inference" && tab != "agent-cost" {
             return;
         }
         let Some(directory) = self.config_dir.clone() else {
             return;
         };
         match crate::config::load(&directory) {
-            Ok(config) => self.apply_inference_settings_locally(config.inference),
+            Ok(config) if tab == "inference" => {
+                self.apply_inference_settings_locally(config.inference)
+            }
+            // The Cost plugin's Agent Cost page wrote `[cost]`: the tree indicators, the sort
+            // and the medals read the reloaded (already repaired) value on the next frame.
+            Ok(config) => self.apply_cost_settings(config.cost),
             Err(error) => {
                 self.status_message = Some(format!(
-                    "The inference settings were saved but not reloaded: {error}"
+                    "The {tab} settings were saved but not reloaded: {error}"
                 ));
             }
         }

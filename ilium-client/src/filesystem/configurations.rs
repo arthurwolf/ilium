@@ -17,7 +17,7 @@ pub(crate) enum InferenceSaveState {
 
 pub enum AgentSetupDialog {
     Path {
-        feature: crate::agent_feature_setup::AgentFeature,
+        feature: ilium_instructions::AgentFeature,
         value: String,
     },
     Suppression(crate::setup_prompt::SetupPromptState),

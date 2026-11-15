@@ -21,11 +21,11 @@ use ilium_core::{
     AgentActivity, AgentProvider, BuiltinAgentProvider, Node, NodeId, NodeKind, PaneContentKind,
     PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
 };
+use ilium_instructions::{AgentFeature, FeatureSetupStatus};
 use ilium_ipc::{ClientRequest, PaneResizeCause, PromptSubmissionSource};
 use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
-use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
 use crate::agent_from_line::{EditorLineContextAction, EditorLineContextMenu, EditorSourceLine};
 use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::config::{
@@ -455,8 +455,6 @@ pub enum SettingsTab {
     Sound,
     VoiceControl,
     AgentMonitoring,
-    /// Agent spend indicators and how "expensive" is decided.
-    Cost,
     Debug,
     /// The WebAssembly plugins of this installation, each with an on/off switch.
     Plugins,
@@ -608,12 +606,11 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 20] = [
+    pub const ALL: [SettingsTab; 19] = [
         Self::Appearance,
         Self::Icons,
         Self::Toolbar,
         Self::AgentMonitoring,
-        Self::Cost,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -649,7 +646,6 @@ impl SettingsTab {
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
             Self::AgentMonitoring => "Agent Monitoring",
-            Self::Cost => "Agent Cost",
             Self::Debug => "Debug",
             Self::Plugins => "Plugins",
             Self::About => "About",
@@ -2063,11 +2059,8 @@ pub struct App {
     /// actor remains owned by `crate::run`, following the same outbox pattern
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
-    /// Agent-spend indicator settings (the Agent Cost tab).
+    /// Agent-spend indicator settings (`[cost]`, edited on the Cost plugin's Agent Cost page).
     pub cost_settings: CostSettings,
-    /// Text being typed into the sparkline-window field of the Agent Cost
-    /// tab (`Enter` on that row), or `None` while it is not being edited.
-    pub cost_window_input: Option<String>,
     /// Derived per-agent spend and the overlay the tree draws.
     pub(crate) cost_tracker: crate::cost_tracker::CostTracker,
     /// Server-authoritative adaptive detection settings. None until the
@@ -2152,8 +2145,6 @@ pub struct App {
     /// Pane whose progress footer is under the pointer, with the pointer cell
     /// the long-description tooltip anchors to.
     pub hovered_progress: Option<(NodeId, Position)>,
-    /// Pointer rests on a Codex pane's clickable `/goal resume` footer text.
-    pub hovered_goal_resume: Option<(NodeId, Position)>,
     /// Server-owned, non-persisted Git observations for worktree rows.
     pub workspace_git_statuses: HashMap<NodeId, ilium_ipc::WorkspaceGitStatus>,
     /// The costs-and-stats popover hanging off an agent pane's second header
@@ -2698,7 +2689,6 @@ impl App {
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
             cost_settings: CostSettings::default(),
-            cost_window_input: None,
             cost_tracker: crate::cost_tracker::CostTracker::default(),
             agent_detection_settings: None,
             agent_detection_settings_error: None,
@@ -2750,7 +2740,6 @@ impl App {
             hovered_tree_node: None,
             hovered_status_slot: None,
             hovered_progress: None,
-            hovered_goal_resume: None,
             workspace_git_statuses: HashMap::new(),
             stats_popover: None,
             goal_popover: None,
@@ -3027,11 +3016,6 @@ impl App {
                     self.commit_animation_value_dialog(&mut host, &outcome)
                 } else if matches!(
                     host.target,
-                    crate::value_dialog_host::ValueTarget::Cost { .. }
-                ) {
-                    self.commit_cost_value_dialog(&mut host, &outcome)
-                } else if matches!(
-                    host.target,
                     crate::value_dialog_host::ValueTarget::SettingsNumber { .. }
                         | crate::value_dialog_host::ValueTarget::DetectionNumber { .. }
                 ) {
@@ -3092,69 +3076,6 @@ impl App {
                 self.mode = Mode::ValueDialog(host);
             }
         }
-    }
-
-    pub(crate) fn begin_cost_value_dialog(&mut self, row: crate::cost_settings::CostRow) {
-        let result = self
-            .config_dir
-            .clone()
-            .ok_or_else(|| "The configuration directory is unavailable".to_owned())
-            .and_then(|directory| {
-                crate::value_dialog_host::ValueDialogHost::cost(&self.cost_settings, row, directory)
-            });
-        match result {
-            Ok(host)
-                if matches!(
-                    host.dialog,
-                    crate::value_dialog::ValueDialogState::Number(_)
-                ) =>
-            {
-                self.begin_authoritative_number_dialog(host)
-            }
-            Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
-            Err(error) => self.status_message = Some(error),
-        }
-    }
-
-    fn commit_cost_value_dialog(
-        &mut self,
-        host: &mut crate::value_dialog_host::ValueDialogHost,
-        outcome: &crate::value_dialog::DialogOutcome,
-    ) -> Result<(), String> {
-        let crate::value_dialog_host::ValueTarget::Cost {
-            target, directory, ..
-        } = &host.target
-        else {
-            return Err("This is not a cost value dialog".into());
-        };
-        host.number_read_ready()?;
-        if host.is_saving() {
-            return Err("The previous value is still being saved".into());
-        }
-        if self.config_dir.as_ref() != Some(directory) {
-            return Err("The configuration destination changed; reopen this dialog".into());
-        }
-        let mut settings = self.cost_settings.clone();
-        match outcome {
-            crate::value_dialog::DialogOutcome::Choose(id) => {
-                target.set_choice(&mut settings, id)?
-            }
-            crate::value_dialog::DialogOutcome::CommitNumber(text) => {
-                target.set_number(&mut settings, text)?
-            }
-            _ => return Err("No cost value was submitted".into()),
-        }
-        let token = std::sync::Arc::new(());
-        self.enqueue_configuration(
-            directory.clone(),
-            crate::filesystem::configuration::ConfigurationChange::Cost(settings.clone()),
-            crate::filesystem::configurations::ConfigurationIntent::ValueDialog {
-                token: std::sync::Arc::clone(&token),
-            },
-        )?;
-        self.cost_settings = settings;
-        host.begin_save(token);
-        Ok(())
     }
 
     pub(crate) fn begin_animation_value_dialog(&mut self, row: usize) {
@@ -5593,31 +5514,6 @@ impl App {
         );
     }
 
-    /// Starts typing an exact sparkline window (`Enter` on that row).
-    pub fn settings_begin_cost_window_input(&mut self) {
-        self.cost_window_input = Some(String::new());
-    }
-
-    pub fn settings_cancel_cost_window_input(&mut self) {
-        self.cost_window_input = None;
-    }
-
-    /// Commits the typed window. An unparsable value keeps the field open
-    /// and says why, so a typo never silently discards what was typed.
-    pub fn settings_submit_cost_window_input(&mut self) {
-        let Some(input) = self.cost_window_input.clone() else {
-            return;
-        };
-        let Some(minutes) = crate::cost_model::parse_window_minutes(&input) else {
-            self.status_message =
-                Some("Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).".to_owned());
-            return;
-        };
-        self.cost_window_input = None;
-        self.cost_settings.set_window_minutes(minutes);
-        self.persist_cost_settings();
-    }
-
     /// Installs startup diagnostics policy. The process writer is owned by the
     /// async event loop; `App` keeps only the settings value rendered by UI.
     pub fn apply_debug_settings(&mut self, settings: DebugSettings) {
@@ -6506,7 +6402,7 @@ impl App {
 
     /// Installs or refreshes Ilium's managed Chatroom and Progress contracts
     /// without requiring a settings visit or an opt-in dialog. User-authored
-    /// text is preserved by `agent_feature_setup`; only marker-owned blocks
+    /// text is preserved by `ilium_instructions`; only marker-owned blocks
     /// are inserted or upgraded.
     fn ensure_automatic_agent_setup(&mut self) -> Vec<String> {
         self.queue_integration_maintenance(true)
@@ -9356,7 +9252,6 @@ impl App {
                 self.hovered_tree_node = None;
                 self.hovered_status_slot = None;
                 self.hovered_progress = None;
-                self.hovered_goal_resume = None;
                 self.tree_toolbar_hovered = false;
                 self.hovered_tree_toolbar_action = None;
             }
@@ -12438,7 +12333,7 @@ impl App {
         let mut actions = Vec::with_capacity(7);
         // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
-        if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
+        if self.agent_debug_log_offered() && self.is_known_agent_pane(pane_id) {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
         }
         if self.is_detected_agent_pane(pane_id) {
@@ -12831,7 +12726,7 @@ impl App {
         let mut actions = Vec::with_capacity(7);
         // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
-        if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
+        if self.agent_debug_log_offered() && self.is_known_agent_pane(pane_id) {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
         }
         if self.is_detected_agent_pane(pane_id) {
@@ -13171,12 +13066,23 @@ impl App {
             .min(menu.actions.len().saturating_sub(1));
     }
 
+    /// Whether "Show debug log" is offered: the Debug menu switch is on and the Diagnostics
+    /// plugin, which draws the viewer, is enabled. Disabling the plugin removes the entry.
+    /// Without a plugin host no plugin state exists to consult, so the switch alone decides.
+    fn agent_debug_log_offered(&self) -> bool {
+        self.ui_settings.agent_debug_menu_enabled
+            && self
+                .wasm_plugins
+                .as_ref()
+                .is_none_or(|plugins| plugins.runs_plugin("ilium.core.diagnostics"))
+    }
+
     /// "Show debug log" on an agent pane. The kernel asks the server for the retained history of
     /// the pane; the snapshot reply is handed to the Diagnostics plugin
     /// (`ilium.core.diagnostics/show-debug-log`), which draws the viewer.
     pub fn open_agent_debug_log(&mut self, pane_id: NodeId) {
         self.mode = Mode::Normal;
-        if !self.ui_settings.agent_debug_menu_enabled || !self.is_known_agent_pane(pane_id) {
+        if !self.agent_debug_log_offered() || !self.is_known_agent_pane(pane_id) {
             self.status_message =
                 Some("Debug history is available only for known agent panes".to_string());
             return;
@@ -16208,11 +16114,9 @@ impl App {
     pub fn handle_pane_mouse(&mut self, mouse: crossterm::event::MouseEvent, position: Position) {
         let Some(viewport) = self.pane_viewport_at(position) else {
             self.hovered_progress = None;
-            self.hovered_goal_resume = None;
             return;
         };
         let id = viewport.pane_id;
-        self.hovered_goal_resume = None;
         if self.is_plugin_pane(id) {
             self.hovered_progress = None;
             self.handle_plugin_pane_mouse(&viewport, mouse, position);
@@ -16436,10 +16340,6 @@ impl App {
 
         if matches!(self.panes.get(&id), Some(PaneRuntime::Editor(_))) {
             self.handle_editor_pane_mouse(id, viewport.content_area, mouse, position);
-            return;
-        }
-
-        if self.handle_goal_resume_mouse(id, viewport.content_area, mouse, position) {
             return;
         }
 
@@ -24152,10 +24052,11 @@ mod tests {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::Toolbar);
-        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
-        assert_eq!(SettingsTab::Cost.previous(), SettingsTab::AgentMonitoring);
-        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Keyboard);
-        assert_eq!(SettingsTab::Keyboard.previous(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Keyboard);
+        assert_eq!(
+            SettingsTab::Keyboard.previous(),
+            SettingsTab::AgentMonitoring
+        );
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Git);
@@ -24755,7 +24656,7 @@ mod tests {
         ] {
             for feature in AgentFeature::ALL {
                 assert_eq!(
-                    crate::agent_feature_setup::status(&target, feature).unwrap(),
+                    ilium_instructions::status(&target, feature).unwrap(),
                     FeatureSetupStatus::Managed,
                     "{} should contain current {} teaching",
                     target.display(),
@@ -24844,8 +24745,8 @@ mod tests {
         let global_file = directory.path().join("global.md");
         let project_file = project.join("CLAUDE.md");
         for path in [&global_file, &project_file] {
-            crate::agent_feature_setup::install(path, AgentFeature::Chatroom).unwrap();
-            crate::agent_feature_setup::install(path, AgentFeature::Progress).unwrap();
+            ilium_instructions::install(path, AgentFeature::Chatroom).unwrap();
+            ilium_instructions::install(path, AgentFeature::Progress).unwrap();
         }
         let mut app = App::new("test".to_string(), project);
         app.tree

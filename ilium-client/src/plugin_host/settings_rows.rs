@@ -12,7 +12,7 @@
 //! and what is clickable are the same rectangles.
 
 use ilium_plugin_host::config_settings::PluginSettingsStore;
-use ilium_plugin_host::settings::{manifest_rows, KernelBinding, SettingsRow};
+use ilium_plugin_host::settings::{manifest_rows, same_enum_value, KernelBinding, SettingsRow};
 use ratatui::layout::Rect;
 use serde_json::{Map, Value};
 
@@ -212,7 +212,7 @@ impl SettingRow {
                 .and_then(|options| {
                     options
                         .into_iter()
-                        .find(|(value, _)| *value == self.value)
+                        .find(|(value, _)| same_enum_value(value, &self.value))
                         .map(|(_, title)| title)
                 })
                 .unwrap_or_else(|| plain(&self.value)),
@@ -242,7 +242,7 @@ impl SettingRow {
                 })?;
                 let current = options
                     .iter()
-                    .position(|(value, _)| *value == self.value)
+                    .position(|(value, _)| same_enum_value(value, &self.value))
                     .unwrap_or(0);
                 let next = match step {
                     Step::Next => (current + 1) % options.len(),

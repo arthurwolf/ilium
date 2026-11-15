@@ -30,7 +30,6 @@
 //! data came from a local `Tree` or a render-cache mirror of one.
 
 pub mod agent_config_writer;
-pub mod agent_feature_setup;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
@@ -60,7 +59,6 @@ pub mod cost_history;
 pub mod cost_model;
 pub mod cost_overlay;
 pub mod cost_settings;
-pub mod cost_settings_ui;
 pub mod cost_tracker;
 pub mod custom_agent_editor;
 mod custom_agent_settings;
@@ -79,7 +77,6 @@ pub mod execution;
 pub mod explorer_overlay;
 mod external_open;
 pub mod filesystem;
-pub mod goal_resume_link;
 pub mod icon_search_workers;
 pub mod icon_settings;
 mod incoming_projection;
@@ -191,7 +188,6 @@ pub mod ui;
 pub mod value_animation;
 pub mod value_config;
 pub mod value_control;
-pub mod value_cost;
 pub mod value_detection;
 pub mod value_dialog;
 pub mod value_dialog_host;

@@ -1,7 +1,7 @@
 //! Typed ordered integration mutations and replaceable maintenance admission.
 use super::ordered::{OrderedWriter, WriteCompletion, WriteId};
-use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
 use ilium_execution::{Client, Job, JobContext, JobCost};
+use ilium_instructions::{AgentFeature, FeatureSetupStatus};
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -71,12 +71,11 @@ fn install(target: &FeatureTarget) -> Result<(), String> {
         )));
     }
     // Fresh status precedes mutation, so a future managed contract is never overwritten.
-    let status =
-        crate::agent_feature_setup::status(&target.path, target.feature).map_err(bounded_error)?;
+    let status = ilium_instructions::status(&target.path, target.feature).map_err(bounded_error)?;
     if status == FeatureSetupStatus::ManagedFuture {
         return Ok(());
     }
-    crate::agent_feature_setup::install(&target.path, target.feature).map_err(bounded_error)?;
+    ilium_instructions::install(&target.path, target.feature).map_err(bounded_error)?;
     Ok(())
 }
 
@@ -103,7 +102,7 @@ impl Job for IntegrationJob {
             Self::Maintain(snapshot) => {
                 snapshot.checked()?;
                 for target in snapshot.targets {
-                    let current = crate::agent_feature_setup::status(&target.path, target.feature)
+                    let current = ilium_instructions::status(&target.path, target.feature)
                         .map_err(bounded_error);
                     // Automatic upkeep only writes the global instruction files, which
                     // already cover every project; per-project copies would duplicate
@@ -120,7 +119,7 @@ impl Job for IntegrationJob {
                             result.failures.push(error);
                         }
                     }
-                    let status = crate::agent_feature_setup::status(&target.path, target.feature)
+                    let status = ilium_instructions::status(&target.path, target.feature)
                         .map_err(bounded_error);
                     result.statuses.push((target, status));
                 }
@@ -131,7 +130,7 @@ impl Job for IntegrationJob {
                         Ok(()) => {}
                         Err(error) => result.failures.push(error),
                     }
-                    let status = crate::agent_feature_setup::status(&target.path, target.feature)
+                    let status = ilium_instructions::status(&target.path, target.feature)
                         .map_err(bounded_error);
                     if let Err(error) = &status {
                         result

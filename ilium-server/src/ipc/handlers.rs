@@ -8322,7 +8322,7 @@ where
     // release it before any later asynchronous bookkeeping.
     let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
-    let mut observed_title = None;
+    let mut observed_shell_line: Option<String> = None;
     let mut authored_title_receipt_changed = false;
     let mut cleared_session_origin_name = None;
     let mut cleared_session_title_generation = None;
@@ -8344,17 +8344,21 @@ where
             return Ok(());
         }
         Some(PaneResource::Terminal(runtime)) => {
-            // A typed command only becomes a title while the shell itself owns
-            // the terminal, which is how "the user is typing at a prompt" is
-            // told apart from "a running command owns the terminal". A
+            // A typed line is only reported to plugins while the shell itself
+            // owns the terminal, which is how "the user is typing at a prompt"
+            // is told apart from "a running command owns the terminal". A
             // platform that cannot tell answers `None`, and this stays false:
-            // inferring a title without knowing who owns the terminal would
-            // retitle panes from keystrokes typed into a running program.
+            // reporting keystrokes typed into a running program as a shell
+            // line would let a plugin retitle panes from them. The plugin
+            // (titles) turns the reported line into a pane title.
             let should_track_title = is_automatic_plain_shell && was_shell_foreground;
             {
                 if let Some(tracker) = &mut runtime.shell_command_tracker {
                     if should_track_title {
-                        observed_title = tracker.observe(bytes);
+                        observed_shell_line = tracker
+                            .observe_submission(bytes)
+                            .and_then(|submission| submission.text)
+                            .filter(|line| !line.trim().is_empty());
                     } else {
                         tracker.reset_pending_line();
                     }
@@ -8773,10 +8777,14 @@ where
         state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
     }
 
-    // A session-transition reset takes precedence over a shell title from
-    // the same byte batch. In practice they are mutually exclusive, but the
-    // ordering makes the stale LLM title impossible to retain if input and
-    // foreground detection race.
+    // A session-transition reset takes precedence over a shell line from the
+    // same byte batch: the line is not reported to plugins when the reset
+    // applies. In practice they are mutually exclusive, but the ordering makes
+    // the stale LLM title impossible to retain if input and foreground
+    // detection race.
+    let shell_line_for_plugins = observed_shell_line.filter(|_| {
+        cleared_conversation_title_generation.is_none() && cleared_session_origin_name.is_none()
+    });
     let tree_changed = {
         let mut tree = state.tree.write().await;
         let panes = state.panes.read().await;
@@ -8797,9 +8805,9 @@ where
                     false
                 }
             }
-        } else if let Some(title) = cleared_session_origin_name.or(observed_title) {
-            // A typed shell command or non-clear session transition has no
-            // distinct short form, so remove any stale inferred alternative.
+        } else if let Some(title) = cleared_session_origin_name {
+            // A non-clear session transition has no distinct short form, so
+            // remove any stale inferred alternative.
             match tree.set_automatic_pane_title(pane_id, title, None, None) {
                 Ok(changed) => changed,
                 Err(error) => {
@@ -8815,6 +8823,9 @@ where
     };
     if tree_changed {
         broadcast_and_persist(state).await;
+    }
+    if let (Some(line), Some(host)) = (shell_line_for_plugins, state.plugins.get()) {
+        host.feed_shell_line(pane_id, line);
     }
     Ok(())
 }

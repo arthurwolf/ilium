@@ -270,6 +270,8 @@ impl PluginSceneFactory {
             .declaration
             .controls
             .picked_paths(values, home.as_deref());
+        // The text settings whose hosts the scene's `http:setting:<key>` grants lend.
+        let setting_values = self.declaration.controls.setting_values(values);
         // Each instance gets its own imports, job book and event queue, built from the scene
         // grants only; `http` never waits inside a frame.
         let equipped = self.services.equip(
@@ -279,6 +281,7 @@ impl PluginSceneFactory {
                 manifest: &self.manifest,
                 observer,
                 picked: &picked,
+                setting_values: &setting_values,
             },
             &self.engine,
             &self.compiled,

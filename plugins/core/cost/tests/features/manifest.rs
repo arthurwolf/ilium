@@ -125,7 +125,7 @@ fn doc_cor_050_client_side_has_entry_world_and_the_views_export() {
 
 /// REQ: COR-050, F-038
 #[test]
-fn doc_cor_050_server_grants_are_the_eight_of_the_page_in_order() {
+fn doc_cor_050_server_grants_are_those_of_the_page_in_order() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
@@ -138,17 +138,25 @@ fn doc_cor_050_server_grants_are_the_eight_of_the_page_in_order() {
             "services.provide:ilium.core.cost/usage",
             "settings.contribute:agent-cost",
             "settings.write-kernel:agent-cost",
+            "settings.write-kernel:reset-planning",
+            "extensions.provide:ilium.core.cost/price-sources",
+            "extensions.provide:ilium.core.cost/quota-sources",
         ]
     );
 }
 
 /// REQ: COR-050, F-116
 #[test]
-fn doc_cor_050_client_grants_are_ui_panels_and_the_reset_planning_tab() {
+fn doc_cor_050_client_grants_are_ui_panels_and_the_two_kernel_tabs() {
+    // The client binds the rows of both kernel tabs to `config.toml` (Settings edits them).
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["ui.panels", "settings.write-kernel:reset-planning"]
+        [
+            "ui.panels",
+            "settings.write-kernel:reset-planning",
+            "settings.write-kernel:agent-cost"
+        ]
     );
 }
 
@@ -334,8 +342,8 @@ fn doc_cor_050_settings_section_is_cost_display_on_the_agent_cost_tab() {
             .as_array()
             .expect("array")
             .len(),
-        2,
-        "the cost-display section and the reset-planning tab"
+        3,
+        "the cost-display section, the reset-planning tab and the Agent Cost tab"
     );
     assert_eq!(section["kind"], "section");
     assert_eq!(section["id"], "cost-display");

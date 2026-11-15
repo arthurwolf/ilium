@@ -3006,13 +3006,13 @@ mod tests {
             directory.path().join("global-progress.md"),
         ] {
             let feature = if path.ends_with("global-chatroom.md") {
-                crate::agent_feature_setup::AgentFeature::Chatroom
+                ilium_instructions::AgentFeature::Chatroom
             } else {
-                crate::agent_feature_setup::AgentFeature::Progress
+                ilium_instructions::AgentFeature::Progress
             };
             assert_eq!(
-                crate::agent_feature_setup::status(&path, feature).unwrap(),
-                crate::agent_feature_setup::FeatureSetupStatus::Managed
+                ilium_instructions::status(&path, feature).unwrap(),
+                ilium_instructions::FeatureSetupStatus::Managed
             );
         }
 

@@ -556,13 +556,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 );
             }
         }
-        SettingsTab::Cost => crate::cost_settings_ui::render(
-            frame,
-            layout.content_area,
-            app,
-            state.selected_row,
-            state.scroll,
-        ),
         SettingsTab::Debug => render_scrollable(
             frame,
             layout.content_area,
@@ -709,15 +702,6 @@ pub fn settings_help_anchors(
         }
         SettingsTab::Toolbar => {
             push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
-        }
-        SettingsTab::Cost => {
-            let all_rows = crate::cost_settings_ui::rows(app);
-            for (topic_id, line, row) in
-                crate::cost_settings_ui::help_anchors(app, layout.content_area.width)
-            {
-                let selected = all_rows.get(state.selected_row) == Some(&row);
-                push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
-            }
         }
         SettingsTab::Animations => {
             let model = app.animation_row_model();
@@ -1029,8 +1013,8 @@ pub fn settings_help_anchors(
         SettingsTab::Setup => {
             for (i, row) in app.agent_setup_rows().iter().enumerate() {
                 let id = match row.feature() {
-                    crate::agent_feature_setup::AgentFeature::Chatroom => "SETUP-01",
-                    crate::agent_feature_setup::AgentFeature::Progress => "SETUP-02",
+                    ilium_instructions::AgentFeature::Chatroom => "SETUP-01",
+                    ilium_instructions::AgentFeature::Progress => "SETUP-02",
                 };
                 push_help_anchor(
                     &mut anchors,
@@ -1178,7 +1162,6 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Icons => "▦",
         SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
-        SettingsTab::Cost => "¤",
         SettingsTab::Keyboard => "⌨",
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
@@ -1201,7 +1184,6 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
-        SettingsTab::Cost => "Cost",
         SettingsTab::Animations => "Motion",
         SettingsTab::VoiceControl => "Voice",
         SettingsTab::LlmInstructions => "LLM text",
@@ -1894,9 +1876,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
                 .lines
                 .len() as u16
         }
-        SettingsTab::Cost => {
-            return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
-        }
         SettingsTab::Debug => debug_view(&app.debug_settings, selected_row, content_area.width)
             .lines
             .len() as u16,
@@ -1942,17 +1921,17 @@ fn setup_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
         )),
         Line::from(""),
     ];
-    for feature in crate::agent_feature_setup::AgentFeature::ALL {
+    for feature in ilium_instructions::AgentFeature::ALL {
         lines.push(Line::from(Span::styled(
             feature.label().to_uppercase(),
             Style::new().add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             match feature {
-                crate::agent_feature_setup::AgentFeature::Chatroom => {
+                ilium_instructions::AgentFeature::Chatroom => {
                     "Teach agents when and how to coordinate through the project chatroom."
                 }
-                crate::agent_feature_setup::AgentFeature::Progress => {
+                ilium_instructions::AgentFeature::Progress => {
                     "Require agents to hand off every task lasting at least three minutes to Ilium; agents never poll."
                 }
             },
@@ -2019,38 +1998,38 @@ fn setup_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
 
 fn setup_target_line(
     app: &App,
-    feature: crate::agent_feature_setup::AgentFeature,
+    feature: ilium_instructions::AgentFeature,
     instruction_file: &std::path::Path,
     label: String,
     selection_style: Style,
 ) -> Line<'static> {
     let (badge, detail, status_style) = match app.agent_setup_status(feature, instruction_file) {
         crate::app::AgentSetupTargetStatus::Available(
-            crate::agent_feature_setup::FeatureSetupStatus::Managed,
+            ilium_instructions::FeatureSetupStatus::Managed,
         ) => ("[ON]", "Ilium-managed", Style::new().fg(Color::Green)),
         crate::app::AgentSetupTargetStatus::Available(
-            crate::agent_feature_setup::FeatureSetupStatus::ManagedStale,
+            ilium_instructions::FeatureSetupStatus::ManagedStale,
         ) => (
             "[UPDATE]",
             "managed instructions need refresh",
             Style::new().fg(Color::Yellow),
         ),
         crate::app::AgentSetupTargetStatus::Available(
-            crate::agent_feature_setup::FeatureSetupStatus::ManagedFuture,
+            ilium_instructions::FeatureSetupStatus::ManagedFuture,
         ) => (
             "[NEWER]",
             "newer managed instructions preserved",
             Style::new().fg(Color::Cyan),
         ),
         crate::app::AgentSetupTargetStatus::Available(
-            crate::agent_feature_setup::FeatureSetupStatus::DetectedUnmanaged,
+            ilium_instructions::FeatureSetupStatus::DetectedUnmanaged,
         ) => (
             "[FOUND]",
             "instruction detected",
             Style::new().fg(Color::Yellow),
         ),
         crate::app::AgentSetupTargetStatus::Available(
-            crate::agent_feature_setup::FeatureSetupStatus::NotInstalled,
+            ilium_instructions::FeatureSetupStatus::NotInstalled,
         ) => (
             "[OFF]",
             "not set up",
@@ -2081,7 +2060,7 @@ pub fn setup_content_hit(area: Rect, scroll: u16, position: Position, app: &App)
     let document_line = position.y.saturating_sub(area.y).saturating_add(scroll) as usize;
     let rows = app.agent_setup_rows();
     let mut line = 3_usize;
-    for feature in crate::agent_feature_setup::AgentFeature::ALL {
+    for feature in ilium_instructions::AgentFeature::ALL {
         line += 2;
         for (index, _row) in rows
             .iter()
@@ -6352,8 +6331,8 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "⑂", "▥", "▷", "♪", "🎙",
-            "⚡", "≡", "≔", "⚑", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
+            "◐", "▦", "☷", "◉", "⌨", "❯", "✎", "⑂", "▷", "♪", "🎙", "≡", "≔", "⚑", "✦", "⌕", "⬡",
+            "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
@@ -6915,24 +6894,6 @@ mod tests {
                                         .map(|anchor| anchor.topic_id),
                                 );
                             }
-                        }
-                    }
-                }
-                SettingsTab::Cost => {
-                    // A calibration's parameter row exists only while it is chosen.
-                    for metric in crate::cost_model::CostMetric::ALL {
-                        app.cost_settings.metric = metric;
-                        for calibration in crate::cost_model::Calibration::ALL {
-                            app.cost_settings.calibration = calibration;
-                            let state = SettingsState {
-                                tab,
-                                ..SettingsState::default()
-                            };
-                            reachable.extend(
-                                settings_help_anchors(&layout, &app, &state)
-                                    .into_iter()
-                                    .map(|anchor| anchor.topic_id),
-                            );
                         }
                     }
                 }

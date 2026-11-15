@@ -117,6 +117,10 @@
       {
         "id": "close-finished",
         "title": "Close finished agent"
+      },
+      {
+        "id": "resume-goal",
+        "title": "Resume the paused goal"
       }
     ],
     "tree_toolbar": [
@@ -157,6 +161,11 @@
       },
       {
         "id": "finished",
+        "placement": "footer-row",
+        "applies_to": "agents"
+      },
+      {
+        "id": "goal",
         "placement": "footer-row",
         "applies_to": "agents"
       }

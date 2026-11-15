@@ -84,7 +84,6 @@ pub(crate) fn draw_at_with_cursor(
             .is_some_and(|popover| popover.is_visible(Instant::now()));
         if app.hovered_status_slot.is_some()
             || app.hovered_progress.is_some()
-            || app.hovered_goal_resume.is_some()
             || app.resources.hovered_action.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
@@ -97,7 +96,6 @@ pub(crate) fn draw_at_with_cursor(
         }
         draw_status_tooltip(frame, app);
         draw_progress_tooltip(frame, app);
-        draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
         app.draw_goal_popover(frame);
@@ -349,21 +347,6 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
         app.progress_display_now_unix_millis(),
         owner.as_deref(),
     );
-}
-
-fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
-    let Some((_, anchor)) = app.hovered_goal_resume else {
-        return;
-    };
-    let content = crate::status_icons::TooltipContent {
-        title: crate::goal_resume_link::GOAL_RESUME_TOOLTIP.to_owned(),
-        body: format!(
-            "Sends {} to this agent and presses Enter.",
-            crate::goal_resume_link::GOAL_RESUME_COMMAND
-        ),
-        reason: None,
-    };
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
 #[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
@@ -1778,13 +1761,6 @@ fn draw_pane_runtime(
                         );
                     }
                 }
-                crate::goal_resume_link::draw_goal_resume_link(
-                    app,
-                    viewport.pane_id,
-                    term.as_ref(),
-                    terminal_area,
-                    frame.buffer_mut(),
-                );
                 term.with_screen(|screen| {
                     // Highlight against the same rect the screen was just drawn
                     // into -- when a completed-agent close action reserves the

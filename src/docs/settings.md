@@ -165,7 +165,7 @@ Poll intervals below a few hundred milliseconds are clamped up by the server. Cu
 
 ### Agent Cost
 
-Controls spend indicators and how "expensive" is decided (fixed cuts, burn cuts, quota budget percentage, or a USD budget). Custom thresholds are set under `[cost]`. See [Agent cost](agent-cost.md).
+This page is contributed by the Cost plugin: turning the plugin off removes the page and the spend indicators. It controls the indicators and how "expensive" is decided (fixed cuts, burn cuts, quota budget percentage, or a USD budget). Its rows edit `[cost]` directly. See [Agent cost](agent-cost.md).
 
 ### Remote compaction
 

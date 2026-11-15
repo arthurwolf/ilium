@@ -13,7 +13,7 @@
 //! agree without threading a new argument through every signature. The app
 //! refreshes it whenever the settings or the terminal width change.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use ilium_core::{NodeKind, PaneContentKind};
 use ilium_ipc::PaneResizeCause;
@@ -263,6 +263,12 @@ impl PaddingSettings {
     }
 }
 
+/// The plugin that owns the padding settings and sends them as `kernel.set-padding`.
+const PADDING_OWNER_PLUGIN: &str = "ilium.core.layout";
+
+/// Whether the owning plugin ran when [`App::follow_padding_owner`] last looked.
+static PADDING_OWNER_RAN: AtomicBool = AtomicBool::new(true);
+
 /// Packed tree padding: one byte per side (left, right, top, bottom).
 static TREE_PADDING: AtomicU32 = AtomicU32::new(0);
 
@@ -293,10 +299,36 @@ pub fn tree_padding() -> PaddingSides {
 }
 
 impl App {
-    /// The padding `panel` gets at the current terminal width.
+    /// The padding `panel` gets at the current terminal width: none while the Layout plugin that
+    /// owns the settings is turned off, so disabling it leaves every panel unpadded.
     pub fn padding_for(&self, panel: PaddingPanel) -> PaddingSides {
+        if !self.padding_owner_runs() {
+            return PaddingSides::NONE;
+        }
         self.padding_settings
             .sides_for(panel, self.layout.screen_area.width)
+    }
+
+    /// Whether the Layout plugin, which owns the padding settings, runs. Without a plugin host
+    /// there is no plugin state to consult, so the settings stand (a client with no plugin
+    /// runtime, and the kernel tests).
+    fn padding_owner_runs(&self) -> bool {
+        self.wasm_plugins
+            .as_ref()
+            .is_none_or(|plugins| plugins.runs_plugin(PADDING_OWNER_PLUGIN))
+    }
+
+    /// Re-applies the padding when the Layout plugin was turned off or on since the last call,
+    /// so the tree and every pane lose or regain their padding at once. Returns whether it
+    /// changed, so the tick redraws.
+    pub(crate) fn follow_padding_owner(&mut self) -> bool {
+        let runs = self.padding_owner_runs();
+        if PADDING_OWNER_RAN.swap(runs, Ordering::Relaxed) == runs {
+            return false;
+        }
+        self.sync_padding();
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+        true
     }
 
     /// The panel kind a pane's content is drawn as.

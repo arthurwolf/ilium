@@ -41,7 +41,8 @@ fn agent_activity_names(activity: ilium_core::AgentActivity) -> (&'static str, &
 }
 
 /// The actions of the built-in agents: `compact` types `/compact` for Claude Code and Codex,
-/// allowed in the default activities.
+/// allowed in the default activities, and `goal-resume` types Codex's `/goal resume`, allowed
+/// while the agent is not working.
 fn builtin_agent_action(
     class: &ilium_core::AgentClass,
     action_id: &str,
@@ -50,6 +51,12 @@ fn builtin_agent_action(
         (ilium_core::AgentClass::Claude | ilium_core::AgentClass::Codex, "compact") => {
             Some(super::super::signatures::SignatureActionSpec::new(
                 "/compact\r",
+                &["idle", "done", "awaiting-approval", "menu"],
+            ))
+        }
+        (ilium_core::AgentClass::Codex, "goal-resume") => {
+            Some(super::super::signatures::SignatureActionSpec::new(
+                "/goal resume\r",
                 &["idle", "done", "awaiting-approval", "menu"],
             ))
         }
@@ -1384,6 +1391,11 @@ mod tests {
         assert!(builtin_agent_action(&ilium_core::AgentClass::Codex, "compact").is_some());
         assert!(builtin_agent_action(&ilium_core::AgentClass::Antigravity, "compact").is_none());
         assert!(builtin_agent_action(&ilium_core::AgentClass::Claude, "other").is_none());
+        let resume = builtin_agent_action(&ilium_core::AgentClass::Codex, "goal-resume")
+            .expect("codex resumes a paused goal");
+        assert_eq!(resume.keys, "/goal resume\r");
+        assert!(resume.allows("idle") && !resume.allows("working"));
+        assert!(builtin_agent_action(&ilium_core::AgentClass::Claude, "goal-resume").is_none());
     }
 
     #[test]

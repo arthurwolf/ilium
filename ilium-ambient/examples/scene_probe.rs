@@ -1,5 +1,5 @@
 //! Render one ambient scene headlessly and print JSONL frames.
-//! Usage: scene_probe --kind pipes|stars|video|images
+//! Usage: scene_probe --kind video|voxel_landscape|open_street_map
 //!        [--width N] [--height N] [--times SECONDS_CSV] [--wait-ms N] [--density PCT] [--settings-json JSON]
 //!        [--png-output NEW_DIR] writes one PNG per frame, with JSONL artifact paths.
 //! Each output line is {"type":"frame","kind":..,"time":..,"status":..,"lines":[..]}.

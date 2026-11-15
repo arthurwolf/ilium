@@ -226,35 +226,3 @@ fn authoritative_number_read_is_ordered_after_admitted_writes() {
         1530
     );
 }
-
-#[test]
-fn authoritative_cost_number_reopen_observes_disk_without_rolling_back_runtime() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.toml");
-    let mut app = editor_app(directory.path());
-    let row = crate::cost_settings::CostRow::SparklineCells;
-    crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
-    app.mode = Mode::Settings(Box::new(SettingsState {
-        tab: SettingsTab::Cost,
-        selected_row: crate::cost_settings::CostRow::rows(&app.cost_settings)
-            .iter()
-            .position(|candidate| *candidate == row)
-            .unwrap(),
-        ..SettingsState::default()
-    }));
-    app.begin_cost_value_dialog(row);
-    app.settle_filesystem_for_test();
-    std::fs::write(&path, "[cost\n").unwrap();
-    submit(&mut app, DialogOutcome::CommitNumber("17".into()));
-    app.settle_filesystem_for_test();
-    assert_eq!(app.cost_settings.sparkline_cells, 17);
-    let mut external = app.cost_settings.clone();
-    external.sparkline_cells = 19;
-    std::fs::write(&path, "").unwrap();
-    crate::config::save_cost_settings(directory.path(), &external).unwrap();
-    submit(&mut app, DialogOutcome::Cancel);
-    app.begin_cost_value_dialog(row);
-    app.settle_filesystem_for_test();
-    assert_eq!(number(&app).draft.buf, "19");
-    assert_eq!(app.cost_settings.sparkline_cells, 17);
-}

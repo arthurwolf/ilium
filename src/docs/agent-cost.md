@@ -29,7 +29,7 @@ Related pages: [Agent monitoring](agent-monitoring.md) (the stats popover), [Set
 
 ## Quick start
 
-1. Open **Settings** (`Ctrl+B :`) and choose the **Agent Cost** tab.
+1. Open **Settings** (`Ctrl+B :`) and choose the **Agent Cost** page. The Cost plugin provides it, so it is listed while that plugin is enabled.
 2. Leave the unit on **API dollars** and the calibration on **Relative to your history** (the defaults).
 3. The **Five-cell meter** is already enabled and appears when you hover an agent row. Turn on more options, and switch an option to **Always visible** if you want it on every row.
 4. Hover an agent to see its meter. Enable **Detail card** for the full breakdown.
@@ -131,7 +131,7 @@ Notes:
 
 ## Spending medals
 
-By default, Ilium places gold, silver and bronze at the far right of the three agent rows with the greatest token spend in the preceding twelve hours. This works even when a model lacks a price, because medals rank timestamped token usage rather than estimated dollars. Turn **Spending medals** off in Settings -> Agent Cost, choose a different rolling period, or award a separate set for each provider instead of ranking Claude and Codex together. The three glyphs are shared icon assignments: choose them from the rich picker in either Agent Cost or Settings -> Icons.
+By default, Ilium places gold, silver and bronze at the far right of the three agent rows with the greatest token spend in the preceding twelve hours. This works even when a model lacks a price, because medals rank timestamped token usage rather than estimated dollars. Turn **Spending medals** off in Settings -> Agent Cost, choose a different rolling period, or award a separate set for each provider instead of ranking Claude and Codex together. The three glyphs are shared icon assignments: choose them from the rich picker in Settings -> Icons.
 
 ## Prices and `[cost.prices]`
 

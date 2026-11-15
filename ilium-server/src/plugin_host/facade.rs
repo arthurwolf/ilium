@@ -29,7 +29,7 @@ use ilium_plugin_api::generated::types::tree::{
 use ilium_plugin_api::generated::types::ui::ViewTarget;
 use ilium_plugin_api::generated::types::{
     Color, ErrorCode, Event, Intent, Modifiers, NodeId, Outcome, Placement, PluginError,
-    PluginSide, SplitDirection,
+    PluginSide, SplitDirection, TitleSource,
 };
 use ilium_plugin_api::kernel::{
     Cell, FacadeError, ForegroundProcess, IntentResult, KernelFacade, Origin, PaneRead,
@@ -981,6 +981,25 @@ impl KernelFacade for ServerFacade {
                         Some(_) => {}
                     }
                 }
+                // An inferred title never replaces one the user typed. For a terminal pane it goes
+                // through the kernel's automatic title path, which applies it only to a pane that
+                // is confirmed to be a plain shell with an automatic title and ignores the rest;
+                // any other rename is a rename by hand.
+                let inferred_pane = spec.source == TitleSource::Inferred
+                    && self
+                        .with_tree(|tree| {
+                            tree.get(node)
+                                .is_some_and(|found| matches!(found.kind, NodeKind::Pane { .. }))
+                        })
+                        .unwrap_or(false);
+                if inferred_pane {
+                    return self.simple(ClientRequest::SetAutomaticPaneTitle {
+                        pane_id: node,
+                        title: spec.title,
+                        short_title: None,
+                        inferred_icon: None,
+                    });
+                }
                 self.simple(ClientRequest::RenameNode {
                     node_id: node,
                     title: spec.title,
@@ -1184,11 +1203,21 @@ impl PaneRead for ServerFacade {
         })
     }
 
-    /// Scrollback lines are not readable here: the pane owner hands out its screen read-only
-    /// and the terminal emulator needs a write to show a scrolled-back view. Answers none
-    /// until the pane owner serves history lines (foundation contract section 17.4).
-    fn history(&self, _pane: NodeId, _lines: u32) -> Option<Vec<String>> {
-        None
+    /// The last `lines` scrollback lines, oldest first (foundation contract section 17.4). The
+    /// pane owner hands out its screen read-only, so the lines are rebuilt on a private
+    /// emulator from the retained output journal (`history.rs`); the live screen is untouched.
+    fn history(&self, pane: NodeId, lines: u32) -> Option<Vec<String>> {
+        let (columns, rows) = self.size(pane)?;
+        if lines == 0 {
+            return Some(Vec::new());
+        }
+        let replay = self.with_terminal(pane, |runtime| runtime.session.output_replay())?;
+        Some(super::history::scrollback_lines(
+            &replay.bytes,
+            rows,
+            columns,
+            lines as usize,
+        ))
     }
 
     fn size(&self, pane: NodeId) -> Option<(u16, u16)> {

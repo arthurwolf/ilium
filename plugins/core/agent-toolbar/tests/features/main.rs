@@ -9,6 +9,7 @@ mod compact_routing;
 mod debug_history;
 mod doc_page;
 mod extension_points;
+mod goal_resume;
 mod grants;
 mod manifest;
 mod model_context;

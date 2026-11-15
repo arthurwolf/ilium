@@ -26,6 +26,18 @@ pub(crate) const CLOSE_FINISHED_COMMAND: &str = "close-finished";
 const FINISHED_SLOT: &str = "finished";
 /// The text of the close button.
 const CLOSE_FINISHED_LABEL: &str = " \u{2715} Close finished agent ";
+/// The command of the footer button that resumes a paused goal.
+pub(crate) const RESUME_GOAL_COMMAND: &str = "resume-goal";
+/// The footer-row slot that carries the resume-goal button.
+const GOAL_SLOT: &str = "goal";
+/// The text of the resume-goal button.
+const RESUME_GOAL_LABEL: &str = " \u{25b6} Resume goal ";
+/// The signature of the agent whose paused goal `/goal resume` continues.
+const GOAL_RESUME_SIGNATURE: &str = "codex";
+/// The goal state the kernel reports for a goal the agent has paused.
+const GOAL_PAUSED: &str = "paused";
+/// The channel on which the server side is asked to type the resume command.
+pub(crate) const GOAL_RESUME_CHANNEL: &str = "goal-resume";
 /// How often the auto-freeze policy looks at the clock while agent panes exist.
 const FREEZE_CHECK_MILLIS: u32 = 30_000;
 
@@ -37,6 +49,10 @@ pub struct AgentToolbarClient {
     last_prompts: BTreeMap<u64, String>,
     /// The panes whose finished-agent close button is showing.
     finished: BTreeSet<u64>,
+    /// The agent signature of each identified pane.
+    signatures: BTreeMap<u64, String>,
+    /// The panes whose resume-goal button is showing.
+    resumable: BTreeSet<u64>,
     /// Goal text per pane, remembered for the frame.
     goals: BTreeMap<u64, Option<String>>,
     /// Latest history reply received from the server side, kept for the popup.
@@ -85,6 +101,22 @@ fn close_finished_slot(pane: NodeId) -> Submission {
     }))
 }
 
+/// The resume button of a paused goal: a footer span whose click runs the resume command.
+fn resume_goal_slot(pane: NodeId) -> Submission {
+    Submission::new(Intent::SetFrameSlot(SetFrameSlotSpec {
+        pane,
+        slot: GOAL_SLOT.to_string(),
+        content: vec![RichSpan {
+            text: RESUME_GOAL_LABEL.to_string(),
+            style: Style::default(),
+            target: SpanTarget::Command(RESUME_GOAL_COMMAND.to_string()),
+            tooltip: Some("Sends /goal resume to this agent and presses Enter.".to_string()),
+        }],
+        icon: None,
+        tooltip: None,
+    }))
+}
+
 fn clear_slot(pane: NodeId, slot: &str) -> Submission {
     Submission::new(Intent::ClearFrameSlot(ClearFrameSlotSpec {
         pane,
@@ -124,7 +156,29 @@ impl AgentToolbarClient {
         }
     }
 
+    /// Shows the resume button while a Codex pane's goal is paused and removes it otherwise.
+    fn sync_goal_row(&mut self, node: NodeId, out: &mut Vec<Submission>) {
+        let paused = self.signatures.get(&node.0).map(String::as_str)
+            == Some(GOAL_RESUME_SIGNATURE)
+            && self
+                .goals
+                .get(&node.0)
+                .and_then(|goal| goal.as_deref())
+                .is_some_and(|goal| goal == GOAL_PAUSED);
+        if paused && self.resumable.insert(node.0) {
+            out.push(resume_goal_slot(node));
+        } else if !paused && self.resumable.remove(&node.0) {
+            out.push(clear_slot(node, GOAL_SLOT));
+        }
+    }
+
     fn on_activity(&mut self, node: NodeId, current: AgentActivity, out: &mut Vec<Submission>) {
+        if matches!(current, AgentActivity::None) {
+            // The agent left the pane: its goal and its identity left with it.
+            self.goals.remove(&node.0);
+            self.signatures.remove(&node.0);
+            self.sync_goal_row(node, out);
+        }
         if !matches!(current, AgentActivity::Done) && self.finished.remove(&node.0) {
             out.push(clear_slot(node, FINISHED_SLOT));
         }
@@ -144,13 +198,30 @@ impl AgentToolbarClient {
         }
     }
 
+    /// The pane a footer click was made on; the focused pane may differ.
+    fn clicked_pane(invoked: &CommandInvokedEvent) -> Option<NodeId> {
+        let clicked = serde_json::from_str::<serde_json::Value>(&invoked.arguments_json)
+            .ok()
+            .and_then(|arguments| arguments.get("node").and_then(serde_json::Value::as_u64));
+        clicked.map(NodeId).or(invoked.context.pane)
+    }
+
     fn on_command(&mut self, invoked: &CommandInvokedEvent, out: &mut Vec<Submission>) {
+        if invoked.command == RESUME_GOAL_COMMAND {
+            if let Some(pane) = Self::clicked_pane(invoked) {
+                // A stale click after the goal left the paused state resumes nothing.
+                if self.resumable.contains(&pane.0) {
+                    out.push(message_to(
+                        PluginSide::Server,
+                        GOAL_RESUME_CHANNEL,
+                        pane.0.to_string().into_bytes(),
+                    ));
+                }
+            }
+            return;
+        }
         if invoked.command == CLOSE_FINISHED_COMMAND {
-            // The footer click names the pane it was made on; the focused pane may differ.
-            let clicked = serde_json::from_str::<serde_json::Value>(&invoked.arguments_json)
-                .ok()
-                .and_then(|arguments| arguments.get("node").and_then(serde_json::Value::as_u64));
-            if let Some(pane) = clicked.map(NodeId).or(invoked.context.pane) {
+            if let Some(pane) = Self::clicked_pane(invoked) {
                 // A stale click after the agent resumed work closes nothing.
                 if self.finished.remove(&pane.0) {
                     out.push(Submission::new(Intent::CloseNode(pane)));
@@ -277,8 +348,15 @@ impl Handler for AgentToolbarClient {
                 Event::AgentActivityChanged(change) => {
                     self.on_activity(change.node, change.current, &mut out);
                 }
+                Event::AgentIdentified(identified) => {
+                    self.signatures
+                        .insert(identified.node.0, identified.signature);
+                    self.sync_goal_row(identified.node, &mut out);
+                }
                 Event::AgentGoalChanged(goal) => {
-                    self.goals.insert(goal.node.0, goal.goal);
+                    let node = goal.node;
+                    self.goals.insert(node.0, goal.goal);
+                    self.sync_goal_row(node, &mut out);
                 }
                 Event::SignalChanged(signal) if signal.signal == ACTIVITY_DETAIL_SIGNAL => {
                     self.on_activity_detail(signal.pane, &signal.value, &mut out);

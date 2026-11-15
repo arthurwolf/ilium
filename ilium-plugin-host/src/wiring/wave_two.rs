@@ -286,12 +286,18 @@ pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet
         if let (Some(backend), Ok(resolver)) = (&backends.media, fs.read_resolver()) {
             let spool = (!backends.data_dir.as_os_str().is_empty())
                 .then(|| backends.media_spool(&context.plugin));
-            set.media = Some(Box::new(MediaImport::new(
+            let media = MediaImport::new(
                 env,
                 Some(Arc::new(resolver) as Arc<dyn VideoFiles>),
                 Some(Arc::clone(backend)),
                 spool,
-            )));
+            );
+            // A scene draws inside a frame: its `next-frame` never waits for the decoder.
+            set.media = Some(Box::new(if context.side == Side::Scene {
+                media.without_waiting()
+            } else {
+                media
+            }));
         }
     }
     set.fs = Some(Box::new(fs));

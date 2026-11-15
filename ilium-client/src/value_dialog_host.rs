@@ -47,11 +47,6 @@ pub enum ValueTarget {
         directory: std::path::PathBuf,
     },
     Animation(crate::value_animation::AnimationControlTarget),
-    Cost {
-        target: crate::value_cost::CostValueTarget,
-        directory: std::path::PathBuf,
-        read: Option<NumericReadState>,
-    },
     DetectionNumber {
         field: crate::value_settings::SettingsNumber,
         original: ilium_ipc::AgentDetectionSettings,
@@ -348,27 +343,6 @@ impl ValueDialogHost {
         })
     }
 
-    pub fn cost(
-        settings: &crate::cost_settings::CostSettings,
-        row: crate::cost_settings::CostRow,
-        directory: std::path::PathBuf,
-    ) -> Result<Self, String> {
-        if !directory.is_absolute() {
-            return Err("The cost configuration directory is unavailable".into());
-        }
-        let target = crate::value_cost::CostValueTarget::new(settings, row)?;
-        let dialog = target.dialog(settings)?;
-        Ok(Self {
-            target: ValueTarget::Cost {
-                target,
-                directory,
-                read: None,
-            },
-            dialog,
-            pending_save: None,
-        })
-    }
-
     pub fn animation(
         target: crate::value_animation::AnimationControlTarget,
     ) -> Result<Self, String> {
@@ -382,28 +356,21 @@ impl ValueDialogHost {
 
     pub(crate) fn number_read(&self) -> Option<&NumericReadState> {
         match &self.target {
-            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
-                read.as_ref()
-            }
+            ValueTarget::SettingsNumber { read, .. } => read.as_ref(),
             _ => None,
         }
     }
 
     pub(crate) fn number_read_mut(&mut self) -> Option<&mut NumericReadState> {
         match &mut self.target {
-            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
-                read.as_mut()
-            }
+            ValueTarget::SettingsNumber { read, .. } => read.as_mut(),
             _ => None,
         }
     }
 
     pub(crate) fn set_number_read(&mut self, state: NumericReadState) {
-        match &mut self.target {
-            ValueTarget::SettingsNumber { read, .. } | ValueTarget::Cost { read, .. } => {
-                *read = Some(state)
-            }
-            _ => {}
+        if let ValueTarget::SettingsNumber { read, .. } = &mut self.target {
+            *read = Some(state);
         }
     }
 

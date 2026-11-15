@@ -234,13 +234,13 @@ fn validate_schema(schema: &Value, pointer: &str, depth: usize, errors: &mut Vec
         }
     }
     if let Some(values) = schema.get("enum") {
-        if !matches!(kind, Some("string" | "integer"))
+        if !matches!(kind, Some("string" | "integer" | "array"))
             || values.as_array().is_none_or(Vec::is_empty)
         {
             errors.push(finding(
                 "manifest.schema",
                 &child_pointer(pointer, "enum"),
-                "Enum requires a nonempty array on a string or integer",
+                "Enum requires a nonempty array on a string, integer or preset list",
             ));
         } else if let Some(values) = values.as_array() {
             for value in values {
@@ -404,6 +404,29 @@ fn has_type(value: &Value, kind: &str) -> bool {
     }
 }
 
+/// Whether `value` equals the enum entry `allowed`: numbers compare by value (`1` equals
+/// `1.0`, within the exact-integer range) and lists of numbers element by element, so a preset
+/// list read back from `config.toml` matches the manifest's spelling of it.
+pub fn same_enum_value(allowed: &Value, value: &Value) -> bool {
+    match (allowed, value) {
+        (Value::Number(_), Value::Number(_)) => {
+            allowed == value
+                || (allowed.as_f64() == value.as_f64()
+                    && allowed
+                        .as_f64()
+                        .is_some_and(|number| number.abs() <= 9_007_199_254_740_991.0))
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| same_enum_value(left, right))
+        }
+        _ => allowed == value,
+    }
+}
+
 fn validate_value(schema: &Value, value: &Value, pointer: &str, errors: &mut Vec<Diagnostic>) {
     if !has_type(value, schema_kind(schema).unwrap_or_default()) {
         errors.push(finding(
@@ -415,15 +438,7 @@ fn validate_value(schema: &Value, value: &Value, pointer: &str, errors: &mut Vec
     }
     let mut invalid = false;
     if let Some(values) = schema.get("enum").and_then(Value::as_array) {
-        invalid |= !values.iter().any(|allowed| {
-            allowed == value
-                || (allowed.is_number()
-                    && value.is_number()
-                    && allowed.as_f64() == value.as_f64()
-                    && allowed
-                        .as_f64()
-                        .is_some_and(|number| number.abs() <= 9_007_199_254_740_991.0))
-        });
+        invalid |= !values.iter().any(|allowed| same_enum_value(allowed, value));
     }
     if let Some(number) = value.as_f64() {
         invalid |= schema
@@ -697,13 +712,33 @@ fn compile_row(kind: &str, row: &Value) -> Option<Value> {
             let options = choice_values(row.get("options"));
             let integer =
                 options.iter().all(|value| value.is_i64() || value.is_u64()) && !options.is_empty();
+            // A preset choice: every option is a list of numbers (for example four ascending
+            // cut points), stored as that list in the bound table.
+            let number_lists = !options.is_empty()
+                && options.iter().all(|value| {
+                    value.as_array().is_some_and(|items| {
+                        !items.is_empty() && items.iter().all(Value::is_number)
+                    })
+                });
             set(
                 "type",
-                Value::from(if integer { "integer" } else { "string" }),
+                Value::from(if integer {
+                    "integer"
+                } else if number_lists {
+                    "array"
+                } else {
+                    "string"
+                }),
             );
+            if number_lists {
+                set("items", serde_json::json!({"type": "number"}));
+            }
             let fixed = row.get("allow_custom").and_then(Value::as_bool) != Some(true)
                 && row.get("source").is_none();
-            if fixed && !options.is_empty() && (integer || options.iter().all(Value::is_string)) {
+            if fixed
+                && !options.is_empty()
+                && (integer || number_lists || options.iter().all(Value::is_string))
+            {
                 let titles = choice_titles(row.get("options"));
                 let count = options.len();
                 set("enum", Value::Array(options));
@@ -1244,5 +1279,36 @@ mod tests {
         }
         validate_settings(&schema, r#"{"zoom": 1.5, "density": "roomy"}"#)
             .expect("a value inside its rows");
+    }
+
+    /// A preset choice offers lists of numbers (for example four cut points): the compiled row
+    /// is an array enum, a stored integer spelling (`[1, 5]`, as TOML may hand it back) still
+    /// matches its float option, and a list outside the presets is refused.
+    #[test]
+    fn a_preset_choice_of_number_lists_compiles_to_an_array_enum() {
+        let manifest = serde_json::json!({"contributes": {"settings": [
+            {"kind": "tab", "id": "presets", "title": "Presets", "sections": [
+                {"id": "main", "title": "Main", "scope": "client", "rows": [
+                    {"type": "choice", "key": "cuts", "title": "Cuts", "default": [1.0, 5.0],
+                     "options": [{"value": [0.5, 2.0], "title": "Low"},
+                                 {"value": [1.0, 5.0], "title": "Middle"}]}
+                ]}
+            ]}
+        ]}});
+        let schema = super::schema_for_side(&manifest, "client");
+        assert_eq!(schema["properties"]["cuts"]["type"], "array");
+        let text = schema.to_string();
+        validate_settings(&text, r#"{"cuts": [1.0, 5.0]}"#).expect("a preset");
+        validate_settings(&text, r#"{"cuts": [1, 5]}"#).expect("an integer spelling");
+        assert!(validate_settings(&text, r#"{"cuts": [1.0, 6.0]}"#).is_err());
+        assert!(validate_settings(&text, r#"{"cuts": "middle"}"#).is_err());
+        assert!(super::same_enum_value(
+            &serde_json::json!([0.5, 2]),
+            &serde_json::json!([0.5, 2.0])
+        ));
+        assert!(!super::same_enum_value(
+            &serde_json::json!([0.5]),
+            &serde_json::json!([0.5, 2.0])
+        ));
     }
 }

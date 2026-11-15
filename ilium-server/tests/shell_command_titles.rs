@@ -1,6 +1,7 @@
-//! End-to-end title tests over the real UDS and real PTYs. The server owns
-//! both the command tracker and authoritative tree, so these cover the full
-//! input -> title -> broadcast path without a client-side mock.
+//! End-to-end title test over the real UDS and real PTYs. The server owns
+//! both the command tracker and authoritative tree. Naming a plain shell pane after
+//! the command typed into it belongs to the titles plugin (it receives the line as
+//! `user-line-submitted`), so only the kernel's own gate is tested here.
 //! Runs on every platform. A typed command only becomes a title while the
 //! shell itself owns the terminal, which is how the server tells "the user is
 //! typing at a prompt" from "a running command owns the terminal". Unix
@@ -13,7 +14,7 @@
 
 use std::time::Duration;
 
-use ilium_core::{NodeKind, PaneTitleSource, ROOT_ID};
+use ilium_core::ROOT_ID;
 use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
 
 mod common;
@@ -33,45 +34,6 @@ const NON_SHELL_PROBE_COMMAND: &str = "cat";
 #[cfg(windows)]
 const NON_SHELL_PROBE_COMMAND: &str = "findstr x";
 
-async fn create_plain_shell(
-    client: &mut ilium_transport::SessionStream,
-    session_name: &str,
-) -> ilium_core::NodeId {
-    write_frame(
-        client,
-        &ClientRequest::Attach {
-            session: session_name.to_string(),
-            hello: Default::default(),
-        },
-    )
-    .await
-    .expect("attach client");
-    read_initial_state(client, Duration::from_secs(5)).await;
-
-    write_frame(
-        client,
-        &ClientRequest::NewPane {
-            request_id: 0,
-            parent_group: ROOT_ID,
-            kind: NewPaneKind::PlainShell,
-            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-        },
-    )
-    .await
-    .expect("create plain shell");
-    let event = expect_event(
-        client,
-        Duration::from_secs(5),
-        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
-    )
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only matches tree snapshots");
-    };
-    let pane_id = tree.panes().next().expect("created pane").id;
-    pane_id
-}
-
 async fn stop(mut server: TestServer, client: &mut ilium_transport::SessionStream) {
     write_frame(client, &ClientRequest::KillSession)
         .await
@@ -88,119 +50,6 @@ async fn stop(mut server: TestServer, client: &mut ilium_transport::SessionStrea
         .expect("server shutdown timed out")
         .expect("server task panicked")
         .expect("server returned an error");
-}
-
-#[tokio::test]
-async fn completed_shell_commands_update_the_title_for_other_clients_until_user_rename() {
-    let server = TestServer::start("shell-title-test").await;
-    let mut creator = server.connect().await;
-    let mut observer = server.connect().await;
-    let pane_id = create_plain_shell(&mut creator, "shell-title-test").await;
-
-    write_frame(
-        &mut observer,
-        &ClientRequest::Attach {
-            session: "shell-title-test".to_string(),
-            hello: Default::default(),
-        },
-    )
-    .await
-    .expect("attach observer");
-    read_initial_state(&mut observer, Duration::from_secs(5)).await;
-
-    for bytes in [b"echo ".as_slice(), b"shell-title-marker\r".as_slice()] {
-        write_frame(
-            &mut creator,
-            &ClientRequest::KeyInput {
-                pane_id,
-                bytes: bytes.to_vec(),
-                submission: None,
-            },
-        )
-        .await
-        .expect("write shell input");
-    }
-
-    let event = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "echo shell-title-marker")
-        )
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only matches tree snapshots");
-    };
-    let NodeKind::Pane { title_source, .. } = &tree.get(pane_id).expect("pane exists").kind else {
-        panic!("expected pane");
-    };
-    assert_eq!(*title_source, PaneTitleSource::Automatic);
-
-    write_frame(
-        &mut creator,
-        &ClientRequest::RenameNode {
-            node_id: pane_id,
-            title: "manual shell name".to_string(),
-            short_title: None,
-            inferred_icon: None,
-        },
-    )
-    .await
-    .expect("rename pane");
-    let _ = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "manual shell name")
-        )
-    })
-    .await;
-    // `creator` is subscribed to the same session-wide broadcast as
-    // `observer` (every attached connection is, including the one that
-    // triggered the mutation -- see `ipc::connection::handle`), so the
-    // rename above is already sitting unread in `creator`'s stream. Drain
-    // it now: otherwise the final `expect_event(&mut creator, ...)` below
-    // would match *this* stale rename snapshot instead of a snapshot
-    // produced after the upcoming "must-not-replace" command, making that
-    // assertion pass even if automatic titling wrongly reasserted itself.
-    let _ = expect_event(&mut creator, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "manual shell name")
-        )
-    })
-    .await;
-
-    write_frame(
-        &mut creator,
-        &ClientRequest::KeyInput {
-            pane_id,
-            bytes: b"echo must-not-replace-user-name\r".to_vec(),
-            submission: None,
-        },
-    )
-    .await
-    .expect("write after user rename");
-    write_frame(
-        &mut creator,
-        &ClientRequest::Attach {
-            session: "shell-title-test".to_string(),
-            hello: Default::default(),
-        },
-    )
-    .await
-    .expect("request authoritative snapshot");
-    let (tree, _) = read_initial_state(&mut creator, Duration::from_secs(5)).await;
-    let pane = tree.get(pane_id).expect("pane exists");
-    assert_eq!(pane.name, "manual shell name");
-    let NodeKind::Pane { title_source, .. } = &pane.kind else {
-        panic!("expected pane");
-    };
-    assert_eq!(*title_source, PaneTitleSource::UserSpecified);
-
-    stop(server, &mut creator).await;
 }
 
 #[tokio::test]

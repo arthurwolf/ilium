@@ -6,16 +6,11 @@ use std::path::PathBuf;
 
 pub enum NumberReadTarget {
     Settings(crate::value_settings::SettingsNumber),
-    Cost(crate::value_cost::CostValueTarget),
 }
 impl NumberReadTarget {
     fn value(&self, config: &crate::config::ClientConfig) -> Result<String, String> {
         match self {
             Self::Settings(field) => Ok(field.persisted_snapshot(config)),
-            Self::Cost(target) => match target.dialog(&config.cost)? {
-                crate::value_dialog::ValueDialogState::Number(number) => Ok(number.draft.buf),
-                _ => Err("The saved cost setting is no longer numeric; reopen this dialog".into()),
-            },
         }
     }
 }

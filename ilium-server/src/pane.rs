@@ -334,6 +334,9 @@ pub struct TerminalPaneRuntime {
     /// missing. They must survive subsequent snapshots without probing or
     /// delivering their commands in the fallback shell.
     pub deferred_progress_monitors: Vec<crate::persistence::PersistedProgressMonitor>,
+    /// Rebuilds the lines typed at a plain shell's prompt (present only for a plain shell). The
+    /// input handler reports each exactly rebuilt line to plugins as `user-line-submitted`; the
+    /// titles plugin turns it into the pane title.
     pub shell_command_tracker: Option<ShellCommandTracker>,
     /// Observes submitted agent slash commands only so an in-process
     /// `/resume`-style transition can invalidate launch-time identity before

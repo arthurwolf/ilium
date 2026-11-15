@@ -2539,57 +2539,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
     }
 
-    if state.tab == crate::app::SettingsTab::Cost {
-        use crate::value_control::{ControlAction, PointerButton};
-        let button = match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => Some(PointerButton::Left),
-            MouseEventKind::Down(MouseButton::Right) => Some(PointerButton::Right),
-            _ => None,
-        };
-        if let Some((index, row, action)) = button.and_then(|button| {
-            crate::cost_settings_ui::value_hit(
-                layout.content_area,
-                state.scroll,
-                position,
-                button,
-                app,
-            )
-        }) {
-            state.selected_row = index;
-            match action {
-                ControlAction::PreviousChoice | ControlAction::Decrement => {
-                    app.settings_adjust_cost_row(row, -1)
-                }
-                ControlAction::NextChoice | ControlAction::Increment => {
-                    app.settings_adjust_cost_row(row, 1)
-                }
-                ControlAction::OpenChoices | ControlAction::EditNumber => {
-                    app.mode = Mode::Settings(Box::new(state));
-                    app.begin_cost_value_dialog(row);
-                    return;
-                }
-            }
-            app.mode = Mode::Settings(Box::new(state));
-            return;
-        }
-        if button.is_some() {
-            let rows = crate::cost_settings_ui::rows(app);
-            let view =
-                crate::cost_settings_ui::view(app, state.selected_row, layout.content_area.width);
-            if let Some(span) = view.rows.iter().find(|span| {
-                crate::cost_settings_ui::value_control(layout.content_area, state.scroll, span, app)
-                    .is_some_and(|control| control.geometry().row.contains(position))
-            }) {
-                state.selected_row = rows
-                    .iter()
-                    .position(|row| *row == span.row)
-                    .unwrap_or(state.selected_row);
-                app.mode = Mode::Settings(Box::new(state));
-                return;
-            }
-        }
-    }
-
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             state.animation_slider_drag = None;
@@ -2895,37 +2844,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_adjust_voice_row(row, direction);
                         return;
                     }
-                }
-            } else if state.tab == crate::app::SettingsTab::Cost {
-                let pointer_button = match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Right) => {
-                        crate::value_control::PointerButton::Right
-                    }
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        crate::value_control::PointerButton::Left
-                    }
-                    _ => crate::value_control::PointerButton::Other,
-                };
-                if let Some(hit) = crate::cost_settings_ui::hit_with_button(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    pointer_button,
-                    app,
-                ) {
-                    state.selected_row = hit.index;
-                    app.mode = Mode::Settings(Box::new(state));
-                    if let Some(target) = hit.row.icon_target() {
-                        let Mode::Settings(state) = &mut app.mode else {
-                            unreachable!("settings mode was retained for the icon picker");
-                        };
-                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
-                    } else if app.cost_settings.number_spec(hit.row).is_none()
-                        && !crate::value_cost::is_choice(hit.row)
-                    {
-                        app.settings_adjust_cost_row(hit.row, hit.direction);
-                    }
-                    return;
                 }
             } else if state.tab == crate::app::SettingsTab::Debug {
                 if let Some(index) = crate::settings_ui::debug_content_hit(
@@ -4298,110 +4216,6 @@ mod shared_dialog_mouse_tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
         assert!(app.modal_stack.is_empty());
         assert_eq!(app.voice_settings.custom_prompt, "Speak concisely.");
-    }
-}
-
-#[cfg(test)]
-mod cost_settings_mouse_tests {
-    use super::*;
-    use crate::app::{App, SettingsState, SettingsTab};
-    use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-
-    fn cost_app() -> (tempfile::TempDir, App, ratatui::layout::Rect) {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("test-session".to_string(), directory.path().to_owned());
-        app.config_dir = Some(directory.path().to_owned());
-        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Cost,
-            ..SettingsState::default()
-        }));
-        let Mode::Settings(state) = &app.mode else {
-            panic!("cost settings fixture");
-        };
-        let content =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
-                .content_area;
-        (directory, app, content)
-    }
-
-    fn click(app: &mut App, column: u16, row: u16) {
-        handle_mouse_event(
-            app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column,
-                row,
-                modifiers: KeyModifiers::empty(),
-            },
-        );
-    }
-
-    fn span_of(
-        app: &App,
-        content: ratatui::layout::Rect,
-        row: CostRow,
-    ) -> crate::cost_settings_ui::RowSpan {
-        *crate::cost_settings_ui::view(app, 0, content.width)
-            .rows
-            .iter()
-            .find(|span| span.row == row)
-            .expect("the row is on the page")
-    }
-
-    #[test]
-    fn clicks_toggle_options_choose_calibrations_and_step_values() {
-        use crate::cost_model::Calibration;
-        let (_directory, mut app, content) = cost_app();
-
-        // Checkbox line of an option.
-        let sparkline = span_of(&app, content, CostRow::Display(CostDisplay::Sparkline));
-        click(&mut app, content.x + 8, content.y + sparkline.first_line);
-        assert!(app.cost_settings.sparkline.enabled);
-
-        // Its visibility selector.
-        let visibility = span_of(&app, content, CostRow::Visibility(CostDisplay::Sparkline));
-        let visibility_control =
-            crate::cost_settings_ui::value_control(content, 0, &visibility, &app).unwrap();
-        let visibility_value = visibility_control.geometry().value;
-        click(&mut app, visibility_value.x, visibility_value.y);
-        assert_eq!(
-            app.cost_settings.sparkline.visibility,
-            CostVisibility::Always
-        );
-
-        // The calibration value advances with left-click.
-        let rating = span_of(&app, content, CostRow::Calibration(Calibration::OwnHistory));
-        let rating_control =
-            crate::cost_settings_ui::value_control(content, 0, &rating, &app).unwrap();
-        let rating_value = rating_control.geometry().value;
-        click(&mut app, rating_value.x, rating_value.y);
-        assert_eq!(app.cost_settings.calibration, Calibration::Budget);
-
-        // The parameter row that appeared: its rendered increment/decrement buttons.
-        let amount = span_of(&app, content, CostRow::Budget);
-        let amount_control =
-            crate::cost_settings_ui::value_control(content, 0, &amount, &app).unwrap();
-        let amount_geometry = amount_control.geometry();
-        assert_eq!(app.cost_settings.budget_usd, 10.0);
-        click(&mut app, amount_geometry.next.x, amount_geometry.next.y);
-        assert_eq!(app.cost_settings.budget_usd, 20.0);
-        click(
-            &mut app,
-            amount_geometry.previous.x,
-            amount_geometry.previous.y,
-        );
-        assert_eq!(app.cost_settings.budget_usd, 10.0);
-
-        // A click on a stepper's description changes nothing.
-        click(&mut app, amount_geometry.next.x, amount_geometry.next.y + 1);
-        assert_eq!(app.cost_settings.budget_usd, 10.0);
-
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings stay open");
-        };
-        assert!(state.selected_row > 0, "a click moves the selection");
     }
 }
 

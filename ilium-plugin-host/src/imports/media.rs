@@ -73,7 +73,28 @@ pub struct DecodeRequest {
 /// The frames of one decoder run, in order. Dropping it stops the decoder.
 pub trait FrameSource: Send {
     /// The next `rgb8` frame of `width * height * 3` bytes, `None` at the end of the run.
+    /// Waits for the decoder.
     fn next_frame(&mut self) -> Result<Option<Vec<u8>>, PluginError>;
+
+    /// The next frame if the decoder already has it; never waits. The default waits, so a
+    /// source that cannot answer without waiting stays correct.
+    fn poll_frame(&mut self) -> Result<FramePoll, PluginError> {
+        Ok(match self.next_frame()? {
+            Some(frame) => FramePoll::Frame(frame),
+            None => FramePoll::End,
+        })
+    }
+}
+
+/// The answer of [`FrameSource::poll_frame`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FramePoll {
+    /// The next frame.
+    Frame(Vec<u8>),
+    /// The run is over.
+    End,
+    /// The decoder has not produced the next frame yet; ask again later.
+    Pending,
 }
 
 /// Finds the real file behind a plugin's `fs-path`.
@@ -185,6 +206,8 @@ pub struct MediaImport {
     spool_dir: Option<PathBuf>,
     videos: HashMap<u64, OpenVideo>,
     next_video: u64,
+    /// `next-frame` waits for the decoder; false answers `timed-out` when no frame is ready.
+    waits: bool,
 }
 
 impl std::fmt::Debug for MediaImport {
@@ -222,7 +245,16 @@ impl MediaImport {
             spool_dir,
             videos: HashMap::new(),
             next_video: 0,
+            waits: true,
         }
+    }
+
+    /// An import whose `next-frame` never waits for the decoder: while no frame is ready it
+    /// answers `timed-out` and keeps the decoder running, so a caller that draws inside a
+    /// frame (a scene) asks again on its next frame instead of stalling.
+    pub fn without_waiting(mut self) -> Self {
+        self.waits = false;
+        self
     }
 
     /// How many videos are open.
@@ -476,6 +508,7 @@ impl HostMedia for MediaImport {
     ) -> Result<Option<Vec<u8>>, PluginError> {
         check_frame_size(width, height)?;
         let backend = self.backend.clone();
+        let waits = self.waits;
         let open = self.video_mut(video)?;
         if open.ended {
             return Ok(None);
@@ -514,12 +547,24 @@ impl HostMedia for MediaImport {
         let Some(decoder) = open.decoder.as_mut() else {
             return Ok(None);
         };
-        match decoder.source.next_frame() {
-            Ok(Some(frame)) => {
+        let polled = if waits {
+            decoder.source.next_frame().map(|frame| match frame {
+                Some(frame) => FramePoll::Frame(frame),
+                None => FramePoll::End,
+            })
+        } else {
+            decoder.source.poll_frame()
+        };
+        match polled {
+            Ok(FramePoll::Frame(frame)) => {
                 decoder.frames_returned += 1;
                 Ok(Some(frame))
             }
-            Ok(None) => {
+            Ok(FramePoll::Pending) => Err(PluginError::new(
+                ErrorCode::TimedOut,
+                "the decoder has no frame ready yet",
+            )),
+            Ok(FramePoll::End) => {
                 open.stop_decoder();
                 open.ended = true;
                 Ok(None)
@@ -603,6 +648,8 @@ mod tests {
     #[derive(Default)]
     struct FakeDecoder {
         frames: u64,
+        /// How many `poll_frame` calls of a run answer `Pending` before frames come.
+        pending_polls: u64,
         runs: Mutex<Vec<DecodeRequest>>,
     }
 
@@ -610,9 +657,21 @@ mod tests {
         left: u64,
         bytes: usize,
         fill: u8,
+        pending: u64,
     }
 
     impl FrameSource for FakeRun {
+        fn poll_frame(&mut self) -> Result<FramePoll, PluginError> {
+            if self.pending > 0 {
+                self.pending -= 1;
+                return Ok(FramePoll::Pending);
+            }
+            Ok(match self.next_frame()? {
+                Some(frame) => FramePoll::Frame(frame),
+                None => FramePoll::End,
+            })
+        }
+
         fn next_frame(&mut self) -> Result<Option<Vec<u8>>, PluginError> {
             if self.left == 0 {
                 return Ok(None);
@@ -645,6 +704,7 @@ mod tests {
                 left: self.frames,
                 bytes: (request.width * request.height * 3) as usize,
                 fill: u8::try_from(runs.len()).unwrap_or(u8::MAX),
+                pending: self.pending_polls,
             }))
         }
     }
@@ -932,6 +992,33 @@ mod tests {
             runs[0].file,
             rig.project.join("a.mp4").canonicalize().expect("real path")
         );
+    }
+
+    #[test]
+    fn a_non_waiting_import_answers_timed_out_until_a_frame_is_ready() {
+        let mut rig = rig(PLAYING, &[("a.mp4", b"video")], 1);
+        let decoder = Arc::new(FakeDecoder {
+            frames: 1,
+            pending_polls: 2,
+            ..FakeDecoder::default()
+        });
+        rig.media.backend = Some(Arc::clone(&decoder) as Arc<dyn MediaBackend>);
+        rig.media.waits = false;
+        let (video, _) = rig.media.open_video(clip("a.mp4")).expect("opens");
+        for _ in 0..2 {
+            assert_eq!(
+                error_code_of(rig.media.next_frame(video, 4, 2)),
+                ErrorCode::TimedOut
+            );
+        }
+        assert!(rig
+            .media
+            .next_frame(video, 4, 2)
+            .expect("decodes")
+            .is_some());
+        assert_eq!(rig.media.next_frame(video, 4, 2).expect("end"), None);
+        // The decoder was never restarted by the pending answers.
+        assert_eq!(decoder.runs.lock().expect("runs").len(), 1);
     }
 
     #[test]
