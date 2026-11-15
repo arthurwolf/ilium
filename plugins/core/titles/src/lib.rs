@@ -34,7 +34,8 @@ impl Handler for TitlesServer {
             // A line the user submitted at a shell prompt names the pane after the command. The
             // kernel reports only lines it rebuilt exactly while the shell owns the terminal.
             if let Event::UserLineSubmitted(line) = event {
-                let has_agent = api.get(line.pane).is_some_and(|view| view.agent.is_some());
+                let has_agent =
+                    HostTree::get(&mut api, line.pane).is_some_and(|view| view.agent.is_some());
                 submissions.extend(shell_title::rename_for_line(
                     line.pane, &line.text, has_agent,
                 ));
