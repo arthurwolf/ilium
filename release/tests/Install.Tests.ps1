@@ -179,20 +179,34 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         $script:pathKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subkey)
         try {
             if ($Exists) { $script:pathKey.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind) }
+            $script:pathJournalsAtWrite = @()
             Mock Get-IliumUserPath { Get-IliumRegistryPath $script:pathKey }
-            Mock Set-IliumUserPath { param($Value) Set-IliumRegistryPath $script:pathKey $Value }
+            Mock Set-IliumUserPath {
+                param($Value)
+                $journalPath = Join-Path $script:root 'installer-state/transaction.json'
+                $script:pathJournalsAtWrite += ,([IO.File]::ReadAllText($journalPath) | ConvertFrom-Json)
+                Set-IliumRegistryPath $script:pathKey $Value
+            }
 
             Install-TestVersion '1.0.0'
             ($script:pathKey.GetValueNames() -contains 'Path') | Should -BeTrue
             if ($Exists) { $script:pathKey.GetValueKind('Path').ToString() | Should -BeExactly $Kind }
             $state = [IO.File]::ReadAllText((Join-Path $script:root 'installer-state/state.json')) | ConvertFrom-Json
             $state.path_originally_absent | Should -Be (-not $Exists)
+            if (-not $Exists) {
+                $script:pathJournalsAtWrite.Count | Should -Be 1
+                ($null -eq $script:pathJournalsAtWrite[0].path_before) | Should -BeTrue
+            }
             if ($Appended) {
                 $installedPath = $script:pathKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
                 $script:pathKey.SetValue('Path', ($installedPath + $Appended), [Microsoft.Win32.RegistryValueKind]$Kind)
             }
 
             Invoke-IliumInstall -Uninstall -InstallDir $script:root -BinDir $script:bin
+            if (-not $Exists) {
+                $script:pathJournalsAtWrite.Count | Should -Be 2
+                ($null -eq $script:pathJournalsAtWrite[1].path_after) | Should -BeTrue
+            }
             ($script:pathKey.GetValueNames() -contains 'Path') | Should -Be $Exists
             if ($Exists) {
                 $script:pathKey.GetValueKind('Path').ToString() | Should -BeExactly $Kind

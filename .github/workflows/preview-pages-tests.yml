@@ -41,6 +41,9 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-preview-installer:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/v0.1.1-preview.7'
+    uses: ./.github/workflows/windows-preview-installer-check.yml
   contracts:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
