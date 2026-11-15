@@ -7654,23 +7654,24 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
         });
     let mut tui = PtySession::spawn(attach_command).expect("spawn last-prompt-banner TUI");
 
-    assert!(
-        wait_until(
-            || {
-                tui.with_screen(|screen| {
-                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
-                })
-            },
-            DETECTION_TIMEOUT,
+    let agent_row = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                let rows = rows_containing_before_column(screen, "Codex:", 60);
+                (rows.len() == 1).then(|| rows[0])
+            })
+        },
+        SETTLED_LAYOUT_DURATION,
+        DETECTION_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|| {
+        panic!(
+            "expected one settled detected Codex tree row.\n{}\nscreen: {:?}",
+            detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+            tui.screen_text()
         )
-        .await,
-        "expected a detected working Codex row.\n{}\nscreen: {:?}",
-        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
-        tui.screen_text()
-    );
-    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
-    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
-    let agent_row = agent_rows[0];
+    });
 
     tui.write(&sgr_mouse_down(0, 8, agent_row))
         .expect("focus detected Codex row");
@@ -7833,23 +7834,24 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         });
     let mut tui = PtySession::spawn(attach_command).expect("spawn typed-prompt TUI");
 
-    assert!(
-        wait_until(
-            || {
-                tui.with_screen(|screen| {
-                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
-                })
-            },
-            DETECTION_TIMEOUT,
+    let agent_row = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                let rows = rows_containing_before_column(screen, "Codex:", 60);
+                (rows.len() == 1).then(|| rows[0])
+            })
+        },
+        SETTLED_LAYOUT_DURATION,
+        DETECTION_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|| {
+        panic!(
+            "expected one settled detected Codex tree row.\n{}\nscreen: {:?}",
+            detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+            tui.screen_text()
         )
-        .await,
-        "expected a detected working Codex row.\n{}\nscreen: {:?}",
-        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
-        tui.screen_text()
-    );
-    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
-    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
-    let agent_row = agent_rows[0];
+    });
 
     tui.write(&sgr_mouse_down(0, 8, agent_row))
         .expect("focus detected Codex row");
@@ -7865,8 +7867,8 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         tui.screen_text()
     );
 
-    // Before any prompt is recorded, empty prompt rows consume no space:
-    // terminal content follows the toolbar and its separator immediately.
+    // Before any prompt is recorded, the reserved prompt slot stays blank.
+    // The terminal keeps its position when a prompt is submitted later.
     assert!(
         wait_until(
             || {
@@ -7875,17 +7877,24 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
                         return false;
                     };
                     let cols = screen.size().1;
-                    screen
-                        .rows(0, cols)
-                        .nth((toolbar_row + 2) as usize)
-                        .unwrap_or_default()
-                        .contains("Pursuing goal")
+                    let rows: Vec<_> = screen.rows(0, cols).collect();
+                    let pane_rows: Vec<_> = screen.rows(70, cols.saturating_sub(71)).collect();
+                    let empty_slot = (toolbar_row + 2..toolbar_row + 7).all(|row| {
+                        pane_rows
+                            .get(row as usize)
+                            .is_some_and(|text| text.trim().is_empty())
+                    });
+                    empty_slot
+                        && rows
+                            .get((toolbar_row + 7) as usize)
+                            .is_some_and(|text| text.contains("Pursuing goal"))
+                        && rows_containing(screen, "last prompt").is_empty()
                 })
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "with no prompt recorded yet, pane content should follow the toolbar separator: {:?}",
+        "with no prompt recorded yet, the reserved slot should be blank while terminal geometry remains fixed: {:?}",
         tui.screen_text()
     );
 

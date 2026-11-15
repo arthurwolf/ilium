@@ -9,7 +9,7 @@ async fn review_nonregular_credentials_do_not_block_or_prevent_server_startup() 
     for kind in ["directory", "fifo"] {
         let root = tempfile::Builder::new()
             .prefix("ilium-monitoring-startup-")
-            .tempdir_in("/data")
+            .tempdir()
             .unwrap();
         std::fs::write(root.path().join(".scratch-reaper"), b"").unwrap();
         let socket = root.path().join("s.sock");
