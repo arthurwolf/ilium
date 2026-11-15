@@ -472,7 +472,7 @@ class WorkflowTests(unittest.TestCase):
                         environment['ILIUM_ANIMATION_HELPER'],
                         str(cargo_target / target['rust_target'] / 'release' / helper),
                     )
-                    if operating_system == 'linux':
+                    if operating_system in ('linux', 'macos'):
                         resource_root = Path(environment['ILIUM_RESOURCE_TEST_ROOT'])
                         self.assertEqual(resource_root, job_work / 'resource-queue-tests')
                         self.assertTrue(resource_root.is_dir())

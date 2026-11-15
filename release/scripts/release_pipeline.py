@@ -292,9 +292,9 @@ def configure_workspace_test_environment(environment, target, work, cargo_target
     helper = cargo_target / target['rust_target'] / 'release' / helper_executable
     environment['ILIUM_PTY_SMOKE_BINARY'] = str(candidate)
     environment['ILIUM_ANIMATION_HELPER'] = str(helper)
-    if target['os'] == 'linux':
-        # Resource queue tests need a durable local (ext4/XFS/Btrfs) directory;
-        # their default /data root does not exist or is not writable on hosted runners.
+    if target['os'] in ('linux', 'macos'):
+        # Resource tests need an owned durable local directory (on Linux ext4/XFS/Btrfs);
+        # their default /data root is missing, unwritable or read-only on hosted runners.
         resource_root = work / 'resource-queue-tests'
         resource_root.mkdir(mode=0o700)
         environment['ILIUM_RESOURCE_TEST_ROOT'] = str(resource_root)
