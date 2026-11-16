@@ -691,3 +691,26 @@ Dispatch `release.yml` with `release_tag=v0.1.1-preview.5` from `release/v0.1.1-
 Dispatch `release.yml` with `release_tag=v0.1.1-preview.6` from `release/v0.1.1-preview.6`; the `windows-preview` job (`windows-preview.yml`) builds the pinned ONNX Runtime from source, builds, tests and audits natively on `windows-2025`, then builds the WiX MSI and Inno Setup EXE from the audited ZIP and silently installs, runs and uninstalls both. The installer smoke asserts the Windows refusal contract (animation add-ons refused with the AppContainer/Job message) for both packages. A failed native build prints its compiler errors into the job log; the complete logs are in the `diagnostics-x86_64-pc-windows-msvc` artifact. Publishing is manual as for preview.5: carry the fourteen preview.5 files byte for byte, add the three Windows files from the green run, write one combined `SHA256SUMS` whose fourteen carried lines equal preview.5's, create a draft prerelease (not latest) targeting the CI commit, upload, check the digests, publish, re-download and compare. `publish_linux_preview.py` refuses other tags, so a wrapper reuses its `publish()` function. The Windows files are unsigned (SmartScreen warns). `install.ps1` accepts only a checksum file listing the five native archives, so it cannot install this prerelease; document direct downloads only. The installer pins (`release/linux-preview-pins.json`) only cover Linux and the macOS tar.gz and stay unchanged.
 
 Before dispatching, run `cargo fmt --all -- --check` and `cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going -- -D warnings` (through ni-build): the Windows native job runs both as gates, and a lint failure there costs a full ONNX Runtime build. After publishing, push the same eighteen files to GHCR as one OCI artifact, mirroring preview.5: `oras push ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.6 --artifact-type application/vnd.ilium.release.bundle.v1 --annotation org.opencontainers.image.source=https://github.com/arthurwolf/ilium --annotation org.opencontainers.image.version=0.1.1-preview.6 <files>` from the files' directory (bare layer titles), logging in with `gh auth token | oras login ghcr.io -u <owner> --password-stdin` under a scratch `DOCKER_CONFIG`. Verify with an anonymous `oras pull` under an empty `DOCKER_CONFIG` followed by `sha256sum -c SHA256SUMS`.
+
+## Complete preview bundle (v0.1.1-preview.7)
+
+The complete preview combines the unchanged seventeen preview.6 files with four
+macOS Intel files and the Linux ARM64 RPM and Snap. The 23 payload files and
+`SHA256SUMS` form one immutable prerelease; the carried files retain their
+original embedded versions. Publish only after the same source commit has
+passed the macOS Intel, Linux ARM64 and Windows qualification jobs, and verify
+every public download against the release checksum inventory.
+
+`publish_preview_ghcr.py` publishes those exact public files as an OCI asset
+bundle. Its preview-specific qualification checks the native run, source and
+package receipts, immutable release and the carried preview.6 bytes; it does
+not claim the separate stable-release qualification. The registry publisher
+rejects a different existing tag and verifies a complete anonymous pull by
+immutable digest. Its check and push are not an atomic create: serialize all
+writers to this tag. The `--operator` mode supports an authenticated local
+release-branch checkout before the preview workflow is available on the default
+branch; use a task-owned ORAS executable, payload directory and receipt paths.
+After an interrupted attempt, use a fresh payload directory with the same
+retained intent and qualification evidence so the existing tag can be checked.
+Record the native run, release commit, package digest and public readback before
+advertising the bundle.

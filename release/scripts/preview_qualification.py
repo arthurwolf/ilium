@@ -32,12 +32,14 @@ RUN_ID = re.compile(r'[1-9][0-9]{0,19}\Z')
 # generated binaries, build policy, manifest, dependency, package source, or
 # native qualification code may enter the Pages checkout without a new run.
 DESCENDANT_PATHS = frozenset({
+    '.github/workflows/preview-ghcr.yml',
     '.github/workflows/preview-pages.yml',
     '.github/workflows/preview-pages-tests.yml',
     'README.md',
     'src/docs/installation.md',
     'changelog.d/preview-pages.md',
     'changelog.d/preview7-release.md',
+    'changelog.d/preview-ghcr.md',
     'release/RELEASING.md',
     'release/install.sh',
     'release/linux-preview-pins.json',
@@ -47,9 +49,11 @@ DESCENDANT_PATHS = frozenset({
     'release/site/_headers',
     'release/scripts/preview_pages.py',
     'release/scripts/preview_qualification.py',
+    'release/scripts/publish_preview_ghcr.py',
     'release/tests/test_posix_install.py',
     'release/tests/test_preview_pages.py',
     'release/tests/test_preview_qualification.py',
+    'release/tests/test_publish_preview_ghcr.py',
     'release/tests/test_readme_assets.py',
 })
 ARTIFACTS = {

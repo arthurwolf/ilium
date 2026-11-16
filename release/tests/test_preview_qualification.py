@@ -91,6 +91,10 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(qualification.source_changes(self.source_sha, self.pages_sha),
                              ['release/install.sh', 'release/scripts/preview_qualification.py'])
             postqualification_publication_files = (
+                '.github/workflows/preview-ghcr.yml',
+                'release/scripts/publish_preview_ghcr.py',
+                'release/tests/test_publish_preview_ghcr.py',
+                'changelog.d/preview-ghcr.md',
                 'release/RELEASING.md',
                 'release/notes/v0.1.1-preview.7.md',
                 'release/tests/test_readme_assets.py',
