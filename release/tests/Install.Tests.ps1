@@ -71,6 +71,24 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         Test-Path (Join-Path $script:bin 'ilium.cmd') | Should -BeTrue
         $script:userPath | Should -Be ('C:\other;;C:\keep;' + $script:bin)
     }
+    It 'installs the carried preview payload under the requested release identity' {
+        $script:fixtureArchive = New-TestRelease '0.1.1-preview.6'
+        $script:downloadUrls = @()
+        $script:checkedPayloadVersion = ''
+        Mock Get-IliumPreviewChecksum { (Get-FileHash -LiteralPath $script:fixtureArchive -Algorithm SHA256).Hash.ToLowerInvariant() }
+        Mock Confirm-IliumBinaryVersion { param($Directory, $Version) $script:checkedPayloadVersion = $Version }
+        Mock Save-IliumDownload {
+            param($Url, $Destination)
+            $script:downloadUrls += $Url
+            if ($Url.EndsWith('/SHA256SUMS')) { [IO.File]::WriteAllText($Destination, 'fixture') }
+            else { [IO.File]::Copy($script:fixtureArchive, $Destination) }
+        }
+        Invoke-IliumInstall -Version '0.1.1-preview.7' -InstallDir $script:root -BinDir $script:bin
+        [IO.File]::ReadAllText((Join-Path $script:root 'current')) | Should -Be "0.1.1-preview.7`n"
+        $script:checkedPayloadVersion | Should -Be '0.1.1-preview.6'
+        @($script:downloadUrls | Where-Object { $_ -notmatch '/v0\.1\.1-preview\.7/' }).Count | Should -Be 0
+        Test-Path (Join-Path $script:root 'versions/0.1.1-preview.7/bin/ilium.exe') | Should -BeTrue
+    }
     It 'rejects <Arch> before download' -TestCases @(@{Arch='ARM64'}, @{Arch='x86'}) {
         param($Arch)
         $script:testArchitecture = $Arch
@@ -449,8 +467,8 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
 
 Describe 'Pinned Windows preview selection and checksum' {
     It 'uses the published Windows preview only for a definite absence of a stable release' {
-        (Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases') | Should -Be '0.1.1-preview.6'
-        (Resolve-IliumLatestResponse 404 '') | Should -Be '0.1.1-preview.6'
+        (Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases') | Should -Be '0.1.1-preview.7'
+        (Resolve-IliumLatestResponse 404 '') | Should -Be '0.1.1-preview.7'
         (Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases/tag/v0.2.0') | Should -Be '0.2.0'
         { Resolve-IliumLatestResponse 429 '' } | Should -Throw
         { Resolve-IliumLatestResponse 302 'https://github.com/arthurwolf/ilium/releases/tag/v0.2.0-preview.1' } | Should -Throw
@@ -460,6 +478,21 @@ Describe 'Pinned Windows preview selection and checksum' {
         $manifest = Join-Path $PSScriptRoot 'fixtures/windows-preview-6.SHA256SUMS'
         (Get-IliumPreviewChecksum $manifest (Get-IliumTarget 'AMD64') '0.1.1-preview.6') |
             Should -Be 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
+        (Get-IliumPreviewChecksum $manifest (Get-IliumTarget 'AMD64') '0.1.1-preview.7') |
+            Should -Be 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
+    }
+    It 'maps only the carried Windows preview archive to its actual payload version' {
+        (Get-IliumPayloadVersion '0.1.1-preview.7' (Get-IliumTarget 'AMD64')) | Should -Be '0.1.1-preview.6'
+        (Get-IliumPayloadVersion '0.1.1-preview.6' (Get-IliumTarget 'AMD64')) | Should -Be '0.1.1-preview.6'
+        (Get-IliumPayloadVersion '0.2.0' (Get-IliumTarget 'AMD64')) | Should -Be '0.2.0'
+        { Get-IliumPayloadVersion '0.1.1-preview.7' @{ archive='other.zip' } } | Should -Throw
+    }
+    It 'accepts only the carried payload VERSION for preview.7' {
+        $archive = New-TestRelease '0.1.1-preview.6'
+        $destination = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        Expand-IliumValidatedZip $archive $destination 'ilium-windows-x86_64' (Get-IliumPayloadVersion '0.1.1-preview.7' (Get-IliumTarget 'AMD64'))
+        $wrong = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        { Expand-IliumValidatedZip (New-TestRelease '0.1.1-preview.7') $wrong 'ilium-windows-x86_64' (Get-IliumPayloadVersion '0.1.1-preview.7' (Get-IliumTarget 'AMD64')) } | Should -Throw '*VERSION*'
     }
     It 'rejects modified, duplicate and missing preview checksum records' {
         $manifest = Join-Path $PSScriptRoot 'fixtures/windows-preview-6.SHA256SUMS'
@@ -469,11 +502,13 @@ Describe 'Pinned Windows preview selection and checksum' {
         foreach ($changed in @(
             $content.Replace('c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89', ('0' * 64)),
             ($content + $selectedLine + "`n"),
+            ($content + "malformed record`n"),
             $withoutSelected
         )) {
             $path = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '.txt')
             [IO.File]::WriteAllText($path, $changed)
             { Get-IliumPreviewChecksum $path (Get-IliumTarget 'AMD64') '0.1.1-preview.6' } | Should -Throw
+            { Get-IliumPreviewChecksum $path (Get-IliumTarget 'AMD64') '0.1.1-preview.7' } | Should -Throw
         }
         { Get-IliumPreviewChecksum $manifest (Get-IliumTarget 'AMD64') '0.1.1-preview.5' } | Should -Throw '*not ready*'
     }

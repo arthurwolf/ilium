@@ -91,7 +91,15 @@ def installer_pins(root, tag):
     require(FALLBACK.findall(resolver) == [win_version], 'PowerShell latest fallback differs from its preview pin')
     pins = {name: {'version': version, 'sha256': sha}
             for name, (version, sha) in linux_pins.items()}
-    pins[win_archive] = {'version': win_version, 'sha256': win_hash}
+    # Preview.7 carries the preview.6 Windows archive byte for byte. The
+    # release tag selects the download, while VERSION and executables retain
+    # the payload version. Do not apply that exception to a different hash.
+    payload_version = win_version
+    if win_version == '0.1.1-preview.7':
+        require(win_hash == 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89',
+                'preview.7 Windows payload hash differs from the carried preview.6 archive')
+        payload_version = '0.1.1-preview.6'
+    pins[win_archive] = {'version': win_version, 'sha256': win_hash, 'payload_version': payload_version}
     return targets, pins, installers
 
 

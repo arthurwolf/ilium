@@ -117,6 +117,12 @@ jobs:
           print(manifest['pins'][os.environ['ARCHIVE']]['version'])
           PY
           )
+          if test "$expected_version" = 0.1.1-preview.7; then
+            case "$ARCHIVE" in
+              ilium-linux-*) expected_version=0.1.1-linux.3 ;;
+              ilium-macos-aarch64.tar.gz) expected_version=0.1.1-preview.5 ;;
+            esac
+          fi
           mkdir -p "$RUNNER_TEMP/ilium-preview-home"
           HOME="$RUNNER_TEMP/ilium-preview-home" curl --proto '=https' --tlsv1.2 -LsSf "$PREVIEW_URL/install.sh" |
             HOME="$RUNNER_TEMP/ilium-preview-home" sh
@@ -125,6 +131,19 @@ jobs:
           test -x "$client" && test -x "$server"
           test "$("$client" --version)" = "ilium $expected_version"
           test "$("$server" --version)" = "ilium-server $expected_version"
+          case "$ARCHIVE" in
+            ilium-linux-*) complete_payload_version=0.1.1-linux.3 ;;
+            ilium-macos-aarch64.tar.gz) complete_payload_version=0.1.1-preview.5 ;;
+            ilium-macos-x86_64.tar.gz) complete_payload_version=0.1.1-preview.7 ;;
+            *) exit 1 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/ilium-complete-preview-home"
+          curl --proto '=https' --tlsv1.2 -LsSf "$PREVIEW_URL/install.sh" |
+            HOME="$RUNNER_TEMP/ilium-complete-preview-home" sh -s -- --version 0.1.1-preview.7
+          client="$RUNNER_TEMP/ilium-complete-preview-home/.local/bin/ilium"
+          server="$RUNNER_TEMP/ilium-complete-preview-home/.local/bin/ilium-server"
+          test "$("$client" --version)" = "ilium $complete_payload_version"
+          test "$("$server" --version)" = "ilium-server $complete_payload_version"
   windows-one-liner:
     needs: pages
     runs-on: windows-2025
@@ -142,18 +161,38 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $manifestPath = Join-Path $env:RUNNER_TEMP 'preview-evidence/preview-site/manifest.json'
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-          $expectedVersion = [string]$manifest.pins.PSObject.Properties['ilium-windows-x86_64.zip'].Value.version
-          if ($expectedVersion -notmatch '\A0\.1\.1-preview\.[0-9]+\z') { throw 'Windows preview pin is missing or invalid' }
-          irm "$env:PREVIEW_URL/install.ps1" | iex
+          $pin = $manifest.pins.PSObject.Properties['ilium-windows-x86_64.zip'].Value
+          $releaseVersion = [string]$pin.version
+          $payloadVersion = [string]$pin.payload_version
+          if ($releaseVersion -cne '0.1.1-preview.7' -or $payloadVersion -cne '0.1.1-preview.6') {
+            throw 'Windows release and payload pins do not match the carried preview archive'
+          }
           $root = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ilium'
-          foreach ($executable in @('ilium', 'ilium-server')) {
-            $launcher = Join-Path $root ('bin/' + $executable + '.cmd')
-            if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "Missing installed $executable launcher" }
-            $output = & $launcher --version 2>&1
-            if ($LASTEXITCODE -ne 0 -or ($output -join "`n").Trim() -cne "$executable $expectedVersion") {
-              throw "Installed $executable launcher did not execute the pinned preview version"
+          function Assert-InstalledPreview {
+            if ((Get-Content -LiteralPath (Join-Path $root 'current') -Raw) -cne "$releaseVersion`n") {
+              throw 'Installed Windows release pointer does not match the release pin'
+            }
+            foreach ($executable in @('ilium', 'ilium-server')) {
+              $launcher = Join-Path $root ('bin/' + $executable + '.cmd')
+              if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "Missing installed $executable launcher" }
+              $output = & $launcher --version 2>&1
+              if ($LASTEXITCODE -ne 0 -or ($output -join "`n").Trim() -cne "$executable $payloadVersion") {
+                throw "Installed $executable launcher did not execute the pinned payload version"
+              }
+            }
+            $helper = Join-Path $root ("versions/$releaseVersion/bin/ilium-animation-helper.exe")
+            $output = & $helper --version 2>&1
+            $expected = '{"type":"result","command":"version","name":"ilium-animation-helper","version":"' + $payloadVersion + '"}'
+            if ($LASTEXITCODE -ne 0 -or @($output).Count -ne 1 -or [string]$output -cne $expected) {
+              throw 'Installed animation helper did not execute the pinned payload version'
             }
           }
+          irm "$env:PREVIEW_URL/install.ps1" | iex
+          Assert-InstalledPreview
+          $installerPath = Join-Path $env:RUNNER_TEMP 'ilium-preview-installer.ps1'
+          Invoke-WebRequest -Uri "$env:PREVIEW_URL/install.ps1" -OutFile $installerPath
+          & $installerPath -Version $releaseVersion
+          Assert-InstalledPreview
   promote:
     if: inputs.promote_production
     needs: [pages, posix-one-liners, windows-one-liner]

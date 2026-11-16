@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 import tarfile
 import tomllib
@@ -253,7 +254,39 @@ def logged(command, root, log, environment=None, timeout=10_800):
     log = Path(log)
     with log.open('xb') as output:
         try:
-            result = subprocess.run(list(map(str, command)), cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            if log.name == 'workspace-tests.log':
+                # A hosted runner can disappear before artifacts upload. Stream the
+                # integration-test progress as well as keeping its exact raw log.
+                process = subprocess.Popen(list(map(str, command)), cwd=root, env=environment,
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                reader_errors = []
+
+                def copy_output():
+                    try:
+                        for chunk in iter(lambda: process.stdout.read1(8192), b''):
+                            output.write(chunk)
+                            output.flush()
+                            emit('progress', operation='workspace-integration-tests',
+                                 output=chunk.decode('utf-8', 'replace').rstrip('\r\n'))
+                            sys.stdout.flush()
+                    except Exception as error:
+                        reader_errors.append(str(error))
+
+                reader = threading.Thread(target=copy_output, daemon=True)
+                reader.start()
+                try:
+                    process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    reader.join(timeout=10)
+                    raise
+                reader.join(timeout=10)
+                require(not reader.is_alive(), 'integration test output remained open after command exit')
+                require(not reader_errors, 'integration test output capture failed: ' + '; '.join(reader_errors))
+                result = process
+            else:
+                result = subprocess.run(list(map(str, command)), cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             # A hung child must fail with evidence (which test was still running)
             # rather than be cancelled hours later with nothing recorded.

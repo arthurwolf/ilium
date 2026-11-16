@@ -887,6 +887,30 @@ class PipelineTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.targets = release_tool.load_targets(ROOT / 'release/targets.toml')
 
+    def test_integration_progress_preserves_log_and_failure(self):
+        log = self.root / 'workspace-tests.log'
+        records = []
+        with patch.object(pipeline, 'emit', side_effect=lambda kind, **values: records.append((kind, values))):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.logged([sys.executable, '-c', "import sys; print('current test'); sys.exit(3)"],
+                                self.root, log)
+        self.assertEqual(log.read_bytes(), b'current test\n')
+        self.assertTrue(any(kind == 'progress' and record.get('output') == 'current test'
+                            for kind, record in records))
+        self.assertTrue(any(kind == 'warning' and record.get('exit_code') == 3
+                            for kind, record in records))
+
+    def test_integration_progress_reports_timeout(self):
+        log = self.root / 'workspace-tests.log'
+        records = []
+        with patch.object(pipeline, 'emit', side_effect=lambda kind, **values: records.append((kind, values))):
+            with self.assertRaisesRegex(release_tool.ReleaseError, 'command exceeded'):
+                pipeline.logged([sys.executable, '-u', '-c', "import time; print('started'); time.sleep(30)"],
+                                self.root, log, timeout=1)
+        self.assertEqual(log.read_bytes(), b'started\n')
+        self.assertTrue(any(kind == 'warning' and record.get('exit_code') == 'timeout'
+                            for kind, record in records))
+
     def test_release_absence_fails_closed_on_listing_errors(self):
         with patch.object(pipeline, 'github', side_effect=pipeline.HTTPFailure(404)):
             with self.assertRaises(pipeline.HTTPFailure):

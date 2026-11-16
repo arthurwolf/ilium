@@ -14,6 +14,7 @@ class WindowsInstallerSourceTests(unittest.TestCase):
         records = dict(line.split('  ', 1)[::-1] for line in checksums.splitlines())
         self.assertEqual(len(records), 17)
         self.assertIn("'0.1.1-preview.6'", source)
+        self.assertIn("'0.1.1-preview.7'", source)
         self.assertIn("'" + records['ilium-windows-x86_64.zip'] + "'", source)
 
     def test_generated_table_matches_authoritative_manifest(self):

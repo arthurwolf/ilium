@@ -40,7 +40,8 @@ class PreviewPagesTests(unittest.TestCase):
               + "function Get-IliumLatestVersion {}\n$pinnedVersion = '0.1.1-preview.6'\n"
               + "$pinnedArchive = 'ilium-windows-x86_64.zip'\n$pinnedHash = '" + 'd' * 64 + "'\n")
         (self.root / 'release/install.ps1').write_text(ps)
-        self.pins = {**pins, 'ilium-windows-x86_64.zip': {'version': '0.1.1-preview.6', 'sha256': 'd' * 64}}
+        self.pins = {**pins, 'ilium-windows-x86_64.zip': {'version': '0.1.1-preview.6', 'sha256': 'd' * 64,
+                                                        'payload_version': '0.1.1-preview.6'}}
 
     def test_evidence_and_artifact_creation_are_exclusive(self):
         evidence = self.root / 'receipt.json'
@@ -204,6 +205,18 @@ class PreviewPagesTests(unittest.TestCase):
     def test_windows_latest_fallback_must_match_requested_published_pin(self):
         installer = self.root / 'release/install.ps1'
         installer.write_text(installer.read_text().replace("return '0.1.1-preview.6'", "return '0.1.1-preview.5'"))
+        with self.assertRaises(release_tool.ReleaseError):
+            preview_pages.installer_pins(self.root, 'v0.1.1-preview.7')
+
+    def test_windows_carried_payload_version_is_bound_to_exact_archive_hash(self):
+        installer = self.root / 'release/install.ps1'
+        source = installer.read_text().replace('0.1.1-preview.6', '0.1.1-preview.7')
+        carried_hash = 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
+        installer.write_text(source.replace('d' * 64, carried_hash))
+        _, pins, _ = preview_pages.installer_pins(self.root, 'v0.1.1-preview.7')
+        self.assertEqual(pins['ilium-windows-x86_64.zip'], {
+            'version': '0.1.1-preview.7', 'sha256': carried_hash, 'payload_version': '0.1.1-preview.6'})
+        installer.write_text(source.replace('d' * 64, '0' * 64))
         with self.assertRaises(release_tool.ReleaseError):
             preview_pages.installer_pins(self.root, 'v0.1.1-preview.7')
 

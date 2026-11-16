@@ -533,11 +533,22 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     // above, the check accumulates across events instead of testing one
     // chunk in isolation.
     let mut screen_bytes = Vec::new();
+    let mut recent_events = std::collections::VecDeque::new();
     while !(saw_prompt_event && saw_submitted_output) {
         let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
             .await
-            .expect("initial input events should arrive before timeout")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "initial input events timed out: saw_prompt_event={saw_prompt_event}, \
+                     saw_submitted_output={saw_submitted_output}, screen={:?}, recent_events={recent_events:?}",
+                    String::from_utf8_lossy(&screen_bytes[screen_bytes.len().saturating_sub(4096)..])
+                )
+            })
             .expect("read initial input event");
+        if recent_events.len() == 20 {
+            recent_events.pop_front();
+        }
+        recent_events.push_back(format!("{event:?}").chars().take(500).collect::<String>());
         if matches!(
             event,
             ServerEvent::PanePromptSubmitted {

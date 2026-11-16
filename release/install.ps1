@@ -239,7 +239,7 @@ function Resolve-IliumLatestResponse([int]$StatusCode, [string]$Location) {
          $Location -cin @('https://github.com/arthurwolf/ilium/releases',
                          'https://github.com/arthurwolf/ilium/releases/',
                          '/arthurwolf/ilium/releases', '/arthurwolf/ilium/releases/'))) {
-        return '0.1.1-preview.6'
+        return '0.1.1-preview.7'
     }
     if ($StatusCode -notin @(301, 302, 303, 307, 308) -or
         $Location -cnotmatch '\Ahttps://github\.com/arthurwolf/ilium/releases/tag/v(.+)\z' -or
@@ -269,10 +269,10 @@ function Get-IliumLatestVersion {
 function Get-IliumPreviewChecksum([string]$Path, [hashtable]$Target, [string]$Version) {
     # This prerelease predates the five-archive/AVAILABILITY contract. Its
     # published manifest lists package formats as well as native archives.
-    $pinnedVersion = '0.1.1-preview.6'
+    $pinnedVersion = '0.1.1-preview.7'
     $pinnedArchive = 'ilium-windows-x86_64.zip'
     $pinnedHash = 'c267349717786f9540ea06dd26a1976adcde4b9209340d12848e679c1239cb89'
-    if ($Version -cne $pinnedVersion -or $Target.archive -cne $pinnedArchive) {
+    if ($Version -cnotin @($pinnedVersion, '0.1.1-preview.6') -or $Target.archive -cne $pinnedArchive) {
         throw 'This platform is not ready yet for the requested release.'
     }
     $content = [IO.File]::ReadAllText($Path)
@@ -287,6 +287,16 @@ function Get-IliumPreviewChecksum([string]$Path, [hashtable]$Target, [string]$Ve
     }
     if ($selected -cne $pinnedHash) { throw 'Published preview archive checksum differs from the pinned Windows release.' }
     return $pinnedHash
+}
+
+function Get-IliumPayloadVersion([string]$Version, [hashtable]$Target) {
+    # Preview.7 carries the exact pinned preview.6 Windows archive unchanged.
+    # Call only after the selected archive has passed its pinned SHA-256 check.
+    if ($Version -ceq '0.1.1-preview.7') {
+        if ($Target.archive -cne 'ilium-windows-x86_64.zip') { throw 'Unexpected carried preview archive.' }
+        return '0.1.1-preview.6'
+    }
+    return $Version
 }
 
 function Get-IliumChecksum([string]$Path, [hashtable]$Target) {
@@ -800,7 +810,7 @@ function Invoke-IliumInstall {
         $origin = 'https://github.com/arthurwolf/ilium/releases/download/v' + $Version
         $checksums = Join-Path $work 'SHA256SUMS'; $archive = Join-Path $work 'archive.zip'
         Save-IliumDownload ($origin + '/SHA256SUMS') $checksums
-        if ($Version -ceq '0.1.1-preview.6') {
+        if ($Version -cin @('0.1.1-preview.6', '0.1.1-preview.7')) {
             $expectedHash = Get-IliumPreviewChecksum $checksums $selected $Version
         } else {
             try { $expectedHash = Get-IliumChecksum $checksums $selected }
@@ -815,8 +825,9 @@ function Invoke-IliumInstall {
         if ((Get-IliumHash $archive) -cne $expectedHash) { throw 'Archive checksum mismatch; previous installation remains selected.' }
         $stage = 'archive'
         $payload = Join-Path $work 'payload'
-        Expand-IliumValidatedZip $archive $payload $selected.prefix $Version
-        Confirm-IliumBinaryVersion $payload $Version
+        $payloadVersion = Get-IliumPayloadVersion $Version $selected
+        Expand-IliumValidatedZip $archive $payload $selected.prefix $payloadVersion
+        Confirm-IliumBinaryVersion $payload $payloadVersion
         $signing = Get-IliumSigningStatus $payload
         $receipt = Get-IliumReceipt $payload
         $final = Join-Path $versions $Version

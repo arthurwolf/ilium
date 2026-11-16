@@ -33,6 +33,29 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
         expected.update(build_windows_installers.INSTALLER_NAMES)
 
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        if "Complete preview: [v0.1.1-preview.7]" in readme:
+            base = "https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/"
+            pinned = re.findall(re.escape(base) + r"([^\s)]+)", readme)
+            self.assertEqual(set(pinned), expected)
+            self.assertEqual(len(pinned), len(expected), "duplicate preview download links")
+            all_downloads = set(re.findall(
+                r"https://github\.com/arthurwolf/ilium/releases/"
+                r"(?:latest/download|download/[^/\s)]+)/[^\s)]+", readme,
+            ))
+            self.assertEqual(all_downloads, {base + name for name in expected})
+            rows = {
+                "Linux x86_64": {"ilium-linux-x86_64.tar.gz", *build_linux_packages.package_names("x86_64")},
+                "Linux ARM64": {"ilium-linux-aarch64.tar.gz", *build_linux_packages.package_names("aarch64")},
+                "macOS Apple Silicon": {"ilium-macos-aarch64.tar.gz", *build_macos_packages.package_names("aarch64")},
+                "macOS Intel": {"ilium-macos-x86_64.tar.gz", *build_macos_packages.package_names("x86_64")},
+                "Windows x86_64": {"ilium-windows-x86_64.zip", *build_windows_installers.INSTALLER_NAMES},
+            }
+            for system, names in rows.items():
+                count = len(names)
+                row = re.search(rf"(?m)^\| {re.escape(system)} \({count} of {count} available[^\n]*$", readme)
+                self.assertIsNotNone(row, system)
+                self.assertEqual(set(re.findall(re.escape(base) + r"([^\s)]+)", row.group())), names, system)
+            return
         if "Linux preview: [v0.1.1-linux.3]" in readme:
             # The published documentation can remain on the preview while the
             # workspace is prepared for the next, not-yet-published release.

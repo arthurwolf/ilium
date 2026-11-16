@@ -199,6 +199,68 @@ class PosixInstallTests(unittest.TestCase):
         self.assertIn("Archive SHA-256 mismatch", result.stderr)
         self.assertFalse((self.install_root / "versions/0.1.1-linux.3").exists())
 
+    def test_complete_preview_installs_carried_archives_with_their_embedded_versions(self):
+        cases = (
+            ("Linux", "x86_64", "ilium-linux-x86_64.tar.gz", "0.1.1-linux.3", "102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a"),
+            ("Linux", "aarch64", "ilium-linux-aarch64.tar.gz", "0.1.1-linux.3", "1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd"),
+            ("Darwin", "arm64", "ilium-macos-aarch64.tar.gz", "0.1.1-preview.5", "66b4a3002e57b2730d932a59e03db2def150838d4bb5d4c3bba7de3cffe21f83"),
+        )
+        self.release("0.1.1-linux.3")
+        self.release("0.1.1-preview.5")
+        destination = self.release("0.1.1-preview.7")
+        installer = INSTALLER.read_text()
+        for kernel, architecture, name, payload_version, published_hash in cases:
+            archive = self.downloads / ("v" + payload_version) / name
+            shutil.copyfile(archive, destination / name)
+            installer = installer.replace(published_hash, hashlib.sha256(archive.read_bytes()).hexdigest())
+        test_installer = self.root / "carried-install.sh"
+        test_installer.write_text(installer)
+        for kernel, architecture, name, payload_version, _ in cases:
+            with self.subTest(kernel=kernel, architecture=architecture):
+                shutil.rmtree(self.install_root, ignore_errors=True)
+                shutil.rmtree(self.bin, ignore_errors=True)
+                result = subprocess.run(["/bin/sh", str(test_installer), "--version", "0.1.1-preview.7"],
+                                        env=self.environment | {"FIXTURE_KERNEL": kernel, "FIXTURE_ARCH": architecture},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((self.install_root / "current").read_text(), "0.1.1-preview.7\n")
+                self.assertEqual(self.launch(), f"ilium {payload_version}\nilium-server {payload_version}\n")
+
+    def test_complete_preview_rejects_wrong_hash_and_embedded_version(self):
+        name = "ilium-linux-x86_64.tar.gz"
+        published_hash = "102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a"
+        destination = self.release("0.1.1-preview.7")
+        archive = destination / name
+        test_installer = self.root / "carried-install.sh"
+        synthetic_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+        # Even with the fixture bytes pinned, the preview.7 VERSION does not
+        # match the explicitly permitted carried Linux build version.
+        test_installer.write_text(INSTALLER.read_text().replace(published_hash, synthetic_hash))
+        result = subprocess.run(["/bin/sh", str(test_installer), "--version", "0.1.1-preview.7"],
+                                env=self.environment, capture_output=True, text=True)
+        self.failure(result, "archive")
+        self.assertIn("Archive VERSION differs", result.stderr)
+        # A modified archive cannot get as far as extraction.
+        archive.write_bytes(archive.read_bytes() + b"tampered")
+        result = subprocess.run(["/bin/sh", str(test_installer), "--version", "0.1.1-preview.7"],
+                                env=self.environment, capture_output=True, text=True)
+        self.failure(result, "checksum")
+        self.assertIn("Archive SHA-256 mismatch", result.stderr)
+
+    def test_previous_preview_pin_remains_valid_after_default_pin_changes(self):
+        name = "ilium-linux-x86_64.tar.gz"
+        old_hash = "102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a"
+        archive = self.release("0.1.1-linux.3") / name
+        installer = INSTALLER.read_text().replace(old_hash, hashlib.sha256(archive.read_bytes()).hexdigest())
+        # Simulate advancing the generated default without changing historical pins.
+        installer = installer.replace(name + "=0.1.1-linux.3:", name + "=0.1.1-preview.7:")
+        test_installer = self.root / "historical-install.sh"
+        test_installer.write_text(installer)
+        result = subprocess.run(["/bin/sh", str(test_installer), "--version", "0.1.1-linux.3"],
+                                env=self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.launch(), "ilium 0.1.1-linux.3\nilium-server 0.1.1-linux.3\n")
+
     X86 = "ilium-linux-x86_64.tar.gz"
     ARM = "ilium-linux-aarch64.tar.gz"
 

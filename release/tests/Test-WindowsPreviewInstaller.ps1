@@ -68,9 +68,10 @@ try {
     $receipt.installer_sha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
     try {
-        # No arguments exercises the same latest-or-pinned-preview decision as
-        # the README command, but executes the candidate file from checkout.
-        $installOutput = @(& $installerPath)
+        # Preview.7 is not public until native qualification finishes. Exercise
+        # the existing published archive explicitly; Pages tests the default
+        # one-liner and preview.7 after that release has been published.
+        $installOutput = @(& $installerPath -Version $expectedVersion)
         if (($installOutput -join "`n") -notmatch 'stage=complete version=0\.1\.1-preview\.6') {
             throw 'Candidate installer did not report the pinned Windows preview.'
         }

@@ -370,12 +370,28 @@ if [ -z "$version" ]; then
     valid_version "$version" || fail "Latest release tag is not a safe version"
     requested_version=$version
 fi
+# These unchanged archives were carried into the complete preview release.
+# Bind each exception to both the release tag and the exact archive digest;
+# the embedded payload keeps its original build version.
+payload_version=$version
+carried_hash=
+case "$version/$archive_name" in
+    0.1.1-linux.3/ilium-linux-x86_64.tar.gz) carried_hash=102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a ;;
+    0.1.1-linux.3/ilium-linux-aarch64.tar.gz) carried_hash=1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd ;;
+    0.1.1-preview.4/ilium-macos-aarch64.tar.gz) carried_hash=80a83891cd6c60b87960956ef08d6cdd76bb82c04742db99e6735b2a66f85c03 ;;
+    0.1.1-preview.7/ilium-linux-x86_64.tar.gz) payload_version=0.1.1-linux.3; carried_hash=102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a ;;
+    0.1.1-preview.7/ilium-linux-aarch64.tar.gz) payload_version=0.1.1-linux.3; carried_hash=1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd ;;
+    0.1.1-preview.7/ilium-macos-aarch64.tar.gz) payload_version=0.1.1-preview.5; carried_hash=66b4a3002e57b2730d932a59e03db2def150838d4bb5d4c3bba7de3cffe21f83 ;;
+esac
 preview_known=0
+case "$version" in 0.1.1-linux.3|0.1.1-preview.4) preview_known=1 ;; esac
 for pin in $preview_pins; do
     pin_value=${pin#*=}
     [ "${pin_value%%:*}" = "$version" ] && preview_known=1
 done
-if [ "$preview_known" = 1 ]; then
+if [ -n "$carried_hash" ]; then
+    expected=$carried_hash
+elif [ "$preview_known" = 1 ]; then
     # Preview releases predate AVAILABILITY and have package-format checksums
     # rather than the native archive inventory. Each native archive is pinned
     # with its own release version in the generated table above
@@ -486,7 +502,7 @@ candidate=$work/extract/$prefix
 for member in ilium ilium-server ilium-animation-helper; do [ -f "$candidate/$member" ] && [ ! -L "$candidate/$member" ] && [ -x "$candidate/$member" ] || fail "Extracted executable payload is incomplete"; done
 [ "$(hash_file "$candidate/beach-1.0.0.iliumanim")" = a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2 ] || fail "Official beach animation differs from compiled release identity"
 [ "$(hash_file "$candidate/carpet-1.0.0.iliumanim")" = 5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9 ] || fail "Official carpet animation differs from compiled release identity"
-printf '%s\n' "$version" > "$work/expected-version"
+printf '%s\n' "$payload_version" > "$work/expected-version"
 cmp -s "$candidate/VERSION" "$work/expected-version" || fail "Archive VERSION differs from requested release"
 while IFS= read -r member; do printf '%s %s\n' "$(hash_file "$candidate/$member")" "$member"; done < "$work/members" > "$work/version-receipt"
 
