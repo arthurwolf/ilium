@@ -453,7 +453,11 @@ def native(arguments):
         helper = 'build_intel_ort.py' if target['os'] == 'macos' else 'build_windows_ort.py'
         output_name = 'intel-ort' if target['os'] == 'macos' else 'windows-ort'
         ort_output = work / output_name
-        logged([sys.executable, root / 'release/scripts' / helper, '--source-register', root / 'release/ort-source.json', '--source-archive', ort_archive, '--output-root', ort_output, '--output', ort_output / 'receipt.json', '--cargo-environment-output', ort_output / 'environment.json', '--cargo-workspace', arguments.workspace.resolve(), '--cargo-target-dir', cargo_target, '--cargo-home', cargo_home, '--runner-identity', target['runner'], '--parallel', str(max(1, min(os.cpu_count() or 1, 4)))], root, work / (output_name + '.log'), environment)
+        # Intel macOS builds and tests ONNX Runtime before compiling the Rust
+        # product in this same helper. Give both stages time within the hosted
+        # job's six-hour limit; the default three hours cut Cargo off mid-build.
+        helper_timeout = 16_200 if target['os'] == 'macos' else 10_800
+        logged([sys.executable, '-u', root / 'release/scripts' / helper, '--source-register', root / 'release/ort-source.json', '--source-archive', ort_archive, '--output-root', ort_output, '--output', ort_output / 'receipt.json', '--cargo-environment-output', ort_output / 'environment.json', '--cargo-workspace', arguments.workspace.resolve(), '--cargo-target-dir', cargo_target, '--cargo-home', cargo_home, '--runner-identity', target['runner'], '--parallel', str(max(1, min(os.cpu_count() or 1, 4)))], root, work / (output_name + '.log'), environment, timeout=helper_timeout)
         environment.update(release_tool.read_json(ort_output / 'environment.json'))
         if target['os'] == 'windows':
             environment['PATH'] = environment['ORT_LIB_LOCATION'] + os.pathsep + environment['PATH']

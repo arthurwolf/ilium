@@ -1328,6 +1328,38 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn('--target', command)
         self.assertEqual(os.path.realpath(environment['RUSTUP_HOME']), os.path.realpath(str(work / 'rustup-home')))
 
+    def test_macos_intel_source_builder_has_time_for_both_required_builds(self):
+        target = next(row for row in self.targets
+                      if row['os'] == 'macos' and row['arch'] == 'x86_64')
+        with (ROOT / 'Cargo.toml').open('rb') as source:
+            workspace_tag = 'v' + release_tool.tomllib.load(source)['workspace']['package']['version']
+        arguments = SimpleNamespace(manifest=ROOT / 'release/targets.toml',
+                                    target=target['rust_target'], workspace=ROOT / 'Cargo.toml',
+                                    tag=workspace_tag, runner_identity=target['runner'],
+                                    work=self.root / 'intel-work', output=self.root / 'output')
+        captured = []
+
+        class ReachedIntelBuilder(Exception):
+            pass
+
+        def capture(command, _root, log, environment=None, timeout=10_800):
+            if Path(log).name == 'intel-ort.log':
+                captured.append((list(map(str, command)), timeout))
+                raise ReachedIntelBuilder
+
+        with patch.object(pipeline.platform, 'system', return_value='Darwin'), \
+                patch.object(pipeline.platform, 'machine', return_value='x86_64'), \
+                patch.object(pipeline.os, 'nice', create=True), \
+                patch.object(pipeline, 'download', side_effect=lambda _url, path, _digest: Path(path).write_bytes(b'fixture')), \
+                patch.object(pipeline, 'logged', side_effect=capture):
+            with self.assertRaises(ReachedIntelBuilder):
+                pipeline.native(arguments)
+        self.assertEqual(len(captured), 1)
+        command, timeout = captured[0]
+        self.assertEqual(command[1], '-u')
+        self.assertEqual(Path(command[2]).name, 'build_intel_ort.py')
+        self.assertEqual(timeout, 16_200)
+
     def test_windows_pester_setup_accepts_pinned_module_publisher_transition(self):
         windows_target = next(target for target in self.targets if target['os'] == 'windows')
         with (ROOT / 'Cargo.toml').open('rb') as source:
