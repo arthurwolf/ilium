@@ -33,10 +33,23 @@ pub(super) struct BridgeState {
     transcripts: BTreeMap<u64, Vec<TranscriptTurn>>,
     /// Topics the plugin published, as `(topic, payload JSON)` in publish order.
     pub(super) published: Vec<(String, String)>,
-    /// Running timers as `(id, repeat)`.
-    pub(super) timers: BTreeMap<u64, Option<u32>>,
+    /// Running volatile timers keyed by their instance-local id.
+    pub(super) timers: BTreeMap<u64, FakeTimer>,
     /// Durable timers as `name -> due epoch`.
-    pub(super) durable: BTreeMap<String, u64>,
+    pub(super) durable: BTreeMap<String, FakeDurableTimer>,
+    pub(super) durable_error: Option<PluginError>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FakeTimer {
+    pub(super) due: u64,
+    pub(super) repeat: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FakeDurableTimer {
+    pub(super) id: u64,
+    pub(super) due: u64,
 }
 
 /// Keeps the bridge installed for one call into the plugin and removes it afterwards.
@@ -146,6 +159,29 @@ impl HostLog for NativeBridge {
     }
 }
 
+impl HostClipboard for NativeBridge {
+    fn read_text(&mut self) -> Option<String> {
+        self.permit("clipboard.read").ok()?;
+        self.host().clipboard.text.clone()
+    }
+
+    fn write_text(&mut self, text: String) -> Result<(), PluginError> {
+        self.permit("clipboard.write")?;
+        if text.len() > 1_048_576 {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "clipboard text is larger than 1 MiB"));
+        }
+        if text.chars().any(|character| character.is_control() && !matches!(character, '\t' | '\n' | '\r')) {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "clipboard text contains a control character"));
+        }
+        let clipboard = &mut self.host().clipboard;
+        if let Some(message) = clipboard.failure.take() {
+            return Err(PluginError::new(ErrorCode::Io, message));
+        }
+        clipboard.text = Some(text);
+        Ok(())
+    }
+}
+
 impl HostClock for NativeBridge {
     fn now_unix_millis(&mut self) -> u64 {
         self.host().now_ms
@@ -155,29 +191,103 @@ impl HostClock for NativeBridge {
     }
 }
 
+impl HostPlugins for NativeBridge {
+    fn list(&mut self) -> Vec<plugins::PluginInfo> {
+        if self.permit("plugins.manage").is_err() || self.host().side != "client" {
+            return Vec::new();
+        }
+        let registry = &self.host().plugins;
+        registry.plugins.iter().map(|(id, (name, enabled))| {
+            let failed = registry.failed.contains(id);
+            plugins::PluginInfo {
+                id: PluginId(id.clone()), name: name.clone(), version: "0.0.0".into(), tier: "T1".into(),
+                enabled: *enabled, failed,
+                state: if *enabled { plugins::PackageState::InstalledEnabled } else { plugins::PackageState::InstalledDisabledByUser },
+                side_states: Vec::new(), scope: "global".into(), disabled_reason: None,
+                health: if failed { plugins::HealthState::Failed } else if *enabled { plugins::HealthState::Healthy } else { plugins::HealthState::Disabled },
+                publisher: String::new(), publisher_key: None, source: String::new(), channel: String::new(),
+                pinned: false, update_available: None, deprecated: false, yanked: false, held_until: None,
+            }
+        }).collect()
+    }
+
+    fn set_enabled(&mut self, plugin: PluginId, enabled: bool, scope: String) -> Result<RequestId, PluginError> {
+        self.permit("plugins.manage")?;
+        if self.host().side != "client" {
+            return Err(PluginError::new(ErrorCode::NotPermitted, "plugin management requires the client side"));
+        }
+        if !matches!(scope.as_str(), "global" | "project" | "session") {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "invalid plugin scope"));
+        }
+        if scope != "global" {
+            return Err(PluginError::new(ErrorCode::Unsupported, "only global plugin scope is implemented"));
+        }
+        let result = {
+            let registry = &mut self.host().plugins;
+            registry.enabled_calls.push((plugin.0.clone(), enabled));
+            if let Some(error) = registry.next_error.take() {
+                Err(error)
+            } else if let Some((_, current)) = registry.plugins.get_mut(&plugin.0) {
+                *current = enabled;
+                if enabled {
+                    registry.failed.remove(&plugin.0);
+                }
+                Ok(())
+            } else {
+                Err(PluginError::new(ErrorCode::NotFound, "plugin is not installed"))
+            }
+        };
+        let request = self.next_id();
+        self.complete(request, match result {
+            Ok(()) => Outcome::Ok,
+            Err(error) => Outcome::Failed(error),
+        });
+        Ok(RequestId(request))
+    }
+}
+
 impl HostTimers for NativeBridge {
     fn set(
         &mut self,
         after_millis: u32,
         repeat_millis: Option<u32>,
     ) -> Result<TimerId, PluginError> {
-        let _ = after_millis;
+        if let Some(position) = self.host().injected_failures.iter().position(|(import, _)| import == "timers.set") {
+            return Err(self.host().injected_failures.remove(position).1);
+        }
+        if after_millis < 50 || repeat_millis.is_some_and(|repeat| repeat < 50) {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "timer interval is below 50 ms"));
+        }
+        if self.host().bridge.timers.len() >= 64 {
+            return Err(PluginError::new(ErrorCode::QuotaExceeded, "the plugin already holds 64 timers"));
+        }
         let id = self.next_id();
-        self.host().bridge.timers.insert(id, repeat_millis);
+        let due = self.host().now_ms.saturating_add(u64::from(after_millis));
+        self.host().bridge.timers.insert(id, FakeTimer { due, repeat: repeat_millis });
         Ok(TimerId(id))
     }
     fn cancel(&mut self, timer: TimerId) {
         self.host().bridge.timers.remove(&timer.0);
     }
     fn at(&mut self, epoch: EpochMs, name: String) -> Result<TimerId, PluginError> {
+        if let Some(error) = &self.host().bridge.durable_error {
+            return Err(error.clone());
+        }
         if name.is_empty() {
             return Err(PluginError::new(
                 ErrorCode::InvalidArgument,
                 "a durable timer needs a name",
             ));
         }
-        self.host().bridge.durable.insert(name, epoch.0);
-        Ok(TimerId(self.next_id()))
+        if epoch.0 == 0 || epoch.0.saturating_add(1_000) < self.host().now_ms {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "the timer is more than one second in the past"));
+        }
+        if !self.host().bridge.durable.contains_key(&name) && self.host().bridge.durable.len() >= 64 {
+            return Err(PluginError::new(ErrorCode::QuotaExceeded, "the plugin already holds 64 durable timers"));
+        }
+        let id = self.next_id();
+        self.host().bridge.durable.insert(name, FakeDurableTimer { id, due: epoch.0 });
+        Ok(TimerId(id))
     }
     fn cancel_durable(&mut self, name: String) {
         self.host().bridge.durable.remove(&name);
@@ -185,32 +295,34 @@ impl HostTimers for NativeBridge {
 }
 
 impl HostStorage for NativeBridge {
-    fn get(&mut self, bucket: Bucket, key: String) -> Option<Vec<u8>> {
-        self.host().storage.get(bucket, &key)
+    fn get(&mut self, bucket: Bucket, key: String) -> Result<Option<Vec<u8>>, PluginError> {
+        self.host().storage.try_get(bucket, &key)
     }
     fn put(&mut self, bucket: Bucket, key: String, value: Vec<u8>) -> Result<(), PluginError> {
-        self.host().storage.put(bucket, &key, &value);
-        Ok(())
+        self.host().storage.try_put(bucket, &key, &value)
     }
     fn remove(&mut self, bucket: Bucket, key: String) -> Result<(), PluginError> {
-        self.host().storage.remove(bucket, &key);
-        Ok(())
+        self.host().storage.remove(bucket, &key)
     }
-    fn keys(&mut self, bucket: Bucket, prefix: String) -> Vec<String> {
-        self.host()
-            .storage
-            .dump(bucket)
-            .into_keys()
-            .filter(|key| key.starts_with(&prefix))
-            .collect()
+    fn keys(&mut self, bucket: Bucket, prefix: String) -> Result<Vec<String>, PluginError> {
+        self.host().storage.try_keys(bucket, &prefix)
     }
     fn write_batch(&mut self, bucket: Bucket, entries: Vec<Entry>) -> Result<(), PluginError> {
-        let _ = bucket;
-        let _ = entries;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        self.host().storage.write_batch(bucket, entries)
+    }
+    fn compare_exchange(&mut self, bucket: Bucket, key: String, expected: Option<Vec<u8>>, value: Option<Vec<u8>>) -> Result<bool, PluginError> {
+        if key.is_empty() || key.len() > 256 || expected.as_ref().is_some_and(|bytes| bytes.len() > 1_048_576) || value.as_ref().is_some_and(|bytes| bytes.len() > 1_048_576) {
+            return Err(PluginError::new(ErrorCode::InvalidArgument, "invalid-conditional-update"));
+        }
+        let storage = &mut self.host().storage;
+        if storage.try_get(bucket, &key)? != expected {
+            return Ok(false);
+        }
+        match value {
+            Some(bytes) => storage.try_put(bucket, &key, &bytes)?,
+            None => storage.remove(bucket, &key)?,
+        }
+        Ok(true)
     }
     fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
         let _ = key;
@@ -1081,19 +1193,27 @@ impl HostExtensions for NativeBridge {
             .list_calls
             .entry(point.clone())
             .or_default() += 1;
-        let plugin = PluginId(self.host().plugin_id.clone());
-        let entries = self
-            .host()
+        let host = self.host();
+        let mut entries: Vec<ExtensionEntry> = host
             .extensions
             .entries(&point)
             .into_iter()
             .map(|entry| ExtensionEntry {
                 extension: entry.id,
-                contributor: plugin.clone(),
+                contributor: PluginId(entry.contributor),
                 priority: u8::try_from(entry.priority.clamp(0, 255)).unwrap_or(u8::MAX),
                 entry_json: entry.entry.to_string(),
             })
             .collect();
+        if entries.is_empty() && host.extensions.has_hook_stub(&point) {
+            // A stubbed hook chain stands for the extensions another plugin would register.
+            entries.push(ExtensionEntry {
+                extension: "stub".to_owned(),
+                contributor: PluginId("ilium.testkit.stub".to_owned()),
+                priority: 128,
+                entry_json: "{}".to_owned(),
+            });
+        }
         Ok(entries)
     }
     fn run_hook(
@@ -1153,25 +1273,27 @@ impl HostExtensions for NativeBridge {
         if serde_json::from_str::<serde_json::Value>(&entry_json).is_err() {
             return Err(ExtensionError::SchemaMismatch);
         }
+        let contributor = self.host().plugin_id.clone();
         self.host()
             .extensions
-            .contribute(&point, &extension, i64::from(priority), entry_json);
+            .contribute_from(&contributor, &point, &extension, i64::from(priority), entry_json);
         Ok(())
     }
     fn unregister(&mut self, point: String, extension: String) -> Result<(), ExtensionError> {
         if !self.permit_scoped("extensions.contribute", &point) {
             return Err(ExtensionError::NotGranted);
         }
+        let contributor = self.host().plugin_id.clone();
         if !self
             .host()
             .extensions
             .points
             .get(&point)
-            .is_some_and(|collect| collect.entries.iter().any(|entry| entry.id == extension))
+            .is_some_and(|collect| collect.entries.iter().any(|entry| entry.id == extension && entry.contributor == contributor))
         {
             return Err(ExtensionError::NotFound);
         }
-        self.host().extensions.withdraw(&point, &extension);
+        self.host().extensions.withdraw_from(&contributor, &point, &extension);
         Ok(())
     }
 }

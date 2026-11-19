@@ -92,6 +92,14 @@ impl FakeSettings {
         ] {
             self.declare(key, ValueKind::Bool, Some(Value::Bool(true)));
         }
+        for key in ["ui.terminal_text_selection_enabled", "terminal.smart_copy_light"] {
+            self.declare(key, ValueKind::Bool, Some(Value::Bool(true)));
+        }
+        self.declare(
+            "terminal.smart_copy_light_key",
+            ValueKind::Text,
+            Some(Value::String("ctrl".to_owned())),
+        );
         self.declare(
             "ui.last_prompt_max_lines",
             ValueKind::Number,
@@ -145,6 +153,20 @@ impl FakeSettings {
                 ErrorCode::InvalidArgument,
                 format!("value of {key} has the wrong type"),
             ));
+        }
+        if key == "terminal.smart_copy_light_key" {
+            let known = value.as_str().is_some_and(|text| {
+                matches!(
+                    text.trim().to_ascii_lowercase().as_str(),
+                    "ctrl" | "control" | "alt" | "option" | "shift"
+                )
+            });
+            if !known {
+                return Err(PluginError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("{key} = {value} must be \"ctrl\", \"alt\" or \"shift\""),
+                ));
+            }
         }
         if key == "ui.last_prompt_max_lines" {
             let in_range = value

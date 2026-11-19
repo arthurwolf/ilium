@@ -62,7 +62,7 @@ pub(super) struct DeliveryState {
 
 // SDK and API generated records are distinct Rust types. The common generated serde wire
 // representation is the explicit bridge; a schema drift fails closed as an ABI diagnostic.
-fn wire_convert<T: Serialize, U: DeserializeOwned>(value: &T) -> Result<U, HarnessError> {
+pub(super) fn wire_convert<T: Serialize, U: DeserializeOwned>(value: &T) -> Result<U, HarnessError> {
     serde_json::to_value(value)
         .and_then(serde_json::from_value)
         .map_err(|error| {
@@ -73,7 +73,7 @@ fn wire_convert<T: Serialize, U: DeserializeOwned>(value: &T) -> Result<U, Harne
         })
 }
 
-fn held_grants(names: &BTreeSet<String>) -> Result<Vec<Grant>, HarnessError> {
+pub(super) fn held_grants(names: &BTreeSet<String>) -> Result<Vec<Grant>, HarnessError> {
     names
         .iter()
         .map(|name| {

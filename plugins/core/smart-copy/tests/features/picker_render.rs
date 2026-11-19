@@ -1,7 +1,7 @@
 //! F-065/F-066: golden screen text of the Smart Copy picker popup (page figure, 48 columns) and
 //! width sweeps at 40, 80 and 120 columns.
 
-use crate::common::{candidates_message, client_host, page_figure, picker_target};
+use crate::common::{deliver_candidates, client_host, page_figure, picker_target};
 
 const CANDIDATES: [&str; 3] = [
     "src/server/routes.rs",
@@ -11,7 +11,7 @@ const CANDIDATES: [&str; 3] = [
 
 fn render(width: u16, height: u16) -> Vec<String> {
     let mut host = client_host();
-    host.deliver_one(candidates_message(&CANDIDATES));
+    deliver_candidates(&mut host, &CANDIDATES);
     host.render(picker_target(), width, height)
         .lines()
         .into_iter()
@@ -67,9 +67,9 @@ fn feature_065_picker_never_exceeds_the_screen_width() {
 #[test]
 fn feature_065_picker_keeps_numbers_visible_when_a_candidate_is_wider_than_the_screen() {
     let mut host = client_host();
-    host.deliver_one(candidates_message(&[
+    deliver_candidates(&mut host, &[
         "a/very/long/path/that/keeps/going/and/going/and/going/forever.rs",
-    ]));
+    ]);
     let rows = host.render(picker_target(), 40, 8).lines();
     let text = rows.join("\n");
     assert!(text.contains("1 a/very"), "{text}");
@@ -88,12 +88,12 @@ fn feature_065_picker_is_empty_before_any_candidates_arrive() {
 #[test]
 fn feature_066_picker_shows_at_most_three_regions() {
     let mut host = client_host();
-    host.deliver_one(candidates_message(&[
+    deliver_candidates(&mut host, &[
         "one/a.rs",
         "two/b.rs",
         "three/c.rs",
         "four/d.rs",
-    ]));
+    ]);
     let text = host.render(picker_target(), 80, 12).lines().join("\n");
     assert!(text.contains("3 three/c.rs"), "{text}");
     assert!(!text.contains("four/d.rs"), "{text}");

@@ -1067,6 +1067,8 @@ pub struct KernelTerminal {
     /// What the plugin holds of `terminal.read-screen`, `terminal.history` and
     /// `terminal.read-cells`, in that order.
     reads: (bool, bool, bool),
+    snapshots: std::collections::HashMap<u64, Box<dyn ilium_plugin_api::kernel::FrozenTerminal>>,
+    next_snapshot: u64,
 }
 
 impl KernelTerminal {
@@ -1080,6 +1082,8 @@ impl KernelTerminal {
                 holds(granted, "terminal.history"),
                 holds(granted, "terminal.read-cells"),
             ),
+            snapshots: std::collections::HashMap::new(),
+            next_snapshot: 1,
         }
     }
 }
@@ -1097,17 +1101,17 @@ impl HostTerminal for KernelTerminal {
             return None;
         }
         let panes = self.kernel.panes();
-        let rows: Vec<String> = match part {
-            ScreenPart::Visible => panes
-                .screen_text(pane)?
-                .lines()
-                .take(max_rows as usize)
-                .map(str::to_owned)
-                .collect(),
-            ScreenPart::Scrollback => panes.history(pane, max_rows)?,
+        let (rows, columns, state) = match part {
+            ScreenPart::Visible => {
+                let captured = panes.visible_screen(pane, max_rows.min(10_000))?;
+                (captured.rows, captured.columns, captured.state)
+            }
+            ScreenPart::Scrollback => (
+                panes.history(pane, max_rows.min(10_000))?,
+                panes.size(pane).map_or(0, |(columns, _)| columns),
+                panes.screen_state(pane).unwrap_or_default(),
+            ),
         };
-        let columns = panes.size(pane).map_or(0, |(columns, _)| columns);
-        let state = panes.screen_state(pane).unwrap_or_default();
         Some(Screen {
             columns,
             rows,
@@ -1119,7 +1123,10 @@ impl HostTerminal for KernelTerminal {
     }
 
     fn get_selection(&mut self, pane: NodeId) -> Option<Selection> {
-        self.rest.get_selection(pane)
+        if !self.reads.0 {
+            return None;
+        }
+        self.kernel.panes().selection(pane)
     }
 
     fn add_output_filter(&mut self, pane: NodeId, filter: OutputFilter) -> Result<(), PluginError> {
@@ -1171,8 +1178,11 @@ impl HostTerminal for KernelTerminal {
             return None;
         }
         let panes = self.kernel.panes();
+        if count > 1_000 {
+            return None;
+        }
         let first = u16::try_from(first_row).ok()?;
-        let last = first.saturating_add(u16::try_from(count).unwrap_or(u16::MAX));
+        let last = first.checked_add(u16::try_from(count).ok()?)?;
         let rows = panes.cells(pane, first..last)?;
         Some(CellRows {
             first_row,
@@ -1199,7 +1209,29 @@ impl HostTerminal for KernelTerminal {
     }
 
     fn freeze_snapshot(&mut self, pane: NodeId) -> Result<u64, PluginError> {
-        self.rest.freeze_snapshot(pane)
+        const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+        if !(self.reads.0 || self.reads.2) {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                "terminal.read-screen or terminal.read-cells is required",
+            ));
+        }
+        self.snapshots.retain(|_, snapshot| snapshot.is_live());
+        if self.snapshots.len() >= 4 {
+            return Err(PluginError::new(ErrorCode::QuotaExceeded, "the snapshot limit is four"));
+        }
+        let snapshot = self.kernel.panes().freeze_cells(pane)?;
+        if !snapshot.is_live() {
+            return Err(PluginError::new(ErrorCode::NotFound, "the pane was removed during capture"));
+        }
+        let used = self.snapshots.values().try_fold(0usize, |total, current| total.checked_add(current.retained_bytes()));
+        if used.and_then(|total| total.checked_add(snapshot.retained_bytes())).is_none_or(|total| total > MAX_SNAPSHOT_BYTES) {
+            return Err(PluginError::new(ErrorCode::QuotaExceeded, "terminal snapshot memory limit exceeded"));
+        }
+        let id = self.next_snapshot;
+        self.next_snapshot = id.checked_add(1).ok_or_else(|| PluginError::new(ErrorCode::QuotaExceeded, "terminal snapshot IDs exhausted"))?;
+        self.snapshots.insert(id, snapshot);
+        Ok(id)
     }
 
     fn read_snapshot_cells(
@@ -1208,11 +1240,19 @@ impl HostTerminal for KernelTerminal {
         first_row: u32,
         count: u32,
     ) -> Option<CellRows> {
-        self.rest.read_snapshot_cells(snapshot, first_row, count)
+        if count > 1000 || first_row.checked_add(count).is_none() || !self.reads.2 {
+            return None;
+        }
+        let captured = self.snapshots.get(&snapshot)?;
+        if !captured.is_live() {
+            self.snapshots.remove(&snapshot);
+            return None;
+        }
+        captured.read_cells(first_row, count)
     }
 
     fn drop_snapshot(&mut self, snapshot: u64) {
-        self.rest.drop_snapshot(snapshot);
+        self.snapshots.remove(&snapshot);
     }
 
     fn history_text(&mut self, pane: NodeId, max_bytes: u32) -> Result<RequestId, PluginError> {
@@ -1249,6 +1289,10 @@ impl HostTerminal for KernelTerminal {
         self.rest.unlock_input(pane);
     }
 }
+
+#[cfg(test)]
+#[path = "backed_snapshot_tests.rs"]
+mod backed_snapshot_tests;
 
 #[cfg(test)]
 mod grant_tests {

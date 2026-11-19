@@ -7,7 +7,7 @@
 //! (`ilium-client/src/plugin_host/popup.rs`).
 
 use ilium_plugin_sdk_core::types::{
-    ActionKind, ActionValue, Span, TriState, UiTree, ViewTarget, Widget,
+    ActionKind, ActionValue, BorderType, Borders, Span, TriState, UiTree, ViewTarget, Widget,
 };
 
 use super::Screen;
@@ -87,7 +87,7 @@ fn text_of(spans: &[Span]) -> String {
 /// Most nodes one render visits; guards against a tree whose child lists form a cycle.
 const NODE_BUDGET: usize = 65_536;
 
-fn write_node(tree: &UiTree, index: u32, lines: &mut Vec<Line>, budget: &mut usize) {
+fn write_node(tree: &UiTree, index: u32, lines: &mut Vec<Line>, budget: &mut usize, columns: usize) {
     if *budget == 0 {
         return;
     }
@@ -169,6 +169,15 @@ fn write_node(tree: &UiTree, index: u32, lines: &mut Vec<Line>, budget: &mut usi
                 });
             }
         }
+        Widget::Toggle(spec) => {
+            let marker = if spec.value { "[x]" } else { "[ ]" };
+            let text = format!("{} {}", spec.label, marker);
+            lines.push(if node.disabled_reason.is_some() {
+                Line::plain(text)
+            } else {
+                Line::clickable(text, key, "", ActionKind::Toggled, Some(ActionValue::Flag(!spec.value)))
+            });
+        }
         Widget::Button(spec) => {
             let text = format!("[ {} ]", spec.label);
             lines.push(if spec.enabled {
@@ -177,11 +186,65 @@ fn write_node(tree: &UiTree, index: u32, lines: &mut Vec<Line>, budget: &mut usi
                 Line::plain(text)
             });
         }
+        Widget::Block(spec) if spec.borders.0 == Borders::ALL.0 && columns >= 4 => {
+            let mut inner: Vec<Line> = Vec::new();
+            let left = usize::from(spec.padding.left);
+            let right = usize::from(spec.padding.right);
+            let inner_columns = columns.saturating_sub(2 + left + right);
+            for child in &node.children {
+                write_node(tree, *child, &mut inner, budget, inner_columns);
+            }
+            let (top_left, top_right, bottom_left, bottom_right) = match spec.border_type {
+                BorderType::Rounded => ('╭', '╮', '╰', '╯'),
+                _ => ('┌', '┐', '└', '┘'),
+            };
+            let title = spec.titles.first().map(|title| text_of(&title.text)).unwrap_or_default();
+            let mut top = String::new();
+            top.push(top_left);
+            top.push('─');
+            if !title.is_empty() {
+                top.push(' ');
+                top.push_str(&title);
+                top.push(' ');
+            }
+            while top.chars().count() < columns - 1 {
+                top.push('─');
+            }
+            top.push(top_right);
+            lines.push(Line::plain(top));
+            for line in inner {
+                let used = line.text.chars().count();
+                let mut text = String::from('│');
+                text.push_str(&" ".repeat(left));
+                text.push_str(&line.text);
+                text.push_str(&" ".repeat(inner_columns.saturating_sub(used) + right));
+                text.push('│');
+                let shift = 1 + left;
+                lines.push(Line {
+                    text,
+                    stretches: line
+                        .stretches
+                        .into_iter()
+                        .map(|mut stretch| {
+                            stretch.first += shift;
+                            stretch.end += shift;
+                            stretch
+                        })
+                        .collect(),
+                });
+            }
+            let mut bottom = String::new();
+            bottom.push(bottom_left);
+            bottom.push_str(&"─".repeat(columns - 2));
+            bottom.push(bottom_right);
+            lines.push(Line::plain(bottom));
+            return;
+        }
         // Every other widget shows only what its children show.
         _ => {}
     }
     for child in &node.children {
-        write_node(tree, *child, lines, budget);
+        write_node(tree, *child, lines, budget, columns);
     }
     lines.append(&mut after);
 }
@@ -190,7 +253,7 @@ fn write_node(tree: &UiTree, index: u32, lines: &mut Vec<Line>, budget: &mut usi
 pub(super) fn draw(tree: &UiTree, columns: u16, rows: u16) -> (Screen, Vec<Hit>) {
     let mut lines = Vec::new();
     let mut budget = NODE_BUDGET;
-    write_node(tree, tree.root, &mut lines, &mut budget);
+    write_node(tree, tree.root, &mut lines, &mut budget, usize::from(columns));
     let mut screen = Screen::blank(columns, rows);
     let mut hits = Vec::new();
     let width = usize::from(columns);

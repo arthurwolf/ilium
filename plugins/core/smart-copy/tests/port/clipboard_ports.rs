@@ -1,7 +1,7 @@
 //! Ports of terminal_clipboard.rs, smart_copy_selection.rs and smart_copy_light.rs: what reaches the
 //! clipboard, in which order, and what the status line says.
 
-use crate::common::{candidates_message, key, open_picker, status_contains};
+use crate::common::{deliver_candidates, key, open_picker, restart_picker, status_contains};
 
 /// REQ: PORT:ilium-client/src/terminal_clipboard.rs::framed_commands_preserve_unicode_and_order
 #[test]
@@ -129,7 +129,8 @@ fn port_selection_a_failed_copy_leaves_the_clipboard_untouched() {
 #[test]
 fn port_selection_a_newer_candidate_list_replaces_the_older_one() {
     let mut host = open_picker(&["old"]);
-    host.deliver_one(candidates_message(&["newer"]));
+    restart_picker(&mut host);
+    deliver_candidates(&mut host, &["newer"]);
     host.deliver_one(key("1"));
     assert_eq!(host.clipboard().last_text().as_deref(), Some("newer"));
 }

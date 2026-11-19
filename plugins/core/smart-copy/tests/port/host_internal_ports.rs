@@ -285,7 +285,8 @@ fn port_internal_a_cancelled_picker_copies_nothing_and_a_later_pick_still_works(
     let mut host = picker_with(2);
     host.deliver_one(key("Escape"));
     assert_eq!(host.clipboard().last_text(), None);
-    host.deliver_one(candidates_message(&["after", "cancel"]));
+    restart_picker(&mut host);
+    deliver_candidates(&mut host, &["after", "cancel"]);
     pick(&mut host, 1);
     assert_eq!(host.clipboard().last_text().as_deref(), Some("after"));
 }
@@ -405,7 +406,7 @@ fn port_internal_a_reply_is_never_shown_as_more_than_three_candidates() {
     let (mut host, pane) = model_host(&["a", "b", "c", "d", "e"]);
     host.inference().reply_text("a\nb\nc\nd\ne");
     ask(&mut host, pane);
-    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    let lines = candidate_lines(&deliver_candidates(&mut host, &[]));
     assert!(lines.len() <= 3, "{lines:?}");
 }
 
@@ -449,9 +450,9 @@ fn port_internal_the_server_side_keeps_working_after_the_client_side_is_rebuilt(
     let (server, _pane) = server_showing(&["src/lib.rs"]);
     let before = scan(&["src/lib.rs"]);
     let mut client = client_host();
-    client.deliver_one(candidates_message(&["src/lib.rs"]));
+    deliver_candidates(&mut client, &["src/lib.rs"]);
     let mut rebuilt = client_host();
-    rebuilt.deliver_one(candidates_message(&["src/lib.rs"]));
+    deliver_candidates(&mut rebuilt, &["src/lib.rs"]);
     pick(&mut rebuilt, 1);
     assert_eq!(
         rebuilt.clipboard().last_text().as_deref(),

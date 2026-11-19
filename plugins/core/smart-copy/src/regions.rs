@@ -2,10 +2,11 @@
 //! frames, trees, lists, quotes, headings and paragraphs, commands, diffs and diagnostics, plus the
 //! fine-grained tokens of [`crate::recognise`] found inside them.
 //!
-//! The rows arrive as plain text (`terminal.read-screen`), so a span is a range of characters of
-//! one row, not a range of terminal cells. Regions may nest; the caller decides what to offer.
+//! The rows arrive as plain text (`terminal.read-screen`); display widths approximate cell
+//! positions until the scanner receives the terminal's actual styled cells.
 
 use std::collections::HashMap;
+use unicode_width::UnicodeWidthChar;
 
 use crate::recognise;
 
@@ -14,7 +15,7 @@ pub const MAXIMUM_DETECTED_CANDIDATES: usize = 1024;
 /// Most rows one region may span before it is skipped as too large to be a selection.
 pub const MAXIMUM_PARTS_PER_CANDIDATE: usize = 128;
 
-/// A range of characters of one row, both ends inclusive.
+/// A range of terminal columns of one row, both ends inclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellSpan {
     pub row: u16,
@@ -47,23 +48,32 @@ impl ScanLine {
             start_columns: Vec::new(),
             end_columns: Vec::new(),
         };
-        // Columns are character indices of the row text: a plugin reads rows as text, not cells.
-        for (column, character) in text.chars().enumerate() {
-            let column = u16::try_from(column).unwrap_or(u16::MAX);
+        let mut next_column = 0usize;
+        let mut previous = (0u16, 0u16);
+        for character in text.chars() {
+            let width = UnicodeWidthChar::width(character).unwrap_or(0);
+            let (start, end) = if width == 0 {
+                previous
+            } else {
+                let start = u16::try_from(next_column).unwrap_or(u16::MAX);
+                next_column = next_column.saturating_add(width);
+                let end = u16::try_from(next_column.saturating_sub(1)).unwrap_or(u16::MAX);
+                previous = (start, end);
+                previous
+            };
             line.text.push(character);
             line.chars.push(character);
-            line.start_columns.push(column);
-            line.end_columns.push(column);
+            line.start_columns.push(start);
+            line.end_columns.push(end);
         }
         line
     }
 
     /// The characters a span covers, without trailing blanks.
     fn text_of(&self, span: CellSpan) -> String {
-        let start = usize::from(span.start_column).min(self.chars.len());
-        let end = (usize::from(span.end_column) + 1).min(self.chars.len());
-        self.chars[start..end.max(start)]
-            .iter()
+        let start = self.end_columns.partition_point(|column| *column < span.start_column);
+        let end = self.start_columns.partition_point(|column| *column <= span.end_column);
+        self.chars[start..end.max(start)].iter()
             .collect::<String>()
             .trim_end()
             .to_string()
@@ -382,6 +392,15 @@ fn is_tree_branch(text: &str) -> bool {
 
 /// Every structure and token the visible rows offer, most specific first.
 pub fn detect_regions(rows: &[String]) -> Vec<DetectedRegion> {
+    detect_regions_impl(rows, false)
+}
+
+/// Regions for the copy list: repeated token text needs only one candidate.
+pub(crate) fn detect_regions_for_candidates(rows: &[String]) -> Vec<DetectedRegion> {
+    detect_regions_impl(rows, true)
+}
+
+fn detect_regions_impl(rows: &[String], unique_tokens: bool) -> Vec<DetectedRegion> {
     let lines = rows
         .iter()
         .map(|row| ScanLine::new(row))
@@ -906,9 +925,16 @@ pub fn detect_regions(rows: &[String]) -> Vec<DetectedRegion> {
 
     // Tokens: URLs, paths, qualified names, addresses, values and so on.
     let mut token_regions = Vec::new();
-    for (line_row, line) in lines.iter().enumerate() {
+    let mut token_texts = std::collections::HashSet::new();
+    'token_rows: for (line_row, line) in lines.iter().enumerate() {
         for token in recognise::scan_line(&line.text) {
+            if unique_tokens && token_regions.len() >= MAXIMUM_DETECTED_CANDIDATES {
+                break 'token_rows;
+            }
             if let Some(span) = line.content_span(line_row, token.start, token.end) {
+                if unique_tokens && !token_texts.insert(line.text_of(span)) {
+                    continue;
+                }
                 draft(&mut token_regions, token.label, token.kind, vec![span]);
             }
         }
@@ -966,7 +992,7 @@ pub fn detect_regions(rows: &[String]) -> Vec<DetectedRegion> {
         let cell_count = region
             .spans
             .iter()
-            .map(|span| usize::from(span.end_column - span.start_column + 1))
+            .map(|span| usize::from(span.end_column) - usize::from(span.start_column) + 1)
             .sum();
         geometries.insert(region.spans.clone(), regions.len());
         regions.push(DetectedRegion {
@@ -990,4 +1016,19 @@ fn is_command_prefix_end(text: &str) -> Option<usize> {
         .find(|marker| trimmed.starts_with(**marker))?;
     let end = indent + marker.chars().count();
     (trimmed.chars().count() > marker.chars().count()).then_some(end)
+}
+
+#[cfg(test)]
+mod cell_geometry_tests {
+    use super::{CellSpan, ScanLine};
+
+    #[test]
+    fn extracting_cells_keeps_wide_and_combining_characters_whole() {
+        let line = ScanLine::new("漢 e\u{301} x");
+        let span = |start_column, end_column| CellSpan { row: 0, start_column, end_column };
+        assert_eq!(line.text_of(span(0, 1)), "漢");
+        assert_eq!(line.text_of(span(1, 1)), "漢");
+        assert_eq!(line.text_of(span(3, 3)), "e\u{301}");
+        assert_eq!(line.text_of(span(5, 5)), "x");
+    }
 }

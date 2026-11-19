@@ -4,13 +4,13 @@ use ilium_plugin_sdk::exports::HookReply;
 use ilium_plugin_sdk::types::{GrabId, Intent, KeyEvent};
 use serde_json::Value;
 
-use crate::common::{add_terminal_pane, candidates_message, client_host, PLUGIN_ID};
+use crate::common::{add_terminal_pane, deliver_candidates, client_host, PLUGIN_ID};
 
 const AFTER_COPY: &str = "ilium.core.smart-copy/after-copy";
 const COPIED: &str = "ilium.core.smart-copy/copied";
 
 fn copy_first(host: &mut ilium_plugin_sdk::testing::FakeHost, text: &str) {
-    host.deliver_one(candidates_message(&[text]));
+    deliver_candidates(host, &[text]);
     host.deliver_one(ilium_plugin_sdk::types::Event::KeyPressed(KeyEvent {
         grab: GrabId(0),
         pane: None,
@@ -36,7 +36,7 @@ fn feature_066_after_copy_chain_receives_text_kind_and_pane() {
             .is_some_and(|kind| !kind.is_empty()),
         "{payload}"
     );
-    assert_eq!(payload["pane"], Value::from(pane), "{payload}");
+    assert_eq!(payload["pane"], Value::from(pane.to_string()), "{payload}");
 }
 
 /// REQ: EXT-042

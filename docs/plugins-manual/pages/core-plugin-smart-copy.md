@@ -82,8 +82,20 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     ],
     "commands": [
       {
+        "id": "copy",
+        "title": "Copy selection"
+      },
+      {
         "id": "smart-copy",
         "title": "Smart Copy"
+      },
+      {
+        "id": "copy-path",
+        "title": "Copy path"
+      },
+      {
+        "id": "transfer",
+        "title": "Transfer screen"
       }
     ]
   }
@@ -109,7 +121,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views",
+      "menu-provider"
+    ]
   },
   "capabilities": {
     "server": [
@@ -120,14 +136,22 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "extensions.provide:ilium.core.smart-copy/after-copy"
     ],
     "client": [
+      "tree.read",
+      "panes.read",
       "terminal.read-screen",
       "terminal.pointer",
       "clipboard.write",
-      "inference"
+      "inference",
+      "extensions.provide:ilium.core.smart-copy/after-copy",
+      "settings.read-kernel:user-interface",
+      "settings.read-kernel:terminal"
     ]
   },
   "activation": [
-    "command:ilium.core.smart-copy/smart-copy"
+    "command:ilium.core.smart-copy/smart-copy",
+    "command:ilium.core.smart-copy/copy",
+    "command:ilium.core.smart-copy/copy-path",
+    "command:ilium.core.smart-copy/transfer"
   ],
   "contributes": {
     "context_menu": [
@@ -217,8 +241,20 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "commands": [
       {
+        "id": "copy",
+        "title": "Copy selection"
+      },
+      {
         "id": "smart-copy",
         "title": "Smart Copy"
+      },
+      {
+        "id": "copy-path",
+        "title": "Copy path"
+      },
+      {
+        "id": "transfer",
+        "title": "Transfer screen"
       }
     ]
   },
@@ -227,7 +263,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "points:recognisers",
     "points:after-copy",
     "topics:copied",
-    "commands:smart-copy"
+    "commands:smart-copy",
+    "commands:copy",
+    "commands:copy-path",
+    "commands:transfer"
   ],
   "limits_tier": "first-party"
 }

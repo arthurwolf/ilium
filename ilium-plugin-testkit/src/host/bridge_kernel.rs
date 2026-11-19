@@ -20,6 +20,24 @@ const FAKE_ROWS: u16 = 24;
 const FIND_LIMIT: usize = 4096;
 
 impl NativeBridge {
+    /// Records one pointer claim of the plugin on an existing pane; a repeated claim is kept once.
+    fn record_pointer_claim(
+        &mut self,
+        pane: NodeId,
+        modifiers: Option<ilium_plugin_sdk_core::generated::types::ui::PointerModifiers>,
+    ) -> Result<(), PluginError> {
+        self.permit("terminal.pointer")?;
+        let host = self.host();
+        if host.tree.get(pane.0).is_none() {
+            return Err(PluginError::new(ErrorCode::NotFound, "no such pane"));
+        }
+        let claims = host.terminal.claims.entry(pane.0).or_default();
+        if !claims.contains(&modifiers) {
+            claims.push(modifiers);
+        }
+        Ok(())
+    }
+
     fn reads_tree(&mut self) -> bool {
         self.permit("tree.read").is_ok()
     }
@@ -156,7 +174,13 @@ impl HostPanes for NativeBridge {
 impl HostKernelSettings for NativeBridge {
     fn read(&mut self, tab: String) -> Result<String, PluginError> {
         self.permit(&format!("settings.read-kernel:{tab}"))?;
-        match self.host().kernel_settings.tab(&tab) {
+        let values = {
+            let host = self.host();
+            host.kernel_settings
+                .tab(&tab)
+                .or_else(|| host.settings().section_value(if tab == "user-interface" { "ui" } else { &tab }))
+        };
+        match values {
             Some(values) => Ok(values.to_string()),
             None => Err(PluginError::new(
                 ErrorCode::NotFound,
@@ -203,7 +227,13 @@ impl HostTerminal for NativeBridge {
         let pane = a0.0;
         let host = self.host();
         let rows = match a1 {
-            m::primitives::terminal::ScreenPart::Visible => host.tree.screen_rows(pane)?,
+            m::primitives::terminal::ScreenPart::Visible => match host.tree.screen_rows(pane) {
+                Some(rows) => rows?,
+                None => {
+                    host.tree.get(pane)?;
+                    host.terminal.rows.get(&pane)?.clone()
+                }
+            },
             // The fake keeps no text for the scrollback: only its length is modelled.
             m::primitives::terminal::ScreenPart::Scrollback => Vec::new(),
         };
@@ -227,7 +257,15 @@ impl HostTerminal for NativeBridge {
         &mut self,
         a0: m::types::ids::NodeId,
     ) -> ::core::option::Option<m::primitives::terminal::Selection> {
-        ::core::option::Option::None
+        self.permit("terminal.read-screen").ok()?;
+        let host = self.host();
+        let node = host.tree.get(a0.0)?;
+        // A plugin-defined pane can also use the terminal primitive. The seeded selection
+        // models that primitive without assuming a particular content-kind identifier.
+        if node.class != NodeClass::Pane {
+            return None;
+        }
+        host.terminal.selections.get(&a0.0).cloned()
     }
     fn add_output_filter(
         &mut self,
@@ -243,17 +281,23 @@ impl HostTerminal for NativeBridge {
         &mut self,
         a0: m::types::ids::NodeId,
     ) -> ::core::result::Result<(), m::types::errors::PluginError> {
-        ::core::result::Result::Err(unmodelled())
+        self.record_pointer_claim(a0, None)
     }
     fn claim_pointer_gesture(
         &mut self,
         a0: m::types::ids::NodeId,
         a1: m::types::ui::PointerModifiers,
     ) -> ::core::result::Result<(), m::types::errors::PluginError> {
-        ::core::result::Result::Err(unmodelled())
+        if a1.0 == 0 {
+            return ::core::result::Result::Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "a gesture claim needs at least one modifier",
+            ));
+        }
+        self.record_pointer_claim(a0, Some(a1))
     }
     fn release_pointer(&mut self, a0: m::types::ids::NodeId) -> () {
-        ()
+        self.host().terminal.claims.remove(&a0.0);
     }
     fn set_highlights(
         &mut self,
@@ -291,7 +335,20 @@ impl HostTerminal for NativeBridge {
         &mut self,
         a0: m::types::ids::NodeId,
     ) -> ::core::result::Result<u64, m::types::errors::PluginError> {
-        ::core::result::Result::Err(unmodelled())
+        if self.permit("terminal.read-screen").is_err() {
+            self.permit("terminal.read-cells")?;
+        }
+        let host = self.host();
+        if host.tree.get(a0.0).is_none() {
+            return Err(PluginError::new(ErrorCode::NotFound, "no such pane"));
+        }
+        if host.terminal.snapshots.len() >= 4 {
+            return Err(PluginError::new(ErrorCode::QuotaExceeded, "the snapshot limit is four"));
+        }
+        host.terminal.next_snapshot += 1;
+        let handle = host.terminal.next_snapshot;
+        host.terminal.snapshots.insert(handle);
+        Ok(handle)
     }
     fn read_snapshot_cells(
         &mut self,
@@ -302,7 +359,7 @@ impl HostTerminal for NativeBridge {
         ::core::option::Option::None
     }
     fn drop_snapshot(&mut self, a0: u64) -> () {
-        ()
+        self.host().terminal.snapshots.remove(&a0);
     }
     fn history_text(
         &mut self,

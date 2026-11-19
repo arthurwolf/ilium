@@ -3,7 +3,7 @@
 //! smart-copy.md "What Smart Copy recognises"), plus the `recognisers` collect point.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{Event, Submission};
+use ilium_plugin_sdk::types::{Event, Intent, Submission};
 use proptest::prelude::*;
 
 use crate::common::{add_terminal_pane, candidate_lines, candidate_payloads, server_host};
@@ -28,6 +28,63 @@ fn scan(rows: &[&str]) -> Vec<String> {
 
 fn lines_of(submissions: &[Submission]) -> Vec<String> {
     candidate_lines(submissions)
+}
+
+#[test]
+fn a_scan_without_an_originating_client_does_not_broadcast_candidates() {
+    let (mut host, pane) = host_showing(&["private/file.rs"]);
+    let mut event = screen_changed(pane, 0, 0);
+    if let Event::Message(message) = &mut event { message.from_client = None; }
+    let submissions = host.deliver_one(event);
+    assert!(submissions.is_empty(), "a scan without an origin must not send a reply");
+}
+
+#[test]
+fn a_scan_from_another_plugin_or_server_is_not_answered() {
+    let (mut host, pane) = host_showing(&["private/file.rs"]);
+    for wrong_side in [false, true] {
+        let mut event = screen_changed(pane, 0, 0);
+        if let Event::Message(message) = &mut event {
+            if wrong_side {
+                message.from_side = ilium_plugin_sdk::types::PluginSide::Server;
+            } else {
+                message.from.0 = "other.plugin".to_string();
+            }
+        }
+        assert!(host.deliver_one(event).is_empty());
+    }
+}
+
+#[test]
+fn a_large_escaped_screen_does_not_exceed_the_message_body_limit() {
+    let rows: Vec<String> = (0..128)
+        .map(|index| format!("{index:03} {}", "\"".repeat(7000)))
+        .collect();
+    let borrowed: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let (mut host, pane) = host_showing(&borrowed);
+    let submissions = host.deliver_one(screen_changed(pane, 0, 127));
+    let payloads: Vec<_> = submissions.iter().filter_map(|submission| match &submission.intent {
+        Intent::Message(message) if message.channel == "candidates" => Some(&message.payload),
+        _ => None,
+    }).collect();
+    assert!(!payloads.is_empty(), "the requesting client receives a response");
+    let mut chunks = std::collections::BTreeMap::new();
+    let mut total = None;
+    for payload in payloads {
+        assert!(payload.len() <= 1024 * 1024, "encoded reply has {} bytes", payload.len());
+        let frame: serde_json::Value = serde_json::from_slice(payload).expect("complete frame");
+        let count = frame["chunk_count"].as_u64().expect("chunk count");
+        let index = frame["chunk_index"].as_u64().expect("chunk index");
+        assert!(total.is_none_or(|previous| previous == count));
+        total = Some(count);
+        assert!(chunks.insert(index, frame["chunk"].as_str().expect("chunk text").to_owned()).is_none());
+    }
+    assert_eq!(chunks.len() as u64, total.expect("at least one frame"));
+    let encoded = chunks.into_values().collect::<String>();
+    let reply: serde_json::Value = serde_json::from_str(&encoded).expect("complete reply");
+    let candidates: Vec<_> = reply["candidates"].as_array().expect("candidate list").iter()
+        .map(|value| value.as_str().expect("candidate string").to_owned()).collect();
+    assert_eq!(candidates, ilium_plugin_core_smart_copy::candidates_of(&rows));
 }
 
 /// REQ: F-065
@@ -156,20 +213,28 @@ fn feature_065_an_empty_screen_offers_no_candidates() {
 fn feature_065_the_message_goes_to_the_client_side_of_this_plugin_on_channel_candidates() {
     let (mut host, pane) = host_showing(&["src/lib.rs"]);
     let submissions = host.deliver_one(screen_changed(pane, 0, 0));
-    assert_eq!(
-        candidate_payloads(&submissions),
-        vec!["src/lib.rs".to_string()]
-    );
+    assert_eq!(candidate_payloads(&submissions).len(), 1);
+    assert!(candidate_lines(&submissions).contains(&"src/lib.rs".to_string()));
+    assert!(submissions.iter().any(|submission| matches!(
+        &submission.intent,
+        ilium_plugin_sdk::types::Intent::Message(message)
+            if message.channel == "candidates" && message.to.client == Some(ilium_plugin_sdk::types::ClientId(1))
+    )));
 }
 
 /// REQ: F-065
 #[test]
-fn feature_065_candidate_payload_is_newline_joined_utf8_without_a_trailing_newline() {
+fn feature_065_candidate_reply_contains_structured_candidates_and_request_identity() {
     let (mut host, pane) = host_showing(&["a src/a.rs", "b src/b.rs"]);
     let submissions = host.deliver_one(screen_changed(pane, 0, 1));
-    let payload = candidate_payloads(&submissions).remove(0);
-    assert!(!payload.ends_with('\n'));
-    assert_eq!(payload.lines().count(), payload.split('\n').count());
+    let payload = submissions.iter().find_map(|submission| match &submission.intent {
+        ilium_plugin_sdk::types::Intent::Message(message) if message.channel == "candidates" => Some(&message.payload),
+        _ => None,
+    }).expect("candidate reply");
+    let reply: serde_json::Value = serde_json::from_slice(payload).expect("structured candidate reply");
+    assert_eq!(reply["instance"], 0);
+    assert_eq!(reply["sequence"], 0);
+    assert!(reply["candidates"].as_array().is_some());
 }
 
 /// REQ: F-065
@@ -238,6 +303,18 @@ fn feature_065_a_collect_contribution_to_recognisers_adds_matches() {
     assert!(lines.contains(&"ABC-123".to_string()), "{lines:?}");
 }
 
+#[test]
+fn an_empty_matching_recogniser_does_not_starve_a_later_contributor() {
+    let text = format!("{} Z#123", "b".repeat(1100));
+    let (mut host, pane) = host_showing(&[&text]);
+    host.contribute_entry_from("plugin.first", "ilium.core.smart-copy/recognisers", "empty",
+        r#"{"id":"empty","kind":"empty","regex":"a*","multiline":false,"label":"Empty"}"#);
+    host.contribute_entry_from("plugin.second", "ilium.core.smart-copy/recognisers", "ticket",
+        r#"{"id":"ticket","kind":"ticket","regex":"Z#[0-9]+","multiline":false,"label":"Ticket"}"#);
+    let lines = lines_of(&host.deliver_one(screen_changed(pane, 0, 0)));
+    assert!(lines.iter().any(|line| line == "Z#123"), "{lines:?}");
+}
+
 /// REQ: F-065
 #[test]
 fn feature_065_every_match_of_a_recogniser_is_offered_in_reading_order() {
@@ -248,9 +325,10 @@ fn feature_065_every_match_of_a_recogniser_is_offered_in_reading_order() {
         r#"{"id":"jira-key","kind":"ticket","regex":"[A-Z]+-[0-9]+","multiline":false,"label":"Jira key"}"#,
     );
     let lines = lines_of(&host.deliver_one(screen_changed(pane, 0, 1)));
+    let ticket = regex::Regex::new(r"\A[A-Z]+-[0-9]+\z").expect("valid ticket pattern");
     let tickets: Vec<&String> = lines
         .iter()
-        .filter(|line| line.contains('-') && !line.contains('/'))
+        .filter(|line| ticket.is_match(line))
         .collect();
     assert_eq!(tickets, ["ABC-1", "ABC-22", "DEF-3"]);
 }
@@ -274,12 +352,14 @@ fn feature_065_a_recogniser_with_an_invalid_regex_is_ignored_and_the_rest_still_
 fn feature_065_two_contributors_with_the_same_entry_id_both_contribute() {
     // EXT-049: equal ids from two plugins both stay.
     let (mut host, pane) = host_showing(&["AAA-1 and bbb#2"]);
-    host.contribute_entry(
+    host.contribute_entry_from(
+        "plugin.first",
         "ilium.core.smart-copy/recognisers",
         "ocean",
         r#"{"id":"ocean","kind":"a","regex":"[A-Z]{3}-[0-9]","multiline":false,"label":"A"}"#,
     );
-    host.contribute_entry(
+    host.contribute_entry_from(
+        "plugin.second",
         "ilium.core.smart-copy/recognisers",
         "ocean",
         r#"{"id":"ocean","kind":"b","regex":"[a-z]{3}#[0-9]","multiline":false,"label":"B"}"#,

@@ -82,6 +82,17 @@ fn port_copy_wide_and_combining_characters_stay_whole() {
     );
 }
 
+#[test]
+fn terminal_region_columns_follow_wide_and_combining_cells() {
+    for (row, expected_column) in [("漢 a/file.rs", 3), ("e\u{301} a/file.rs", 2)] {
+        let regions = ilium_plugin_core_smart_copy::regions::detect_regions(&[row.to_string()]);
+        let path = regions.iter().find(|region| region.text == "a/file.rs")
+            .expect("the file path is detected");
+        assert_eq!(path.spans[0].start_column, expected_column, "{row:?}");
+        assert_eq!(path.spans[0].end_column, expected_column + 8, "{row:?}");
+    }
+}
+
 /// REQ: PORT:ilium-client/src/smart_copy.rs::inline_code_requires_an_exact_backtick_run
 #[test]
 fn port_copy_inline_code_requires_an_exact_backtick_run() {
@@ -157,7 +168,7 @@ fn port_copy_model_reply_is_limited_to_three_distinct_lines_of_the_screen() {
         .reply_text("alpha beta\nalpha beta\ngamma\nextra\nfourth");
     host.deliver_one(palette_command("smart-copy", Some(pane)));
     host.settle();
-    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    let lines = candidate_lines(&deliver_candidates(&mut host, &[]));
     assert!(lines.len() <= 3, "{lines:?}");
     assert!(host.failures().is_empty());
 }
@@ -190,7 +201,7 @@ fn port_copy_the_frozen_screen_ignores_later_output() {
     host.terminal().set_rows(pane, &["frozen text"]);
     host.deliver_one(menu_command("smart-copy", pane, "smart-copy"));
     host.terminal().set_rows(pane, &["changed later"]);
-    host.deliver_one(candidates_message(&["frozen text"]));
+    deliver_candidates(&mut host, &["frozen text"]);
     host.deliver_one(key("1"));
     assert_eq!(host.clipboard().last_text().as_deref(), Some("frozen text"));
 }
@@ -317,7 +328,7 @@ fn port_copy_model_line_that_is_not_on_screen_is_rejected() {
     host.inference().reply_text("never on screen");
     host.deliver_one(palette_command("smart-copy", Some(pane)));
     host.settle();
-    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    let lines = candidate_lines(&deliver_candidates(&mut host, &[]));
     assert!(!lines.iter().any(|l| l == "never on screen"), "{lines:?}");
 }
 
@@ -336,7 +347,7 @@ fn port_copy_exact_model_repeat_appears_at_most_once() {
     host.inference().reply_text("gamma\ngamma");
     host.deliver_one(palette_command("smart-copy", Some(pane)));
     host.settle();
-    let lines = candidate_lines(&host.deliver_one(candidates_message(&[])));
+    let lines = candidate_lines(&deliver_candidates(&mut host, &[]));
     assert!(lines.iter().filter(|l| *l == "gamma").count() <= 1, "{lines:?}");
 }
 
@@ -375,7 +386,7 @@ fn port_copy_frozen_candidates_do_not_touch_the_clipboard_before_a_key() {
     let pane = add_terminal_pane(&mut host, "api");
     host.terminal().set_rows(pane, &["frozen text"]);
     host.deliver_one(menu_command("smart-copy", pane, "smart-copy"));
-    host.deliver_one(candidates_message(&["frozen text"]));
+    deliver_candidates(&mut host, &["frozen text"]);
     assert_eq!(host.clipboard().last_text().as_deref(), None);
 }
 

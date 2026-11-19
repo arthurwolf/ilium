@@ -167,7 +167,7 @@ A plugin that starts at boot costs time in every session. A plugin that starts o
 | Session convert | `command:ilium.core.session-convert/convert`, `service:convert` | `view:ilium.core.session-convert/progress` | Used on demand |
 | Sessions | `startup` | `view:ilium.core.sessions/list` | Offers the snapshot sections to the kernel writer |
 | Settings | none | `startup` | The Settings screen frame and the guided setup |
-| Smart copy | none | `command:ilium.core.smart-copy/smart-copy` | Starts on the copy gesture |
+| Smart copy | none | `command:ilium.core.smart-copy/smart-copy`, `command:ilium.core.smart-copy/copy`, `command:ilium.core.smart-copy/copy-path`, `command:ilium.core.smart-copy/transfer` | Starts on the copy gesture, the terminal menu entries and the picker command |
 | Terminal | `event:screen-changed` | `startup` | Links and the context menu need the first frame |
 | Text triggers | `startup` | `view:ilium.core.text-triggers/rules` | The output filter must be in place before the first byte |
 | Titles | `startup` | none | Triggers fire on agent events from the start |

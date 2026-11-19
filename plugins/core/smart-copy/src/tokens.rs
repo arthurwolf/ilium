@@ -129,6 +129,9 @@ pub fn path_is_plausible(path: &str) -> bool {
         return segments >= 2;
     }
     has_source_extension(path)
+        || (segments >= 2 && path.rsplit('/').next().is_some_and(|name| {
+            name.rsplit_once('.').is_some_and(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+        }))
         || path
             .split('/')
             .next()
@@ -140,11 +143,11 @@ pub fn path_kind_label(path: &str) -> String {
     format!("path {}", short(path))
 }
 
-/// A hash candidate has a digit and a letter and a git/sha length (7 to 12, 40 or 64).
+/// A hash candidate has a digit and a letter and an abbreviated or full git/sha length.
 pub fn is_plausible_hash(candidate: &str) -> bool {
     let has_digit = candidate.chars().any(|c| c.is_ascii_digit());
     let has_letter = candidate.chars().any(|c| c.is_ascii_alphabetic());
-    has_digit && has_letter && matches!(candidate.len(), 7..=12 | 40 | 64)
+    has_digit && has_letter && matches!(candidate.len(), 7..=40 | 64)
 }
 
 /// Number of ASCII digits in `text`.

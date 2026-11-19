@@ -29,6 +29,40 @@ fn sound_host() -> FakeHost {
     host
 }
 
+#[derive(Default)]
+struct StorageBatchProbe;
+
+impl NativeEntry for StorageBatchProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::host::{Bucket, Entry, HostStorage};
+        HostStorage::write_batch(&mut *ilium_plugin_sdk_core::host(), Bucket::Session, vec![
+            Entry { key: "old".into(), value: None },
+            Entry { key: "new".into(), value: Some(b"value".to_vec()) },
+        ])
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, _events: Vec<Event>) -> Vec<Submission> { Vec::new() }
+}
+
+#[test]
+fn native_storage_batch_replaces_values_atomically_and_reports_write_failure() {
+    use ilium_plugin_sdk_core::host::Bucket;
+    let mut host = FakeHost::new();
+    host.storage_mut().put(Bucket::Session, "old", b"original");
+    host.storage_mut().set_write_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    assert!(host.try_activate::<StorageBatchProbe>().is_err());
+    assert_eq!(host.storage().get(Bucket::Session, "old"), Some(b"original".to_vec()));
+    assert_eq!(host.storage().get(Bucket::Session, "new"), None);
+    host.storage_mut().set_write_error(None);
+    host.try_activate::<StorageBatchProbe>().expect("atomic batch succeeds after recovery");
+    assert_eq!(host.storage().get(Bucket::Session, "old"), None);
+    assert_eq!(host.storage().get(Bucket::Session, "new"), Some(b"value".to_vec()));
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Visit {
     Activate(u64),
@@ -148,7 +182,7 @@ fn native_events_oversized_reply_traps_drops_the_instance_and_admits_nothing() {
     with_clean_env(|| {
         let mut host = probe_host(&["sound.play"], vec![(1..=257).map(sound).collect()]);
         assert_fails_with("trap.submission-batch", || host.deliver(client_batch(1)));
-        assert_eq!(host.lifecycle_state(), InstanceState::Inactive);
+        assert_eq!(host.lifecycle_state(), InstanceState::RestartScheduled);
         assert!(host.submitted().is_empty());
         assert!(host.pending_requests().is_empty());
         assert!(host.outcomes().is_empty());
@@ -167,16 +201,17 @@ fn native_events_callback_panic_drops_non_send_instance_and_cancels_old_pending_
         let mut host = probe_host(&["sound.play"], vec![vec![sound_keyed(1, "pending")]]);
         host.deliver(client_batch(1));
         PANIC_EVENTS.with(|panic| *panic.borrow_mut() = true);
-        assert_fails_with("trap.panic", || host.deliver(client_batch(1)));
-        assert_eq!(host.lifecycle_state(), InstanceState::Inactive);
+        host.deliver(client_batch(1));
+        assert_eq!(host.lifecycle_state(), InstanceState::RestartScheduled);
         assert!(host.pending_requests().is_empty());
         assert_eq!(host.outcomes(), vec![Outcome::Cancelled]);
         assert_eq!(host.failures()[0].code, "trap.panic");
         assert!(visits().contains(&Visit::Drop(1)));
-        spy_reset();
-        assert_eq!(host.activate::<Spy>().instance, 2);
+        PANIC_EVENTS.with(|panic| *panic.borrow_mut() = false);
+        host.advance_clock(1_000);
         host.settle();
-        assert!(spy().batches.is_empty());
+        assert_eq!(host.lifecycle_state(), InstanceState::Active);
+        assert!(!visits().iter().any(|visit| matches!(visit, Visit::Events(2, _))));
     });
 }
 
@@ -490,6 +525,51 @@ fn native_events_single_revoke_uses_the_same_pending_request_revocation_boundary
 }
 
 #[test]
+fn native_events_revoking_attention_grant_fails_pending_attention_request() {
+    with_clean_env(|| {
+        use ilium_plugin_sdk_core::types::NodeId;
+        let request = Submission {
+            intent: Intent::AckAttention(NodeId(7)),
+            correlation: 1,
+            dedup_key: None,
+        };
+        let mut host = probe_host(&["tree.attention"], vec![vec![request]]);
+        host.deliver(client_batch(1));
+        host.revoke("tree.attention");
+        assert_eq!(host.outcomes().len(), 1);
+        assert_eq!(outcome_code(&host.outcomes()[0]), Some(ErrorCode::Revoked));
+        assert!(host.pending_requests().is_empty());
+    });
+}
+
+#[test]
+fn native_events_revocation_respects_remaining_scoped_grants() {
+    with_clean_env(|| {
+        use ilium_plugin_sdk_core::types::InvokeCommandSpec;
+        let request = Submission {
+            intent: Intent::InvokeCommand(InvokeCommandSpec {
+                command: "ilium.git/status".into(),
+                arguments_json: "{}".into(),
+            }),
+            correlation: 1,
+            dedup_key: None,
+        };
+        let mut host = probe_host(
+            &["commands.invoke:*", "commands.invoke:ilium.git/status"],
+            vec![vec![request]],
+        );
+        host.deliver(client_batch(1));
+        host.revoke("commands.invoke:*");
+        assert!(host.outcomes().is_empty());
+        assert_eq!(host.pending_requests(), vec![RequestRef::Submission(1)]);
+        host.revoke("commands.invoke:ilium.git/status");
+        assert_eq!(host.outcomes().len(), 1);
+        assert_eq!(outcome_code(&host.outcomes()[0]), Some(ErrorCode::Revoked));
+        assert!(host.pending_requests().is_empty());
+    });
+}
+
+#[test]
 fn native_events_grant_addition_keeps_old_pending_without_delivering_it_to_the_new_instance() {
     with_clean_env(|| {
         let mut host = probe_host(&["sound.play"], vec![vec![sound(1)]]);
@@ -585,6 +665,19 @@ fn native_events_configured_auto_outcome_does_not_bypass_shape_or_grant_refusal(
             Some(ErrorCode::NotPermitted)
         );
         assert!(matches!(host.outcomes()[0], Outcome::Refused(_)));
+    });
+}
+
+#[test]
+fn native_events_toast_requires_the_notification_grant() {
+    with_clean_env(|| {
+        spy_reset();
+        let mut host = FakeHost::new();
+        host.activate::<Spy>();
+        spy_script(vec![vec![Submission::new(Intent::DismissToast("notice".into()))]]);
+        host.deliver(client_batch(1));
+        host.settle();
+        assert_eq!(outcome_code(&host.outcomes()[0]), Some(ErrorCode::NotPermitted));
     });
 }
 
@@ -689,9 +782,528 @@ fn native_events_panicking_grant_deactivation_retires_the_preserved_pending_work
         assert_fails_with("deactivate callback panicked", || {
             host.grant_now("tree.read")
         });
-        assert_eq!(host.lifecycle_state(), InstanceState::Inactive);
+        assert_eq!(host.lifecycle_state(), InstanceState::RestartScheduled);
         assert!(host.pending_requests().is_empty());
         assert_eq!(host.outcomes(), vec![Outcome::Cancelled]);
         assert!(visits().contains(&Visit::Drop(1)));
+    });
+}
+
+thread_local! {
+    static FIRED_TIMERS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct TimerProbe;
+
+impl NativeEntry for TimerProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::HostTimers;
+        HostTimers::set(&mut *ilium_plugin_sdk_core::host(), 100, None)?;
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        for event in events {
+            if let Event::TimerFired(timer) = event {
+                FIRED_TIMERS.with(|fired| fired.borrow_mut().push(timer.0));
+            }
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn volatile_timer_fires_once_only_after_its_fake_clock_deadline() {
+    with_clean_env(|| {
+        FIRED_TIMERS.with(|fired| fired.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<TimerProbe>();
+        host.advance_clock(99);
+        assert!(FIRED_TIMERS.with(|fired| fired.borrow().is_empty()));
+        host.advance_clock(1);
+        assert_eq!(FIRED_TIMERS.with(|fired| fired.borrow().len()), 1);
+        host.advance_clock(100);
+        assert_eq!(FIRED_TIMERS.with(|fired| fired.borrow().len()), 1);
+    });
+}
+
+#[test]
+fn deactivation_cancels_the_old_instances_volatile_timers() {
+    with_clean_env(|| {
+        FIRED_TIMERS.with(|fired| fired.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<TimerProbe>();
+        host.advance_clock(50);
+        host.deactivate(DeactivationReason::Shutdown);
+        host.activate::<TimerProbe>();
+        host.advance_clock(50);
+        assert!(FIRED_TIMERS.with(|fired| fired.borrow().is_empty()));
+        host.advance_clock(50);
+        assert_eq!(FIRED_TIMERS.with(|fired| fired.borrow().len()), 1);
+    });
+}
+
+#[test]
+fn an_injected_timer_failure_is_returned_to_the_plugin_once() {
+    with_clean_env(|| {
+        let mut host = FakeHost::new();
+        host.inject_failure("timers.set", PluginError::new(ErrorCode::Internal, "timer unavailable"));
+        let error = match host.try_activate::<TimerProbe>() {
+            Ok(_) => panic!("the injected timer failure must refuse activation"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, ErrorCode::Internal);
+        host.try_activate::<TimerProbe>().expect("the one-shot failure is consumed");
+    });
+}
+
+#[derive(Default)]
+struct RepeatingTimerProbe;
+
+impl NativeEntry for RepeatingTimerProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::HostTimers;
+        HostTimers::set(&mut *ilium_plugin_sdk_core::host(), 50, Some(50))?;
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        use ilium_plugin_sdk_core::generated::host::HostTimers;
+        for event in events {
+            if let Event::TimerFired(timer) = event {
+                let count = FIRED_TIMERS.with(|fired| {
+                    let mut fired = fired.borrow_mut();
+                    fired.push(timer.0);
+                    fired.len()
+                });
+                if count == 2 {
+                    HostTimers::cancel(&mut *ilium_plugin_sdk_core::host(), timer);
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn repeating_timer_can_cancel_itself_during_a_clock_advance() {
+    with_clean_env(|| {
+        FIRED_TIMERS.with(|fired| fired.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<RepeatingTimerProbe>();
+        host.advance_clock(250);
+        assert_eq!(FIRED_TIMERS.with(|fired| fired.borrow().len()), 2);
+        assert!(host.active_timers().is_empty());
+    });
+}
+
+thread_local! {
+    static DURABLE_BATCHES: RefCell<Vec<Vec<String>>> = const { RefCell::new(Vec::new()) };
+    static DURABLE_LATENESS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct DurableTimerProbe;
+
+#[derive(Default)]
+struct RestartTimerProbe;
+
+impl NativeEntry for RestartTimerProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::host::{HostClock, HostTimers};
+        use ilium_plugin_sdk_core::types::EpochMs;
+        if activation.instance == 1 {
+            let mut api = ilium_plugin_sdk_core::host();
+            let now = HostClock::now_unix_millis(&mut *api);
+            HostTimers::at(&mut *api, EpochMs(now + 1_500), "after-restart".into())?;
+        }
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        for event in events {
+            if let Event::DurableTimerFired(timer) = event {
+                DURABLE_BATCHES.with(|batches| batches.borrow_mut().push(vec![timer.name]));
+            }
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn clock_advance_delivers_durable_timer_after_scheduled_restart() {
+    with_clean_env(|| {
+        DURABLE_BATCHES.with(|batches| batches.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<RestartTimerProbe>();
+        host.inject_trap("trap.deadline");
+        host.deliver(client_batch(1));
+        assert_eq!(host.lifecycle_state(), InstanceState::RestartScheduled);
+        host.advance_clock(2_000);
+        assert_eq!(host.lifecycle_state(), InstanceState::Active);
+        assert_eq!(DURABLE_BATCHES.with(|batches| batches.borrow().clone()), vec![vec!["after-restart".to_string()]]);
+    });
+}
+
+impl NativeEntry for DurableTimerProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::{HostClock, HostTimers};
+        use ilium_plugin_sdk_core::types::EpochMs;
+        let mut host = ilium_plugin_sdk_core::host();
+        let now = HostClock::now_unix_millis(&mut *host);
+        HostTimers::at(&mut *host, EpochMs(now + 100), "later".into())?;
+        HostTimers::at(&mut *host, EpochMs(now + 50), "first".into())?;
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        use ilium_plugin_sdk_core::generated::host::{HostClock, HostTimers};
+        use ilium_plugin_sdk_core::types::EpochMs;
+        let mut names = Vec::new();
+        for event in events {
+            if let Event::DurableTimerFired(timer) = event {
+                if timer.name == "first" {
+                    let mut host = ilium_plugin_sdk_core::host();
+                    let now = HostClock::now_unix_millis(&mut *host);
+                    HostTimers::at(&mut *host, EpochMs(now + 50), "rearmed".into())
+                        .expect("rearming a valid timer succeeds");
+                }
+                names.push(timer.name);
+            }
+        }
+        if !names.is_empty() {
+            DURABLE_BATCHES.with(|batches| batches.borrow_mut().push(names));
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn durable_timers_fire_in_deadline_batches_and_rearm_inside_advanced_time() {
+    with_clean_env(|| {
+        DURABLE_BATCHES.with(|batches| batches.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<DurableTimerProbe>();
+        host.advance_clock(100);
+        DURABLE_BATCHES.with(|batches| {
+            assert_eq!(*batches.borrow(), vec![vec!["first"], vec!["later", "rearmed"]]);
+        });
+        assert!(host.durable_timers().is_empty());
+    });
+}
+
+#[derive(Default)]
+struct MixedTimerProbe;
+
+impl NativeEntry for MixedTimerProbe {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::{HostClock, HostTimers};
+        use ilium_plugin_sdk_core::types::EpochMs;
+        let mut host = ilium_plugin_sdk_core::host();
+        let now = HostClock::now_unix_millis(&mut *host);
+        HostTimers::set(&mut *host, 100, None)?;
+        HostTimers::at(&mut *host, EpochMs(now + 100), "durable".into())?;
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        let kinds: Vec<String> = events.into_iter().filter_map(|event| match event {
+            Event::TimerFired(_) => Some("volatile".to_string()),
+            Event::DurableTimerFired(timer) => {
+                DURABLE_LATENESS.with(|lateness| lateness.borrow_mut().push(timer.late_by_millis));
+                Some("durable".to_string())
+            }
+            _ => None,
+        }).collect();
+        if !kinds.is_empty() {
+            DURABLE_BATCHES.with(|batches| batches.borrow_mut().push(kinds));
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn volatile_and_durable_timers_with_the_same_deadline_share_one_batch() {
+    with_clean_env(|| {
+        DURABLE_BATCHES.with(|batches| batches.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<MixedTimerProbe>();
+        host.advance_clock(100);
+        DURABLE_BATCHES.with(|batches| {
+            assert_eq!(*batches.borrow(), vec![vec!["volatile", "durable"]]);
+        });
+    });
+}
+
+#[test]
+fn timers_overdue_after_setting_the_clock_do_not_move_time_backwards() {
+    with_clean_env(|| {
+        DURABLE_LATENESS.with(|lateness| lateness.borrow_mut().clear());
+        let mut host = FakeHost::new();
+        host.activate::<MixedTimerProbe>();
+        let target = host.clock().now() + 250;
+        host.set_clock(target);
+        host.advance_clock(0);
+        assert_eq!(host.clock().now(), target);
+        DURABLE_LATENESS.with(|lateness| assert_eq!(*lateness.borrow(), vec![150]));
+    });
+}
+
+#[derive(Default)]
+struct RearmWithoutProgress;
+
+impl NativeEntry for RearmWithoutProgress {
+    const SIDE: &'static str = "server";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::{HostClock, HostTimers};
+        use ilium_plugin_sdk_core::types::EpochMs;
+        let mut host = ilium_plugin_sdk_core::host();
+        let now = HostClock::now_unix_millis(&mut *host);
+        HostTimers::at(&mut *host, EpochMs(now), "loop".into())?;
+        Ok(())
+    }
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, _events: Vec<Event>) -> Vec<Submission> {
+        self.native_activate(Activation::default()).unwrap();
+        Vec::new()
+    }
+}
+
+#[test]
+fn timers_rearmed_without_clock_progress_fail_boundedly() {
+    with_clean_env(|| {
+        let mut host = FakeHost::new();
+        host.activate::<RearmWithoutProgress>();
+        assert_fails_with(codes::SETTLE_LIMIT, || host.advance_clock(0));
+    });
+}
+
+thread_local! {
+    static LISTED_PLUGINS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
+    static PLUGIN_MUTATION_RESULTS: RefCell<Vec<Outcome>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct PluginRegistryProbe;
+
+impl NativeEntry for PluginRegistryProbe {
+    const SIDE: &'static str = "client";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::HostPlugins;
+        let plugins = HostPlugins::list(&mut *ilium_plugin_sdk_core::host());
+        LISTED_PLUGINS.with(|listed| {
+            *listed.borrow_mut() = plugins.into_iter().map(|plugin| (plugin.id.0, plugin.enabled)).collect();
+        });
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn native_on_events(&mut self, _events: Vec<Event>) -> Vec<Submission> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn native_plugin_registry_import_reads_the_seeded_fake_registry() {
+    with_clean_env(|| {
+        LISTED_PLUGINS.with(|listed| listed.borrow_mut().clear());
+        let mut host = FakeHost::new().side("client").grant("plugins.manage");
+        host.plugins().add_simple("example.notes", "Notes", true);
+        host.activate::<PluginRegistryProbe>();
+        LISTED_PLUGINS.with(|listed| {
+            assert_eq!(*listed.borrow(), vec![("example.notes".to_string(), true)]);
+        });
+    });
+}
+
+#[derive(Default)]
+struct PluginMutationProbe;
+
+impl NativeEntry for PluginMutationProbe {
+    const SIDE: &'static str = "client";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::HostPlugins;
+        use ilium_plugin_sdk_core::types::PluginId;
+        HostPlugins::set_enabled(&mut *ilium_plugin_sdk_core::host(), PluginId("example.notes".into()), false, "global".into())?;
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        for event in events {
+            if let Event::RequestCompleted(result) = event {
+                PLUGIN_MUTATION_RESULTS.with(|results| results.borrow_mut().push(result.outcome));
+            }
+        }
+        Vec::new()
+    }
+}
+
+#[test]
+fn native_plugin_registry_mutation_refusal_preserves_state_and_allows_retry() {
+    with_clean_env(|| {
+        PLUGIN_MUTATION_RESULTS.with(|results| results.borrow_mut().clear());
+        let mut host = FakeHost::new().side("client").grant("plugins.manage");
+        host.plugins().add_simple("example.notes", "Notes", true);
+        host.plugins().fail_next_set_enabled(PluginError::new(ErrorCode::Io, "cannot save"));
+        host.try_activate::<PluginMutationProbe>().unwrap();
+        host.settle();
+        PLUGIN_MUTATION_RESULTS.with(|results| assert!(matches!(&results.borrow()[..], [Outcome::Failed(error)] if error.code == ErrorCode::Io)));
+        host.deactivate(DeactivationReason::Shutdown);
+        host.try_activate::<PluginRegistryProbe>().unwrap();
+        LISTED_PLUGINS.with(|listed| assert_eq!(*listed.borrow(), vec![("example.notes".into(), true)]));
+        host.deactivate(DeactivationReason::Shutdown);
+        host.try_activate::<PluginMutationProbe>().unwrap();
+        host.settle();
+        PLUGIN_MUTATION_RESULTS.with(|results| assert!(matches!(&results.borrow()[..], [Outcome::Failed(_), Outcome::Ok])));
+        assert_eq!(host.plugins().set_enabled_calls(), vec![("example.notes".into(), false), ("example.notes".into(), false)]);
+        host.deactivate(DeactivationReason::Shutdown);
+        host.try_activate::<PluginRegistryProbe>().unwrap();
+        LISTED_PLUGINS.with(|listed| assert_eq!(*listed.borrow(), vec![("example.notes".into(), false)]));
+    });
+}
+
+thread_local! {
+    static CLIPBOARD_RESULTS: RefCell<Vec<Result<(), ErrorCode>>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct ClipboardBoundaryProbe;
+
+impl NativeEntry for ClipboardBoundaryProbe {
+    const SIDE: &'static str = "client";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::generated::host::HostClipboard;
+        let mut api = ilium_plugin_sdk_core::host();
+        let inputs = ["\u{1b}".to_string(), "x".repeat(1_048_577), "first".into(), "second".into()];
+        let results = inputs.into_iter().map(|text| HostClipboard::write_text(&mut *api, text).map_err(|error| error.code)).collect();
+        CLIPBOARD_RESULTS.with(|saved| *saved.borrow_mut() = results);
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, _events: Vec<Event>) -> Vec<Submission> { Vec::new() }
+}
+
+#[test]
+fn native_clipboard_checks_grants_and_validation_before_consuming_failure() {
+    with_clean_env(|| {
+        let mut denied = FakeHost::new().side("client");
+        denied.activate::<ClipboardBoundaryProbe>();
+        CLIPBOARD_RESULTS.with(|results| assert!(results.borrow().iter().all(|result| *result == Err(ErrorCode::NotPermitted))));
+        assert_eq!(denied.clipboard().last_text(), None);
+        denied.deactivate(DeactivationReason::Shutdown);
+
+        let mut host = FakeHost::new().side("client").grant("clipboard.write");
+        host.clipboard().fail_next_write("unavailable");
+        host.activate::<ClipboardBoundaryProbe>();
+        CLIPBOARD_RESULTS.with(|results| assert_eq!(*results.borrow(), vec![Err(ErrorCode::InvalidArgument), Err(ErrorCode::InvalidArgument), Err(ErrorCode::Io), Ok(())]));
+        assert_eq!(host.clipboard().last_text().as_deref(), Some("second"));
+    });
+}
+
+thread_local! {
+    static SELECTION_RESULTS: RefCell<Vec<Option<String>>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct TerminalSelectionProbe;
+
+impl NativeEntry for TerminalSelectionProbe {
+    const SIDE: &'static str = "client";
+    const EXPORTS: &'static [&'static str] = &["lifecycle", "handler"];
+
+    fn native_activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        use ilium_plugin_sdk_core::primitives::HostTerminal;
+        use ilium_plugin_sdk_core::types::NodeId;
+        let mut api = ilium_plugin_sdk_core::host();
+        let results = [77, 78, 79].into_iter().map(|pane| {
+            HostTerminal::get_selection(&mut *api, NodeId(pane)).map(|selection| selection.text)
+        }).collect();
+        SELECTION_RESULTS.with(|saved| *saved.borrow_mut() = results);
+        Ok(())
+    }
+
+    fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> { None }
+    fn native_on_events(&mut self, _events: Vec<Event>) -> Vec<Submission> { Vec::new() }
+}
+
+#[test]
+fn native_terminal_selection_respects_grants_and_pane_identity() {
+    use ilium_plugin_sdk_core::primitives::terminal::Selection;
+    use ilium_plugin_sdk_core::types::NodeClass;
+    use ilium_plugin_testkit::TreeNode;
+
+    with_clean_env(|| {
+        for granted in [false, true] {
+            let mut host = FakeHost::new().side("client");
+            if granted { host = host.grant("terminal.read-screen"); }
+            host.tree().add_with_id(TreeNode {
+                id: 77, parent: None, name: "terminal".into(), class: NodeClass::Pane,
+                content_kind: Some("ilium.terminal".into()), agent: None,
+            });
+            host.tree().add_with_id(TreeNode {
+                id: 79, parent: None, name: "custom terminal".into(), class: NodeClass::Pane,
+                content_kind: Some("example.custom-terminal".into()), agent: None,
+            });
+            host.terminal().set_selection(77, Selection {
+                first_row: 0, first_column: 0, last_row: 1, last_column: 4,
+                text: "first\nsecond".into(),
+            });
+            host.terminal().set_selection(79, Selection {
+                first_row: 0, first_column: 0, last_row: 0, last_column: 5,
+                text: "custom".into(),
+            });
+            host.activate::<TerminalSelectionProbe>();
+            SELECTION_RESULTS.with(|results| assert_eq!(
+                *results.borrow(),
+                vec![granted.then(|| "first\nsecond".to_string()), None,
+                    granted.then(|| "custom".to_string())]
+            ));
+        }
     });
 }

@@ -96,7 +96,7 @@ fn manifest_050_declares_both_sides_with_their_worlds() {
     );
     assert_eq!(
         manifest["client"],
-        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views", "menu-provider"]})
     );
 }
 
@@ -105,7 +105,13 @@ fn manifest_050_declares_both_sides_with_their_worlds() {
 fn manifest_050_server_reads_cells_and_the_screen_and_may_infer() {
     assert_eq!(
         grants("server"),
-        ["terminal.read-cells", "terminal.read-screen", "inference"]
+        [
+            "terminal.read-cells",
+            "terminal.read-screen",
+            "inference",
+            "extensions.provide:ilium.core.smart-copy/recognisers",
+            "extensions.provide:ilium.core.smart-copy/after-copy"
+        ]
     );
 }
 
@@ -115,10 +121,15 @@ fn manifest_050_client_reads_the_screen_claims_the_pointer_writes_the_clipboard_
     assert_eq!(
         grants("client"),
         [
+            "tree.read",
+            "panes.read",
             "terminal.read-screen",
             "terminal.pointer",
             "clipboard.write",
-            "inference"
+            "inference",
+            "extensions.provide:ilium.core.smart-copy/after-copy",
+            "settings.read-kernel:user-interface",
+            "settings.read-kernel:terminal"
         ]
     );
 }
@@ -155,7 +166,12 @@ fn manifest_050_activation_is_the_command_trigger_of_the_boot_table() {
     let manifest = manifest();
     assert_eq!(
         manifest["activation"],
-        json!(["command:ilium.core.smart-copy/smart-copy"])
+        json!([
+            "command:ilium.core.smart-copy/smart-copy",
+            "command:ilium.core.smart-copy/copy",
+            "command:ilium.core.smart-copy/copy-path",
+            "command:ilium.core.smart-copy/transfer"
+        ])
     );
     let boot = manual_page("reference-kernel-and-boot.md");
     let row = boot
@@ -163,7 +179,7 @@ fn manifest_050_activation_is_the_command_trigger_of_the_boot_table() {
         .find(|line| line.starts_with("| Smart copy |"))
         .expect("boot table row");
     assert!(!row.contains("service:copy"));
-    assert!(row.contains("`command:smart-copy`"));
+    assert!(row.contains("`command:ilium.core.smart-copy/smart-copy`"));
 }
 
 /// REQ: COR-050

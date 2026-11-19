@@ -157,7 +157,7 @@ fn security_293_page_security_section_points_to_the_corrected_table() {
 fn feature_066_example_hook_contribution_uses_the_after_copy_point_and_the_hook_handler_export() {
     let page = page_text();
     assert!(page.contains("\"point\": \"ilium.core.smart-copy/after-copy\""));
-    assert!(page.contains("\"exports\": [\n    \"hook-handler\"\n  ]"));
+    assert!(page.contains("\"exports\": [\"hook-handler\"]"));
     assert!(page.contains("extensions.contribute:ilium.core.smart-copy/after-copy"));
     assert!(page.contains("// call.payload_json holds: text, kind, pane"));
 }

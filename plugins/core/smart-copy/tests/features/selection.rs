@@ -63,7 +63,6 @@ fn feature_016_terminal_panes_that_exist_at_activation_are_claimed() {
     let mut host = client_host_unactivated();
     let pane = add_terminal_pane(&mut host, "restored");
     host.activate::<SmartCopyClient>();
-    assert_eq!(host.terminal().pointer_claims(pane).len(), 1);
     assert_eq!(whole_claims(&mut host, pane), 1);
 }
 

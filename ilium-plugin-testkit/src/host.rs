@@ -272,6 +272,8 @@ const GRANT_CATALOGUE: &[&str] = &[
     "audio.loopback",
     "cli.contribute",
     "clipboard",
+    "clipboard.read",
+    "clipboard.write",
     "commands.invoke",
     "editor.edit",
     "editor.provide",
@@ -338,6 +340,7 @@ const GRANT_CATALOGUE: &[&str] = &[
 /// Host import families `inject_failure` accepts (DEV-494).
 const IMPORT_FAMILIES: &[&str] = &[
     "storage",
+    "timers",
     "fs",
     "process",
     "http",
@@ -433,15 +436,6 @@ fn event_name(event: &Event) -> String {
     }
 }
 
-/// The grant an intent needs on top of being declared (DEV-433). Other intents are treated as permitted.
-fn intent_grant(intent: &Intent) -> Option<&'static str> {
-    match intent {
-        Intent::PlaySound(_) => Some("sound.play"),
-        Intent::CloseNode(_) => Some("tree.write"),
-        _ => None,
-    }
-}
-
 /// Decodes standard base64 (with or without padding); `None` for any other character.
 pub(crate) fn decode_base64(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::new();
@@ -493,6 +487,7 @@ trait ErasedPlugin {
     fn run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>>;
     fn handle_service(&mut self, call: ServiceCall) -> Option<ServiceReply>;
     fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>>;
+    fn menu_items(&mut self, context: MenuContext) -> Option<Vec<MenuEntry>>;
     fn render(&mut self, view: ViewTarget, area: Area) -> Option<UiTree>;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -518,6 +513,9 @@ impl<P: NativeEntry + 'static> ErasedPlugin for NativeWrapper<P> {
     fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>> {
         self.0.native_handle_hook(call)
     }
+    fn menu_items(&mut self, context: MenuContext) -> Option<Vec<MenuEntry>> {
+        self.0.native_menu_items(context)
+    }
     fn render(&mut self, view: ViewTarget, area: Area) -> Option<UiTree> {
         self.0.native_render(view, area)
     }
@@ -532,10 +530,15 @@ type PluginFactory = Box<dyn Fn() -> Box<dyn ErasedPlugin>>;
 #[derive(Debug, Clone)]
 struct PendingRequest {
     correlation: u64,
-    needed_grant: Option<&'static str>,
+    instance: u64,
+    order: usize,
+    dedup_key: Option<String>,
+    canonical: ilium_plugin_api::generated::types::intents::Submission,
     fixed: Option<Outcome>,
+    auto_outcome: Option<Outcome>,
     /// The sound name when the intent is `play-sound`.
     sound: Option<String>,
+    records_input: bool,
 }
 
 mod bridge;
@@ -585,7 +588,7 @@ pub struct FakeHost {
     factory: Opaque<Option<PluginFactory>>,
     submitted: Vec<Submission>,
     pending: Vec<PendingRequest>,
-    outcomes: Vec<Outcome>,
+    outcomes: Vec<(usize, Outcome)>,
     auto_outcome: Option<Outcome>,
     played_sounds: Vec<String>,
     dedup: BTreeMap<String, (u64, u64)>,
@@ -1020,12 +1023,15 @@ impl FakeHost {
         let mut plugin: Box<dyn ErasedPlugin> = Box::new(NativeWrapper(P::default()));
         self.instance += 1;
         self.state = InstanceState::Activating;
+        self.outbox.borrow_mut().clear();
         let activation = self.build_activation(None);
         let activated = {
             let _bridge = bridge::enter(self);
             plugin.activate(activation)
         };
         if let Err(error) = activated {
+            self.bridge.timers.clear();
+            self.outbox.borrow_mut().clear();
             self.state = InstanceState::Failed;
             return Err(error);
         }
@@ -1051,9 +1057,8 @@ impl FakeHost {
         }
     }
 
-    /// Replaces the outbox by a `tree-changed` replay when the plugin can read a non-empty tree.
+    /// Queues a `tree-changed` replay when the plugin can read a non-empty tree.
     fn replay_tree(&mut self) {
-        self.outbox.borrow_mut().clear();
         if !self.granted.contains("tree.read") {
             return;
         }
@@ -1087,6 +1092,9 @@ impl FakeHost {
             let _bridge = bridge::enter(self);
             plugin.deactivate(reason)
         };
+        self.cancel_pending();
+        self.outbox.borrow_mut().clear();
+        self.bridge.timers.clear();
         self.state = InstanceState::Stopped;
         bytes
     }
@@ -1116,6 +1124,7 @@ impl FakeHost {
         if self.plugin.0.is_none() {
             return Vec::new();
         }
+        let empty_batch = events.is_empty();
         let mut accepted = Vec::new();
         for event in events {
             let allowed = match event_grants(&event) {
@@ -1131,7 +1140,7 @@ impl FakeHost {
                 });
             }
         }
-        if accepted.is_empty() {
+        if accepted.is_empty() && !empty_batch {
             return Vec::new();
         }
         if let Some(code) = self.pending_trap.take() {
@@ -1161,6 +1170,7 @@ impl FakeHost {
     /// Checks a batch of submissions (dedup keys, grants) and queues them as pending requests.
     fn admit_submissions(&mut self, submissions: Vec<Submission>) -> Vec<Submission> {
         if submissions.len() > MAX_BATCH_EVENTS {
+            self.record_failure("trap.submission-batch", "the plugin returned too many submissions");
             fail(
                 "trap.submission-batch",
                 &format!("{} submissions in one batch", submissions.len()),
@@ -1169,37 +1179,26 @@ impl FakeHost {
         if submissions.is_empty() {
             return submissions;
         }
-        let mut verdicts: Vec<Option<Outcome>> = Vec::with_capacity(submissions.len());
+        let canonical: Vec<ilium_plugin_api::generated::types::intents::Submission> = submissions.iter()
+            .map(|submission| delivery::wire_convert(submission).unwrap_or_else(|error| fail(&error.code, &error.message)))
+            .collect();
+        let held = delivery::held_grants(&self.granted).unwrap_or_else(|error| fail(&error.code, &error.message));
+        let refusals = ilium_plugin_api::submission::batch_refusals(&canonical, &self.plugin_id, &held);
+        let mut verdicts: Vec<Option<Outcome>> = refusals.iter()
+            .map(|error| delivery::wire_convert::<_, Option<PluginError>>(error)
+                .unwrap_or_else(|error| fail(&error.code, &error.message)).map(Outcome::Refused))
+            .collect();
         let mut seen_in_batch: BTreeMap<String, u64> = BTreeMap::new();
-        let mut first_refused: Option<usize> = None;
-        for (index, submission) in submissions.iter().enumerate() {
-            let mut verdict = None;
-            if let Some(key) = &submission.dedup_key {
-                let valid = !key.is_empty()
-                    && key.chars().count() <= 128
-                    && key.chars().all(|character| {
-                        character.is_ascii_alphanumeric() || "._:/-".contains(character)
-                    });
-                if !valid {
-                    verdict = Some(Outcome::Refused(PluginError::new(
-                        ErrorCode::InvalidArgument,
-                        format!("dedup-key-invalid: {key}"),
-                    )));
-                } else if let Some(first) = seen_in_batch.get(key) {
-                    verdict = Some(Outcome::Duplicate(RequestRef::Submission(*first)));
-                } else if let Some((at_ms, first)) = self.dedup.get(key) {
-                    if self.now_ms.saturating_sub(*at_ms) <= DEDUP_WINDOW_MS {
-                        verdict = Some(Outcome::Duplicate(RequestRef::Submission(*first)));
-                    }
-                }
+        for (submission, verdict) in submissions.iter().zip(verdicts.iter_mut()) {
+            if verdict.is_some() {
+                continue;
             }
-            if verdict.is_none() {
-                if let Some(grant) = intent_grant(&submission.intent) {
-                    if !self.granted.contains(grant) {
-                        verdict = Some(Outcome::Refused(PluginError::new(
-                            ErrorCode::NotPermitted,
-                            format!("the {grant} grant is not held"),
-                        )));
+            if let Some(key) = &submission.dedup_key {
+                if let Some(first) = seen_in_batch.get(key) {
+                    *verdict = Some(Outcome::Duplicate(RequestRef::Submission(*first)));
+                } else if let Some((at_ms, first)) = self.dedup.get(key) {
+                    if self.now_ms.saturating_sub(*at_ms) < DEDUP_WINDOW_MS {
+                        *verdict = Some(Outcome::Duplicate(RequestRef::Submission(*first)));
                     }
                 }
             }
@@ -1208,22 +1207,8 @@ impl FakeHost {
                     seen_in_batch.insert(key.clone(), submission.correlation);
                 }
             }
-            if matches!(verdict, Some(Outcome::Refused(_))) && first_refused.is_none() {
-                first_refused = Some(index);
-            }
-            verdicts.push(verdict);
         }
-        if let Some(lowest) = first_refused {
-            for (index, verdict) in verdicts.iter_mut().enumerate() {
-                if !matches!(verdict, Some(Outcome::Refused(_))) {
-                    let _ = index;
-                    *verdict = Some(Outcome::Refused(PluginError::new(
-                        ErrorCode::Cancelled,
-                        format!("batch refused: submission {lowest}"),
-                    )));
-                }
-            }
-        } else {
+        if !verdicts.iter().any(|verdict| matches!(verdict, Some(Outcome::Refused(_)))) {
             for (submission, verdict) in submissions.iter().zip(verdicts.iter()) {
                 if let (Some(key), None) = (&submission.dedup_key, verdict) {
                     self.dedup
@@ -1231,15 +1216,11 @@ impl FakeHost {
                 }
             }
         }
-        for (submission, verdict) in submissions.iter().zip(verdicts) {
-            let needed_grant = if verdict.is_none() {
-                intent_grant(&submission.intent)
-            } else {
-                None
-            };
+        for ((submission, canonical), verdict) in submissions.iter().zip(canonical).zip(verdicts) {
             self.call_order
                 .calls
                 .push(format!("submission:{}", submission.correlation));
+            let order = self.submitted.len();
             self.submitted.push(submission.clone());
             let sound = match &submission.intent {
                 Intent::PlaySound(name) => Some(name.clone()),
@@ -1247,9 +1228,14 @@ impl FakeHost {
             };
             self.pending.push(PendingRequest {
                 correlation: submission.correlation,
-                needed_grant,
+                instance: self.instance,
+                order,
+                dedup_key: submission.dedup_key.clone(),
+                canonical,
                 fixed: verdict,
+                auto_outcome: self.auto_outcome.clone(),
                 sound,
+                records_input: matches!(&submission.intent, Intent::SendInput(_)),
             });
         }
         submissions
@@ -1269,6 +1255,9 @@ impl FakeHost {
             message: message.to_string(),
         });
         self.plugin.0 = None;
+        self.cancel_pending();
+        self.outbox.borrow_mut().clear();
+        self.bridge.timers.clear();
         self.rendered.clear();
         let count = self.failures.len();
         match RESTART_DELAYS_MS.get(count.saturating_sub(1)) {
@@ -1314,6 +1303,7 @@ impl FakeHost {
         self.instance += 1;
         self.state = InstanceState::Activating;
         self.restored = restored.clone();
+        self.outbox.borrow_mut().clear();
         let activation = self.build_activation(restored);
         let activated = {
             let _bridge = bridge::enter(self);
@@ -1375,29 +1365,39 @@ impl FakeHost {
         let pending = std::mem::take(&mut self.pending);
         let mut events = Vec::new();
         for request in pending {
-            let defaulted = request.fixed.is_none() && self.auto_outcome.is_none();
+            let defaulted = request.fixed.is_none() && request.auto_outcome.is_none();
             let outcome = request
                 .fixed
-                .or_else(|| self.auto_outcome.clone())
-                .unwrap_or(Outcome::Ok);
+                .or(request.auto_outcome)
+                .unwrap_or_else(|| {
+                    if request.sound.is_some() || request.records_input {
+                        Outcome::Ok
+                    } else {
+                        Outcome::Failed(PluginError::new(ErrorCode::Unsupported, "native fake effect is not implemented"))
+                    }
+                });
             if defaulted {
                 if let Some(name) = request.sound {
                     // The sound fake records the effect instead of touching host audio.
                     self.played_sounds.push(name);
                 }
             }
-            self.outcomes.push(outcome.clone());
-            events.push(Event::RequestCompleted(RequestResult {
-                request: RequestRef::Submission(request.correlation),
-                outcome,
-            }));
+            self.outcomes.push((request.order, outcome.clone()));
+            if request.instance == self.instance {
+                events.push(Event::RequestCompleted(RequestResult {
+                    request: RequestRef::Submission(request.correlation),
+                    outcome,
+                }));
+            }
         }
         events
     }
 
     /// Outcomes completed so far, in submission order.
     pub fn outcomes(&self) -> Vec<Outcome> {
-        self.outcomes.clone()
+        let mut outcomes = self.outcomes.clone();
+        outcomes.sort_by_key(|(order, _)| *order);
+        outcomes.into_iter().map(|(_, outcome)| outcome).collect()
     }
 
     /// Every submission the plugin made, in order.
@@ -1415,12 +1415,23 @@ impl FakeHost {
 
     /// Completes a pending request with an outcome.
     pub fn complete(&mut self, request: RequestRef, outcome: Outcome) {
-        self.pending
-            .retain(|pending| RequestRef::Submission(pending.correlation) != request);
-        self.outcomes.push(outcome.clone());
-        self.outbox
-            .borrow_mut()
-            .push(Event::RequestCompleted(RequestResult { request, outcome }));
+        let Some(index) = self.pending.iter().position(|pending| RequestRef::Submission(pending.correlation) == request) else {
+            fail(codes::REQUEST_NOT_PENDING, "the request is not pending");
+        };
+        let pending = self.pending.remove(index);
+        if pending.fixed.is_none() && matches!(outcome, Outcome::Refused(_)) {
+            if let Some(key) = pending.dedup_key {
+                if self.dedup.get(&key).is_some_and(|(_, first)| *first == pending.correlation) {
+                    self.dedup.remove(&key);
+                }
+            }
+        }
+        self.outcomes.push((pending.order, outcome.clone()));
+        if pending.instance == self.instance {
+            self.outbox
+                .borrow_mut()
+                .push(Event::RequestCompleted(RequestResult { request, outcome }));
+        }
     }
 
     /// Sounds applied to the deterministic sound fake at `settle`; this never plays host audio.
@@ -1570,14 +1581,15 @@ impl FakeHost {
     }
 
     /// Menu entries the plugin contributes for a context.
-    pub fn menu_items(&mut self, _context: MenuContext) -> Vec<MenuEntry> {
-        Vec::new()
+    pub fn menu_items(&mut self, context: MenuContext) -> Vec<MenuEntry> {
+        self.call_plugin(|plugin| plugin.menu_items(context))
+            .flatten()
+            .unwrap_or_default()
     }
 
     /// Cancels every pending request.
     pub fn cancel_pending(&mut self) {
-        let pending = std::mem::take(&mut self.pending);
-        for request in pending {
+        while let Some(request) = self.pending.first() {
             self.complete(
                 RequestRef::Submission(request.correlation),
                 Outcome::Cancelled,
@@ -1592,9 +1604,64 @@ impl FakeHost {
         FakeClock::at(self.now_ms)
     }
 
-    /// Moves the clock forward; restarts run at the next `settle` (DEV-491).
+    /// Moves the clock forward, delivering due timers in deadline order.
     pub fn advance_clock(&mut self, ms: u64) {
-        self.now_ms = self.now_ms.saturating_add(ms);
+        let target = self.now_ms.saturating_add(ms);
+        let mut previous_delivery_time = None;
+        let mut same_time_deliveries = 0usize;
+        loop {
+            if self.plugin.0.is_none() {
+                let Some(restart_at) = self.restart_due.filter(|due| *due <= target) else {
+                    break;
+                };
+                self.now_ms = self.now_ms.max(restart_at);
+                self.fs.set_now(self.now_ms);
+                if !self.perform_due_restart() {
+                    break;
+                }
+                continue;
+            }
+            let Some(due) = self.bridge.timers.values().map(|timer| timer.due)
+                .chain(self.bridge.durable.values().map(|timer| timer.due))
+                .min().filter(|due| *due <= target) else { break };
+            self.now_ms = self.now_ms.max(due);
+            if previous_delivery_time == Some(self.now_ms) {
+                same_time_deliveries += 1;
+                if same_time_deliveries > SETTLE_ROUNDS * 16 {
+                    fail(codes::SETTLE_LIMIT, "timers repeatedly rearmed without advancing the clock");
+                }
+            } else {
+                previous_delivery_time = Some(self.now_ms);
+                same_time_deliveries = 1;
+            }
+            self.fs.set_now(self.now_ms);
+            let ids: Vec<u64> = self.bridge.timers.iter().filter_map(|(id, timer)| (timer.due == due).then_some(*id)).collect();
+            let names: Vec<String> = self.bridge.durable.iter()
+                .filter_map(|(name, timer)| (timer.due == due).then_some(name.clone())).collect();
+            let mut events = Vec::with_capacity(ids.len() + names.len());
+            for id in ids {
+                if let Some(timer) = self.bridge.timers.remove(&id) {
+                    if let Some(repeat) = timer.repeat {
+                        let next = due.saturating_add(u64::from(repeat));
+                        if next > due {
+                            self.bridge.timers.insert(id, bridge::FakeTimer { due: next, repeat: Some(repeat) });
+                        }
+                    }
+                    events.push(Event::TimerFired(ilium_plugin_sdk_core::types::TimerId(id)));
+                }
+            }
+            for name in names {
+                if let Some(timer) = self.bridge.durable.remove(&name) {
+                    events.push(Event::DurableTimerFired(ilium_plugin_sdk_core::types::DurableTimerEvent {
+                        timer: ilium_plugin_sdk_core::types::TimerId(timer.id),
+                        name,
+                        late_by_millis: self.now_ms.saturating_sub(timer.due),
+                    }));
+                }
+            }
+            self.deliver_batch(events);
+        }
+        self.now_ms = target;
         self.fs.set_now(self.now_ms);
     }
 
@@ -1618,11 +1685,18 @@ impl FakeHost {
         let Some(mut plugin) = self.plugin.0.take() else {
             return;
         };
-        {
+        let deactivated = {
             let _bridge = bridge::enter(self);
-            let _ = plugin.deactivate(reason);
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.deactivate(reason)))
+        };
+        if let Err(payload) = deactivated {
+            drop(plugin);
+            self.record_failure("trap.panic", "the plugin panicked in deactivate");
+            std::panic::resume_unwind(payload);
         }
+        self.bridge.timers.clear();
         self.instance += 1;
+        self.restored = None;
         self.state = InstanceState::Activating;
         let activation = self.build_activation(None);
         let activated = {
@@ -1663,25 +1737,56 @@ impl FakeHost {
 
     /// Replaces the whole grant list.
     pub fn grants_changed(&mut self, names: &[&str]) {
+        for name in names {
+            if let Err(error) = self.check_grant(name) {
+                fail(&error.code, &error.message);
+            }
+        }
         let new: BTreeSet<String> = names.iter().map(|name| (*name).to_string()).collect();
         let removed: Vec<String> = self.granted.difference(&new).cloned().collect();
         let added = new.difference(&self.granted).next().is_some();
         self.granted = new;
         if !removed.is_empty() {
+            let held = delivery::held_grants(&self.granted)
+                .unwrap_or_else(|error| fail(&error.code, &error.message));
             let pending = std::mem::take(&mut self.pending);
+            let mut preserved = Vec::new();
+            let mut completions = Vec::new();
             for request in pending {
-                let revoked = request
-                    .needed_grant
-                    .map(|grant| removed.iter().any(|name| name == grant))
-                    .unwrap_or(false);
+                let revoked = request.fixed.is_none()
+                    && ilium_plugin_api::submission::check_grants(
+                        &request.canonical,
+                        &self.plugin_id,
+                        &held,
+                    ).is_err();
                 if revoked {
-                    self.outcomes.push(Outcome::Failed(PluginError::new(
+                    let outcome = Outcome::Failed(PluginError::new(
                         ErrorCode::Revoked,
                         "the grant was revoked",
-                    )));
+                    ));
+                    self.outcomes.push((request.order, outcome.clone()));
+                    if request.instance == self.instance {
+                        completions.push(Event::RequestCompleted(RequestResult {
+                            request: RequestRef::Submission(request.correlation),
+                            outcome,
+                        }));
+                    }
                 } else {
-                    self.pending.push(request);
+                    preserved.push(request);
                 }
+            }
+            for batch in completions.chunks(MAX_BATCH_EVENTS) {
+                self.deliver_batch(batch.to_vec());
+            }
+            // Work submitted from the revocation callback belongs to the retiring instance.
+            // Record immediate refusals, but do not allow newly accepted effects to escape it.
+            for request in std::mem::take(&mut self.pending) {
+                self.outcomes.push((request.order, request.fixed.unwrap_or(Outcome::Cancelled)));
+            }
+            self.pending = preserved;
+            if self.plugin.0.is_none() {
+                self.cancel_pending();
+                return;
             }
             self.reactivate_cycle(DeactivationReason::Revoked);
         } else if added {
@@ -2280,6 +2385,11 @@ impl FakeHost {
         self.extensions.contribute(point, id, 0, entry_json);
     }
 
+    /// Contributes an entry on behalf of a named plugin.
+    pub fn contribute_entry_from(&mut self, contributor: &str, point: &str, id: &str, entry_json: &str) {
+        self.extensions.contribute_from(contributor, point, id, 0, entry_json);
+    }
+
     /// Contributes an anonymous entry to a collect point.
     pub fn contribute_collect(&mut self, point: &str, entry_json: &str) {
         let id = format!("entry-{}", self.extensions.entries_len(point));
@@ -2412,8 +2522,13 @@ impl FakeHost {
         self.bridge
             .durable
             .iter()
-            .map(|(name, due)| (name.clone(), *due))
+            .map(|(name, timer)| (name.clone(), timer.due))
             .collect()
+    }
+
+    /// Injects or clears a failure when a plugin arms a durable timer.
+    pub fn set_durable_timer_error(&mut self, error: Option<PluginError>) {
+        self.bridge.durable_error = error;
     }
 
     /// Active timers as `(id, repeat)`.
@@ -2421,7 +2536,7 @@ impl FakeHost {
         self.bridge
             .timers
             .iter()
-            .map(|(id, repeat)| (u32::try_from(*id).unwrap_or(u32::MAX), *repeat))
+            .map(|(id, timer)| (u32::try_from(*id).unwrap_or(u32::MAX), timer.repeat))
             .collect()
     }
 
@@ -2640,6 +2755,8 @@ impl FakeInference {
 /// An entry contributed to an extension point.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtensionEntry {
+    /// Plugin that contributed the entry.
+    pub contributor: String,
     /// Entry id.
     pub id: String,
     /// Priority; lower runs first.
@@ -2657,8 +2774,13 @@ pub struct CollectPoint {
 impl CollectPoint {
     /// Adds or replaces an entry.
     pub fn add(&mut self, id: &str, priority: impl Into<i64>, entry: Value) {
-        self.entries.retain(|existing| existing.id != id);
+        self.add_from("fixture", id, priority, entry);
+    }
+
+    fn add_from(&mut self, contributor: &str, id: &str, priority: impl Into<i64>, entry: Value) {
+        self.entries.retain(|existing| existing.id != id || existing.contributor != contributor);
         self.entries.push(ExtensionEntry {
+            contributor: contributor.to_owned(),
             id: id.to_string(),
             priority: priority.into(),
             entry,
@@ -2720,12 +2842,16 @@ impl FakeExtensions {
         priority: impl Into<i64>,
         entry: impl IntoJsonText,
     ) {
+        self.contribute_from("fixture", point, id, priority, entry);
+    }
+
+    fn contribute_from(&mut self, contributor: &str, point: &str, id: &str, priority: impl Into<i64>, entry: impl IntoJsonText) {
         let text = entry.into_json_text();
         let value = serde_json::from_str(&text).unwrap_or(Value::String(text));
         self.points
             .entry(point.to_string())
             .or_default()
-            .add(id, priority, value);
+            .add_from(contributor, id, priority, value);
     }
 
     /// Contributes an entry to a collect point.
@@ -2761,6 +2887,7 @@ impl FakeExtensions {
         entries.sort_by(|left, right| {
             left.priority
                 .cmp(&right.priority)
+                .then_with(|| left.contributor.cmp(&right.contributor))
                 .then_with(|| left.id.cmp(&right.id))
         });
         entries
@@ -2780,6 +2907,12 @@ impl FakeExtensions {
     fn withdraw(&mut self, point: &str, id: &str) {
         if let Some(collect) = self.points.get_mut(point) {
             collect.entries.retain(|entry| entry.id != id);
+        }
+    }
+
+    fn withdraw_from(&mut self, contributor: &str, point: &str, id: &str) {
+        if let Some(collect) = self.points.get_mut(point) {
+            collect.entries.retain(|entry| entry.id != id || entry.contributor != contributor);
         }
     }
 
@@ -2856,7 +2989,13 @@ impl FakeExtensions {
             if let Some(reply) = &chain.all {
                 return (reply.clone(), false);
             }
-            if let Some((_, _, reply)) = chain.items.first() {
+            // A transform chain runs in priority order and a later replacement overrides an earlier one.
+            let replacing = chain
+                .items
+                .iter()
+                .rev()
+                .find(|(_, _, reply)| matches!(reply, HookReply::Replace(_) | HookReply::Answer(_)));
+            if let Some((_, _, reply)) = replacing.or_else(|| chain.items.first()) {
                 return (reply.clone(), false);
             }
         }
@@ -3050,6 +3189,8 @@ pub struct FakeTerminal {
     history: BTreeMap<u64, String>,
     selections: BTreeMap<u64, Selection>,
     claims: BTreeMap<u64, Vec<Option<PointerModifiers>>>,
+    snapshots: BTreeSet<u64>,
+    next_snapshot: u64,
 }
 
 impl FakeTerminal {
@@ -3073,6 +3214,11 @@ impl FakeTerminal {
     /// Sets the selection.
     pub fn set_selection(&mut self, pane: u64, selection: Selection) {
         self.selections.insert(pane, selection);
+    }
+
+    /// How many terminal snapshots the plugin holds now.
+    pub fn live_snapshots(&self) -> usize {
+        self.snapshots.len()
     }
 
     /// Pointer claims made on a pane.

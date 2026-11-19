@@ -6,7 +6,7 @@ use ilium_plugin_sdk::primitives::terminal::Selection;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::NodeId;
 
-use crate::common::{add_terminal_pane, client_host};
+use crate::common::{add_terminal_pane, client_host, menu_command, status_contains};
 
 fn context(pane: Option<u64>) -> MenuContext {
     MenuContext {
@@ -40,6 +40,37 @@ fn entry<'a>(entries: &'a [MenuEntry], id: &str) -> &'a MenuEntry {
         .iter()
         .find(|entry| entry.id == id)
         .unwrap_or_else(|| panic!("entry {id} missing"))
+}
+
+#[test]
+fn copying_from_the_menu_uses_the_target_panes_selection() {
+    let mut host = client_host();
+    let first = add_terminal_pane(&mut host, "first");
+    let second = add_terminal_pane(&mut host, "second");
+    host.terminal().set_selection(first, selection("first selection"));
+    host.terminal().set_selection(second, selection("second selection"));
+    host.deliver_one(menu_command("copy", second, "copy"));
+    assert_eq!(host.clipboard().last_text().as_deref(), Some("second selection"));
+}
+
+#[test]
+fn copying_a_missing_selection_does_not_replace_the_clipboard() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    let output = host.deliver_one(menu_command("copy", pane, "copy"));
+    assert_eq!(host.clipboard().last_text(), None);
+    assert!(status_contains(&output, "Nothing selected"));
+}
+
+#[test]
+fn copying_a_selection_reports_a_clipboard_failure() {
+    let mut host = client_host();
+    let pane = add_terminal_pane(&mut host, "api");
+    host.terminal().set_selection(pane, selection("text"));
+    host.clipboard().fail_next_write("Io");
+    let output = host.deliver_one(menu_command("copy", pane, "copy"));
+    assert_eq!(host.clipboard().last_text(), None);
+    assert!(status_contains(&output, "Copy failed: Io"));
 }
 
 /// REQ: F-016

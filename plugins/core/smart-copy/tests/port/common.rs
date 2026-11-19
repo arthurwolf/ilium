@@ -121,15 +121,38 @@ pub fn palette_command(command: &str, pane: Option<u64>) -> Event {
     })
 }
 
-/// The `candidates` message the server side sends to the client side of this plugin.
-pub fn candidates_message(lines: &[&str]) -> Event {
-    Event::Message(MessageEvent {
+/// Delivers a reply correlated to the most recent scan, creating a picker fixture if needed.
+pub fn deliver_candidates(host: &mut FakeHost, lines: &[&str]) -> Vec<Submission> {
+    let scan = |host: &FakeHost| host.submitted().into_iter().rev().find_map(|submission| {
+        match submission.intent {
+            Intent::Message(message) if message.channel == "scan" => Some(message.payload),
+            _ => None,
+        }
+    });
+    if scan(host).is_none() {
+        let pane = add_terminal_pane(host, "picker fixture");
+        host.deliver_one(palette_command("smart-copy", Some(pane)));
+    }
+    let request: serde_json::Value = serde_json::from_slice(&scan(host).expect("picker sent scan"))
+        .expect("scan payload is JSON");
+    host.deliver_one(Event::Message(MessageEvent {
         from: PluginId(PLUGIN_ID.to_string()),
         from_side: PluginSide::Server,
         from_client: None,
         channel: "candidates".to_string(),
-        payload: lines.join("\n").into_bytes(),
-    })
+        payload: serde_json::json!({"instance": request["instance"], "sequence": request["sequence"], "candidates": lines}).to_string().into_bytes(),
+    }))
+}
+
+/// Starts another picker on the pane used by the latest scan.
+pub fn restart_picker(host: &mut FakeHost) {
+    let payload = host.submitted().into_iter().rev().find_map(|submission| match submission.intent {
+        Intent::Message(message) if message.channel == "scan" => Some(message.payload),
+        _ => None,
+    }).expect("an earlier picker sent a scan");
+    let request: serde_json::Value = serde_json::from_slice(&payload).expect("scan payload is JSON");
+    let pane = request["pane"].as_u64().expect("scan pane");
+    host.deliver_one(palette_command("smart-copy", Some(pane)));
 }
 
 /// The picker popup target of the page.
@@ -155,19 +178,27 @@ pub fn candidate_payloads(submissions: &[Submission]) -> Vec<String> {
                     && spec.to.plugin == PluginId(PLUGIN_ID.to_string())
                     && spec.to.side == PluginSide::Client =>
             {
-                Some(String::from_utf8(spec.payload.clone()).expect("candidate payload is UTF-8"))
+                Some(serde_json::from_slice::<serde_json::Value>(&spec.payload)
+                    .expect("candidate payload is JSON")["candidates"]
+                    .as_array().expect("candidate list").iter()
+                    .map(|item| item.as_str().expect("candidate text"))
+                    .collect::<Vec<_>>().join("\n"))
             }
             _ => None,
         })
         .collect()
 }
 
-/// Candidate lines of the first `candidates` message in the list; empty when none was sent.
+/// Candidate values of the first reply, preserving multiline boundaries.
 pub fn candidate_lines(submissions: &[Submission]) -> Vec<String> {
-    candidate_payloads(submissions)
-        .first()
-        .map(|payload| payload.lines().map(str::to_string).collect())
-        .unwrap_or_default()
+    submissions.iter().find_map(|submission| match &submission.intent {
+        Intent::Message(spec) if spec.channel == "candidates" => {
+            let reply: serde_json::Value = serde_json::from_slice(&spec.payload).ok()?;
+            reply.get("candidates")?.as_array()?.iter()
+                .map(|item| item.as_str().map(str::to_owned)).collect()
+        }
+        _ => None,
+    }).unwrap_or_default()
 }
 
 /// True when any status segment intent carries text containing `needle`.
@@ -209,9 +240,9 @@ pub fn scan_message(pane: u64, rows: Option<(u32, u32)>) -> Event {
     Event::Message(MessageEvent {
         from: PluginId(PLUGIN_ID.to_string()),
         from_side: PluginSide::Client,
-        from_client: None,
+        from_client: Some(ilium_plugin_sdk::types::ClientId(1)),
         channel: "scan".to_string(),
-        payload: ilium_plugin_core_smart_copy::scan_payload(pane, rows),
+        payload: ilium_plugin_core_smart_copy::scan_payload(pane, rows, 0, 0),
     })
 }
 
@@ -229,6 +260,6 @@ pub fn offers(row: &str, token: &str) -> bool {
 /// A client host with the picker open on these candidates.
 pub fn open_picker(lines: &[&str]) -> FakeHost {
     let mut host = client_host();
-    host.deliver_one(candidates_message(lines));
+    deliver_candidates(&mut host, lines);
     host
 }
