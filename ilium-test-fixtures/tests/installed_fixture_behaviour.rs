@@ -130,7 +130,6 @@ fn the_fixture_binary_name_matches_the_bin_target_cargo_builds() {
     );
 }
 
-
 /// Linux session discovery reads the child's initial environment. This check
 /// also proves re-exec preserves the PID returned by spawn and handles inherited
 /// provider overrides without changing the integration-test runner's home.
@@ -154,7 +153,10 @@ fn explicit_fixture_home_is_visible_in_the_same_process_start_environment() {
         Command::new(&installed.path)
             .env("HOME", directory.path())
             .env("CODEX_HOME", directory.path().join("inherited-codex"))
-            .env("CLAUDE_CONFIG_DIR", directory.path().join("inherited-claude"))
+            .env(
+                "CLAUDE_CONFIG_DIR",
+                directory.path().join("inherited-claude"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
