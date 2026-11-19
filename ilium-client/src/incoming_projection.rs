@@ -190,6 +190,9 @@ impl ProjectionRetention {
             }
             ProjectRestructureRejected { project_id, .. } => (global, Some(*project_id)),
             PaneRecapScreen { .. }
+            | MonitoringEvents { .. }
+            | MonitoringAck { .. }
+            | ControlWrite { .. }
             | ScreenUpdate { .. }
             | ScreenPreview { .. }
             | TerminalReplay { .. }

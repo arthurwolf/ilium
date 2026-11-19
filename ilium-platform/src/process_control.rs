@@ -451,6 +451,11 @@ pub fn terminate_pty_process_tree(
     }
 }
 
+/// Whether this platform implements an identity-bound PTY process-tree proof.
+pub const fn supports_pty_tree_proof() -> bool {
+    cfg!(target_os = "linux")
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn terminate_pty_process_tree(
     _root: &PtyProcessIdentity,

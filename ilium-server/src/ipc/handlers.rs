@@ -110,6 +110,9 @@ struct SessionTransitionObservation {
 /// Attribution follows the request contract, never text parsing.
 fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
     match request {
+        ClientRequest::MonitoringEvents { .. }
+        | ClientRequest::MonitoringAck { .. }
+        | ClientRequest::ControlWrite { .. } => None,
         ClientRequest::NewPane { parent_group, .. } => Some(*parent_group),
         ClientRequest::ClosePane { pane_id, .. } => Some(*pane_id),
         ClientRequest::MoveNode { node_id, .. } => Some(*node_id),
@@ -151,6 +154,7 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::SignalPaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReplacePaneWithCommandConfirmed { pane_id, .. } => Some(*pane_id),
         ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
         ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
             Some(*project_id)
@@ -184,6 +188,7 @@ pub fn handle_request<'a>(
                 | ClientRequest::RemoveWorkspace { .. }
                 | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
                 | ClientRequest::ReplacePaneWithCommand { .. }
+                | ClientRequest::ReplacePaneWithCommandConfirmed { .. }
         ) {
             state.repo_discovery_cache.invalidate();
             state.repo_facts_cache.invalidate();
@@ -217,6 +222,7 @@ pub fn handle_request<'a>(
                 | "set_node_bookmarked"
                 | "set_node_expanded"
                 | "set_node_locked_closed"
+                | "replace_pane_with_command_confirmed"
         ) {
             scoped_tx.finish_synchronous_mutation();
         }
@@ -230,6 +236,49 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::ControlWrite {
+            request_id,
+            token,
+            caller_pane,
+            operation,
+        } => {
+            let result =
+                crate::control_access::authorize_write(state, &token, caller_pane, &operation)
+                    .await;
+            let _ = direct_tx
+                .send(ServerEvent::ControlWrite { request_id, result })
+                .await;
+            false
+        }
+        ClientRequest::MonitoringAck {
+            request_id,
+            consumer,
+            cursor,
+        } => {
+            let result = crate::monitoring_query::acknowledge(&state.events, &consumer, &cursor)
+                .map(|sequence| {
+                    format!(
+                        "{}:{sequence}",
+                        state
+                            .events
+                            .monitoring
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .epoch()
+                    )
+                });
+            let _ = direct_tx
+                .send(ServerEvent::MonitoringAck { request_id, result })
+                .await;
+            false
+        }
+        ClientRequest::MonitoringEvents { request_id, query } => {
+            let result = crate::monitoring_query::read_query_with_state(state, &query).await;
+            let _ = direct_tx
+                .send(ServerEvent::MonitoringEvents { request_id, result })
+                .await;
+            false
+        }
         // Connection-owned subscriptions are intercepted by the reader.
         ClientRequest::SetStatusScreenWatches { .. } => false,
         ClientRequest::Resource {
@@ -664,7 +713,39 @@ async fn handle_scoped_request(
             pane_id,
             command_line,
         } => {
-            handle_replace_pane_with_command(state, pane_id, command_line, direct_tx, None, None)
+            if let Err(message) = handle_replace_pane_with_command(
+                state,
+                pane_id,
+                command_line,
+                direct_tx,
+                None,
+                None,
+            )
+            .await
+            {
+                send_direct_error(direct_tx, message).await;
+            }
+            false
+        }
+        ClientRequest::ReplacePaneWithCommandConfirmed {
+            request_id,
+            pane_id,
+            command_line,
+        } => {
+            let result = handle_replace_pane_with_command(
+                state,
+                pane_id,
+                command_line,
+                direct_tx,
+                None,
+                None,
+            )
+            .await;
+            if let Err(message) = &result {
+                send_direct_error(direct_tx, message.clone()).await;
+            }
+            let _ = direct_tx
+                .send(ServerEvent::PaneCreateFinished { request_id, result })
                 .await;
             false
         }
@@ -5278,12 +5359,11 @@ async fn handle_terminate_pane_process(
     direct_tx: &DirectEventSender,
 ) {
     let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
-        match control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT) {
-            Ok(_) => Ok(()),
-            Err(tree_error) => {
-                tracing::warn!(%tree_error, "pane process-tree proof unavailable; killing captured direct child");
-                control.kill_direct_child().map_err(std::io::Error::other)
-            }
+        if ilium_platform::process_control::supports_pty_tree_proof() {
+            control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT).map(|_| ())
+        } else {
+            tracing::warn!("PTY process-tree proof is unavailable on this platform; using direct-child termination");
+            control.kill_direct_child().map_err(std::io::Error::other)
         }
     }).await;
     let _ = crate::agent_debug::record(
@@ -5486,7 +5566,7 @@ async fn handle_unfreeze_pane(
             return;
         }
     };
-    handle_replace_pane_with_command(
+    if let Err(message) = handle_replace_pane_with_command(
         state,
         pane_id,
         resume_command,
@@ -5494,7 +5574,10 @@ async fn handle_unfreeze_pane(
         Some(reservation),
         None,
     )
-    .await;
+    .await
+    {
+        send_direct_error(direct_tx, message).await;
+    }
 }
 
 struct PaneReplacementReservation<'a> {
@@ -5609,16 +5692,13 @@ async fn handle_replace_pane_with_command(
     direct_tx: &DirectEventSender,
     reservation: Option<PaneReplacementReservation<'_>>,
     custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
-) {
+) -> Result<NodeId, String> {
     let Some(_reservation) =
         reservation.or_else(|| PaneReplacementReservation::try_new(state, pane_id))
     else {
-        send_direct_error(
-            direct_tx,
-            format!("pane {pane_id:?} is already being replaced"),
-        )
-        .await;
-        return;
+        return Err(format!(
+            "pane {pane_id:?} is already being replaced; outcome is uncertain"
+        ));
     };
     let origin = {
         let panes = state.panes.read().await;
@@ -5679,8 +5759,7 @@ async fn handle_replace_pane_with_command(
     let Some(parent) = tree.parent_of(pane_id) else {
         drop(tree);
         drop(publish_guard);
-        send_direct_error(direct_tx, format!("no such pane {pane_id:?}")).await;
-        return;
+        return Err(format!("no such pane {pane_id:?}"));
     };
     let is_terminal = tree.get(pane_id).is_some_and(|node| {
         matches!(
@@ -5694,12 +5773,7 @@ async fn handle_replace_pane_with_command(
     if !is_terminal {
         drop(tree);
         drop(publish_guard);
-        send_direct_error(
-            direct_tx,
-            "only a terminal pane can be replaced".to_string(),
-        )
-        .await;
-        return;
+        return Err("only a terminal pane can be replaced".to_string());
     }
     let workspace = tree.pane_workspace(pane_id).cloned();
     let position = tree
@@ -5726,12 +5800,7 @@ async fn handle_replace_pane_with_command(
         Err(error) => {
             drop(tree);
             drop(publish_guard);
-            send_direct_error(
-                direct_tx,
-                format!("failed to create replacement pane: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to create replacement pane: {error}"));
         }
     };
     let has_verified_continuity = {
@@ -5753,12 +5822,7 @@ async fn handle_replace_pane_with_command(
         let _ = tree.remove_node(new_pane_id);
         drop(tree);
         drop(publish_guard);
-        send_direct_error(
-            direct_tx,
-            format!("failed to place replacement pane: {error}"),
-        )
-        .await;
-        return;
+        return Err(format!("failed to place replacement pane: {error}"));
     }
     drop(tree);
     if let Some(mut preference) = close_preference {
@@ -5781,13 +5845,13 @@ async fn handle_replace_pane_with_command(
     .await
     {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
+        Err(error @ (RegisterPaneError::NodeRemoved(_) | RegisterPaneError::Admission(_))) => {
             state
                 .workspace_close_preferences
                 .write()
                 .await
                 .remove(&new_pane_id);
-            return;
+            return Err(format!("replacement pane was not started: {error}"));
         }
         Err(RegisterPaneError::Spawn(error)) => {
             let mut tree = state.tree.write().await;
@@ -5799,12 +5863,7 @@ async fn handle_replace_pane_with_command(
                 .await
                 .remove(&new_pane_id);
             broadcast_and_persist(state).await;
-            send_direct_error(
-                direct_tx,
-                format!("failed to spawn {command_line}: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to spawn {command_line}: {error}"));
         }
     }
     let _ = crate::agent_debug::record(
@@ -5843,6 +5902,16 @@ async fn handle_replace_pane_with_command(
         new_pane_id
     };
     handle_close_pane_with_spawn_guard(state, completed_pane_id, direct_tx).await;
+    if !old_pane_is_live {
+        return Err("original pane was closed while replacement was starting".into());
+    }
+    let tree = state.tree.read().await;
+    if tree.get(pane_id).is_some() || tree.get(new_pane_id).is_none() {
+        return Err(
+            "replacement outcome is uncertain; inspect the pane tree before retrying".into(),
+        );
+    }
+    Ok(new_pane_id)
 }
 
 /// Creates one built-in coding agent inside the project represented by
@@ -7041,6 +7110,13 @@ async fn handle_close_pane_with_spawn_guard(
     }
     drop(panes);
     drop(tree);
+    for id in &descendant_pane_ids {
+        state.events.record_monitoring(
+            Some(*id),
+            ilium_ipc::MonitoringEventKind::Closed,
+            "Pane closed",
+        );
+    }
     for (id, resource) in closed_resources {
         crate::lifecycle_log::record(
             state,
@@ -9213,6 +9289,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closing_a_pane_records_one_monitoring_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let pane = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ilium_core::ROOT_ID, "project").unwrap();
+            tree.add_pane(group, "pane", PaneContentKind::Terminal)
+                .unwrap()
+        };
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_close_pane(&state, pane, &sender).await;
+        handle_close_pane(&state, pane, &sender).await;
+        let log = state.events.monitoring.lock().unwrap();
+        let closed = log
+            .read_after(0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == ilium_ipc::MonitoringEventKind::Closed)
+            .collect::<Vec<_>>();
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].pane_id, Some(pane));
+    }
+
+    #[tokio::test]
+    async fn closing_a_group_records_monitoring_for_each_descendant_pane() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (group, first, second) = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ilium_core::ROOT_ID, "project").unwrap();
+            let first = tree
+                .add_pane(group, "first", PaneContentKind::Terminal)
+                .unwrap();
+            let second = tree
+                .add_pane(group, "second", PaneContentKind::Terminal)
+                .unwrap();
+            (group, first, second)
+        };
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_close_pane(&state, group, &sender).await;
+        let log = state.events.monitoring.lock().unwrap();
+        let panes = log
+            .read_after(0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == ilium_ipc::MonitoringEventKind::Closed)
+            .map(|event| event.pane_id.unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(panes.len(), 2);
+        assert!(panes.contains(&first));
+        assert!(panes.contains(&second));
+    }
+
+    #[tokio::test]
     async fn closing_a_removed_pane_leaves_no_retained_blocking_error() {
         let directory = tempfile::tempdir().unwrap();
         let state = snapshot_io_handler_state(&directory);
@@ -10866,7 +10996,8 @@ mod tests {
             handle_replace_pane_with_command(&state, old, "exec cat".into(), &sender, None, None),
         )
         .await
-        .expect("replacement finishes");
+        .expect("replacement finishes")
+        .expect("replacement succeeds");
         while let Ok(reply) = replies.try_recv() {
             assert!(!matches!(reply, ServerEvent::Error { .. }), "{reply:?}");
         }

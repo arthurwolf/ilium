@@ -6,7 +6,7 @@ Documentation lives at the repository root: `README.md` (short user overview), `
 
 ## Compilation and Rust build coordination
 
-All compilation goes through the ni-build service on ni-vm, as defined in `~/.claude/CLAUDE.md` ("Distributed compilation through ni-build"); that global section is the only copy. The chatroom, progress-monitor and goal/waiting rules also live only in the global file.
+All compilation goes through the ni-build service on ni-vm, as defined in `~/.claude/CLAUDE.md` ("Distributed compilation through ni-build"); that global section is the only copy. The progress-monitor and goal/waiting rules also live only in the global file.
 
 **Where compile and test runs happen.** Any compile, test, Clippy or fmt run made to check that work functions goes in a separate build folder, never in the main checkout or on the current branch:
 
@@ -216,12 +216,6 @@ All Settings pages and tabs must feel spacious, clean, "aerated", and classy, co
 
 - Never edit `CHANGELOG.md` for a change: add `changelog.d/<branch-or-topic>.md` (format in `changelog.d/README.md`). Every branch editing the same top lines of `CHANGELOG.md` caused conflicts and dirty-checkout merge refusals. `python3 tools/compile_changelog.py` folds fragments in at release. `.gitattributes` also sets `merge=union` on `CHANGELOG.md` as a safety net.
 - A leftover `CHANGELOG.md` conflict is still not a blocker: keep both sides.
-
-<!-- ilium-agent-feature: chatroom -->
-<!-- ilium-on-demand: chatroom v1 -->
-If `CHATROOM.md` exists, hooks already inject recent coordination: do not read chatroom context at startup. Before editing shared files or resources, read `~/.claude/docs/chatroom.md` and use `ilium chat context --since-last-read` only when another agent may own the area. Use `ilium chat send` sparingly for a task claim or release, blocker, dependency, material discovery or decision, or handoff; never routine progress narration. Never rewrite `CHATROOM.md` directly.
-
-<!-- /ilium-agent-feature: chatroom -->
 
 <!-- ilium-agent-feature: progress version=17 -->
 <!-- ilium-on-demand: progress v1 -->

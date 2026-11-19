@@ -380,6 +380,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn waiter_claim_and_disconnect_are_scoped_to_each_monitor() {
+        let mut runtime = runtime();
+        runtime.detected_agent_class = Some(AgentClass::Codex);
+        install(&mut runtime, ProgressTaskStatus::Done, 100.0);
+        let mut second = progress(ProgressTaskStatus::Done, 100.0);
+        second.monitor_id = 8;
+        runtime
+            .install_progress_monitor(ProgressMonitorRegistration {
+                monitor_id: 8,
+                pane_id: NodeId(1),
+                command: "/bin/true".to_string(),
+                interval: Duration::from_secs(5),
+                initial_progress: second,
+            })
+            .expect("second monitor");
+
+        assert!(runtime.claim_progress_outcome_notification(MONITOR_ID));
+        assert!(!runtime.claim_progress_outcome_notification(MONITOR_ID));
+        assert!(runtime.claim_progress_outcome_notification(8));
+        assert!(runtime
+            .collect_progress_outcome_by_waiter(MONITOR_ID)
+            .unwrap());
+        assert_eq!(
+            runtime.progress_reconcile_action(MONITOR_ID),
+            ProgressReconcileAction::None
+        );
+        assert_eq!(
+            runtime.progress_reconcile_action(8),
+            ProgressReconcileAction::Redeliver {
+                monitor_id: 8,
+                possible_duplicate: false,
+            }
+        );
+        runtime.release_progress_outcome_from_waiter(MONITOR_ID);
+        assert_eq!(
+            runtime.progress_reconcile_action(MONITOR_ID),
+            ProgressReconcileAction::Redeliver {
+                monitor_id: MONITOR_ID,
+                possible_duplicate: false,
+            }
+        );
+        finish(runtime);
+    }
+
     #[tokio::test]
     async fn outcome_without_supported_composer_is_not_redelivered() {
         let mut runtime = runtime();

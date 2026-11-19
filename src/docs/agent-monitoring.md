@@ -275,11 +275,11 @@ All under **Settings -> Agent Monitoring**.
 | Hide completed progress after | `[ui].completed_progress_hide_after_seconds` | 60 | Steps of 30 seconds; `0` = Never |
 | Progress fill style | `[ui].task_progress_frames` | Braille | Braille, Blocks, Moons, Quarters or custom |
 
-Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding releases the footer rows and resizes the child terminal; error details, unread indicators, retained results and queued notifications are untouched.
+Hide-after behaviour: the delay starts from the server's final observation and does not restart when a client reconnects. Hiding leaves the footer space reserved and does not resize the child terminal; error details, unread indicators, retained results and queued notifications are untouched.
 
 ## Reserved terminal space
 
-The prompt banner and progress footer occupy rows only while they have visible content. When either appears or disappears, Ilium resizes the child terminal to match the available space. The agent toolbar has its own reserved row when enabled.
+The prompt banner and progress footer reserve their configured rows while enabled, even when empty. Showing or hiding their content therefore does not resize the child terminal. The agent toolbar has its own reserved row when enabled.
 
 To reclaim or change the space, turn a display off or lower its row limit in Settings. The child can still be resized by explicit settings changes, split changes and resizing the outer terminal. Editors and boards reserve no terminal metadata space, and tiny panes keep at least one terminal cell where physically possible.
 

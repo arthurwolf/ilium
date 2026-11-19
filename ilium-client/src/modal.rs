@@ -16,6 +16,113 @@ use crate::theme;
 
 const TEXT_PROMPT_DEFAULT_HINT: &str = "Click a button or use the shown keyboard shortcut";
 
+/// Fixed width of the "New group" destination picker (see
+/// `App::open_create_group_dialog`) -- wide enough for a few levels of
+/// indentation plus a realistic group name without wrapping.
+const CREATE_GROUP_WIDTH: u16 = 54;
+
+/// At most this many destinations are shown at once; a session with more
+/// nested groups than this scrolls the list (see `create_group_visible_window`)
+/// rather than growing the popup past a reasonable screen fraction.
+pub const CREATE_GROUP_MAX_VISIBLE: usize = 7;
+pub const CREATE_SPLIT_MEMBER_MAX_VISIBLE: usize = 9;
+
+pub fn create_split_orientation_dialog_area(screen_area: Rect) -> Rect {
+    // 61 cells of key hints, two borders and one padding cell on each side.
+    centered_fixed_rect(66, 9, screen_area)
+}
+
+pub fn create_split_members_dialog_area(screen_area: Rect, choice_count: usize) -> Rect {
+    let visible_count = choice_count.clamp(1, CREATE_SPLIT_MEMBER_MAX_VISIBLE) as u16;
+    centered_fixed_rect(72, visible_count + 6, screen_area)
+}
+
+pub fn create_split_member_visible_window(
+    selected_index: usize,
+    choice_count: usize,
+) -> (usize, usize) {
+    let start = selected_index
+        .saturating_sub(CREATE_SPLIT_MEMBER_MAX_VISIBLE / 2)
+        .min(choice_count.saturating_sub(CREATE_SPLIT_MEMBER_MAX_VISIBLE));
+    (
+        start,
+        (start + CREATE_SPLIT_MEMBER_MAX_VISIBLE).min(choice_count),
+    )
+}
+
+pub fn create_split_member_row_at(
+    screen_area: Rect,
+    selected_index: usize,
+    choice_count: usize,
+    position: Position,
+) -> Option<usize> {
+    let popup = create_split_members_dialog_area(screen_area, choice_count);
+    let inner = Rect::new(
+        popup.x.saturating_add(1),
+        popup.y.saturating_add(1),
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    );
+    let first_choice_row = inner.y.saturating_add(2);
+    // The bottom bound matters on terminals shorter than the dialog's natural
+    // height: `centered_fixed_rect` clamps the popup, so without it a click
+    // below the popup (or on its clipped bottom rows) would still map to a
+    // choice index whose row was never actually painted.
+    if position.x < inner.x
+        || position.x >= inner.right()
+        || position.y < first_choice_row
+        || position.y >= inner.bottom()
+    {
+        return None;
+    }
+    let (start, end) = create_split_member_visible_window(selected_index, choice_count);
+    let index = start + usize::from(position.y.saturating_sub(first_choice_row));
+    (index < end).then_some(index)
+}
+
+/// Interior row layout of the create-group dialog, computed purely from its
+/// outer `area` -- shared by rendering (`ui::draw_create_group`) and mouse
+/// hit-testing (`App::handle_create_group_mouse`) so neither can drift out
+/// of sync with the other.
+pub struct CreateGroupLayout {
+    pub name_row: Rect,
+    pub label_row: Rect,
+    pub list_area: Rect,
+    pub hint_row: Rect,
+}
+
+/// The outer popup rect, sized to fit every visible destination row (capped
+/// at `CREATE_GROUP_MAX_VISIBLE`) plus the fixed name/label/hint chrome.
+pub fn create_group_dialog_area(screen_area: Rect, destination_count: usize) -> Rect {
+    let visible = destination_count.clamp(1, CREATE_GROUP_MAX_VISIBLE);
+    // Border (2) + name row (1) + spacer (1) + "Create under:" label (1) +
+    // one row per visible destination + hint row (1).
+    let height = 2 + 1 + 1 + 1 + visible as u16 + 1;
+    centered_fixed_rect(CREATE_GROUP_WIDTH, height, screen_area)
+}
+
+/// Splits a create-group dialog's outer `area` into its fixed rows. Assumes
+/// a one-cell border on every edge, matching `theme::block`.
+pub fn create_group_layout(area: Rect) -> CreateGroupLayout {
+    let inner = inset_rect(area, 1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // name field
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // "Create under:" label
+            Constraint::Min(0),    // destination list
+            Constraint::Length(1), // hint
+        ])
+        .split(inner);
+    CreateGroupLayout {
+        name_row: rows[0],
+        label_row: rows[2],
+        list_area: rows[3],
+        hint_row: rows[4],
+    }
+}
+
 /// The `[start, end)` slice of `total` destinations to actually render,
 /// keeping `selected_index` in view. A pure function of the three inputs so
 /// scroll position never needs its own persisted, driftable state.

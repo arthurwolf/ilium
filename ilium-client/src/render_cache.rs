@@ -148,7 +148,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::PaneCreateFinished { request_id, result } => {
-            app.receive_pane_create_finished(request_id, result);
+            if !app.receive_conversion_replacement(request_id, result.clone()) {
+                app.receive_pane_create_finished(request_id, result);
+            }
             None
         }
         ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {
@@ -787,7 +789,11 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
-        ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::PaneRecapScreen { .. }
+        | ServerEvent::RecapUpdated { .. }
+        | ServerEvent::MonitoringEvents { .. }
+        | ServerEvent::MonitoringAck { .. }
+        | ServerEvent::ControlWrite { .. } => None,
         ServerEvent::Rejected(rejection) if rejection.code == "ipc.protocol-mismatch" => {
             app.status_message = Some(format!("Plugin protocol mismatch: {}", rejection.message));
             app.status_message_retention = app.processing_derivation_retention.clone();
@@ -2080,12 +2086,12 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert!(with_prompt.content_area.height < before.content_area.height);
+        assert_eq!(with_prompt.content_area, before.content_area);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app
+        assert!(!app
             .take_outbound_requests()
             .iter()
             .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
@@ -2149,12 +2155,12 @@ mod tests {
             },
         );
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert!(with_prompt.content_area.height < after_toolbar.content_area.height);
+        assert_eq!(with_prompt.content_area, after_toolbar.content_area);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app
+        assert!(!app
             .take_outbound_requests()
             .iter()
             .any(|request| matches!(request, ClientRequest::ResizePane { .. })));

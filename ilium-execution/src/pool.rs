@@ -3,7 +3,7 @@ use std::fmt;
 use std::io;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TrySendError};
@@ -17,7 +17,8 @@ use crate::budget::{
     QuotaGroup, QuotaSnapshot, RejectReason, Tenant,
 };
 use crate::job::{
-    recover_unpublished, task, ErasedJob, Job, JobHold, Metrics, Receipt, Rejected, Wake,
+    recover_unpublished, task, ErasedJob, Job, JobHold, Metrics, Receipt, Rejected,
+    ReservationTrace, Wake,
 };
 use crate::retirement::{
     RetirementFailure, RetirementReservation, RetirementState, RETIREMENT_SLOTS,
@@ -402,10 +403,23 @@ pub(crate) struct Shared {
     serial: Weak<SerialRegistry>,
     phase: AtomicU8,
     stop: StopToken,
+    reservations: Mutex<Vec<Weak<ReservationTrace>>>,
     // Last field: all bank/channel storage is destroyed before this charge.
     _metadata_charge: Debit,
 }
 impl Shared {
+    fn trace_reservation(&self, cost: JobCost) -> Arc<ReservationTrace> {
+        let trace = Arc::new(ReservationTrace {
+            name: OnceLock::new(),
+            input: AtomicUsize::new(cost.input_bytes),
+            result: AtomicUsize::new(cost.result_bytes),
+        });
+        if let Ok(mut reservations) = self.reservations.try_lock() {
+            reservations.retain(|entry| entry.strong_count() != 0);
+            reservations.push(Arc::downgrade(&trace));
+        }
+        trace
+    }
     pub(crate) fn cancelling(&self) -> bool {
         self.phase.load(Ordering::Acquire) == CANCEL
     }
@@ -634,6 +648,7 @@ impl Execution {
             serial: Arc::downgrade(&serial),
             phase: AtomicU8::new(OPEN),
             stop: StopToken::default(),
+            reservations: Mutex::new(Vec::new()),
             _metadata_charge: metadata_charge,
         });
         let mut workers = Vec::new();
@@ -858,6 +873,34 @@ impl RetirementHandle {
 }
 
 impl Client {
+    /// Best-effort snapshot of this bank's estimated outstanding reservations.
+    /// Other banks and external storage can also charge the shared quota.
+    pub fn significant_reservations(&self) -> Vec<(&'static str, usize, usize)> {
+        let Ok(entries) = self.shared.reservations.try_lock() else {
+            return Vec::new();
+        };
+        let mut result: Vec<_> = entries
+            .iter()
+            .filter_map(Weak::upgrade)
+            .map(|trace| {
+                (
+                    trace
+                        .name
+                        .get()
+                        .copied()
+                        .unwrap_or("unsubmitted or external work"),
+                    trace.input.load(Ordering::Acquire),
+                    trace.result.load(Ordering::Acquire),
+                )
+            })
+            .filter(|(_, input, result)| *input >= 1024 * 1024 || *result >= 1024 * 1024)
+            .collect();
+        result.sort_unstable_by_key(|(_, input, result)| {
+            std::cmp::Reverse(input.saturating_add(*result))
+        });
+        result.truncate(5);
+        result
+    }
     /// Reserve charged serial metadata before the adapter accepts its first
     /// write; the lease transfers to bank custody if that adapter drops.
     pub fn try_reserve_serial_custody<J: Job>(
@@ -969,6 +1012,7 @@ impl Client {
         let hold = Arc::new(JobHold {
             _debit: debit,
             service_slots: None,
+            trace: self.shared.trace_reservation(cost),
         });
         drop(tenant_guard);
         drop(root_guard);
@@ -1035,6 +1079,7 @@ impl Client {
         let hold = Arc::new(JobHold {
             _debit: debit,
             service_slots: service.then(|| Arc::clone(&bank.signal.service_slots)),
+            trace: self.shared.trace_reservation(cost),
         });
         drop(tenant_guard);
         drop(root_guard);
@@ -1129,6 +1174,7 @@ impl Reservation {
         if let Err(reason) = self.validate_job_type::<J>() {
             return Err(Rejected { reason, value: job });
         }
+        let _ = self.hold.trace.name.set(std::any::type_name::<J>());
         let bank = &self.shared.banks[self.lane.index()];
         // Reservation is the admission linearization point. Pending remains
         // nonzero until the worker dequeues or this call rejects, so Drain

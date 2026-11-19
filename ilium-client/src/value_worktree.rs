@@ -342,8 +342,9 @@ mod tests {
 
     #[tokio::test]
     async fn loading_parent_retains_correlated_reply_and_allocations_under_catalog() {
-        let (_execution, preparation) =
-            crate::ipc_preparation::IpcPreparation::standalone().unwrap();
+        let (_execution, preparation) = crate::ipc_preparation::IpcPreparation::standalone()
+            .await
+            .unwrap();
         let mut app = App::new(
             "worktree-catalog".into(),
             "/tmp/synthetic-selector-fixture".into(),

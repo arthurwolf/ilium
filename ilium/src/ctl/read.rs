@@ -1,7 +1,7 @@
 //! `ilium ctl` commands that only read state.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ilium_control::documents::{self, Document, PaneFilter};
 use ilium_control::{render_document, resolve_pane, Format, Shape};
@@ -12,9 +12,6 @@ use super::args::{CtlCommand, Target};
 use super::link::{self, Link};
 use super::CtlFailure;
 use crate::pane_scan::{self, PaneEvidence};
-
-/// How often `wait` re-reads the session.
-const WAIT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) async fn run(
     command: CtlCommand,
@@ -36,6 +33,17 @@ pub(super) async fn run(
     Ok(())
 }
 
+pub(super) async fn document_at(
+    command: CtlCommand,
+    target: Target,
+    socket: crate::session::LiveSessionSocket,
+) -> Result<Document, CtlFailure> {
+    let mut link = link::open_at(&target, socket).await?;
+    let outcome = dispatch(command, &mut link).await;
+    link.detach().await;
+    outcome
+}
+
 async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlFailure> {
     let tree = &link.tree().clone();
     let session = &link.session_name().to_owned();
@@ -44,6 +52,7 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
             depth,
             project,
             no_details,
+            ..
         } => documents::tree_document(tree, session, project.as_deref(), depth, !no_details)?,
         CtlCommand::Project {
             selector,
@@ -55,7 +64,9 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
             depth,
             no_details,
         } => documents::node_document(tree, &id, depth, !no_details)?,
-        CtlCommand::Pane { id, screen, lines } => {
+        CtlCommand::Pane {
+            id, screen, lines, ..
+        } => {
             let mut document = documents::pane_document(tree, &id)?;
             if screen {
                 let pane_id = resolve_pane(tree, &id)?;
@@ -72,6 +83,7 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
             kind,
             project,
             name_contains,
+            ..
         } => documents::find_panes(
             tree,
             &PaneFilter {
@@ -91,7 +103,13 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
             }
         }
         CtlCommand::Whoami => whoami(link)?,
-        CtlCommand::Wait { id, state, timeout } => wait(link, &id, &state, timeout).await?,
+        CtlCommand::Wait {
+            ids,
+            all,
+            state,
+            timeout,
+            ..
+        } => wait(link, &ids, &state, all, timeout).await?,
         _ => return Err(CtlFailure::usage("not a read command")),
     })
 }
@@ -137,51 +155,66 @@ fn whoami(link: &Link) -> Result<Document, CtlFailure> {
 }
 
 async fn wait(
-    link: &Link,
-    selector: &str,
+    link: &mut Link,
+    selectors: &[String],
     states: &str,
+    all: bool,
     timeout: Option<u64>,
 ) -> Result<Document, CtlFailure> {
-    let wanted: Vec<String> = states
-        .split(',')
-        .map(|state| state.trim().to_ascii_lowercase())
-        .filter(|state| !state.is_empty())
-        .collect();
-    if wanted.is_empty() {
-        return Err(CtlFailure::usage("--state must name at least one state"));
-    }
-    let pane_id = resolve_pane(link.tree(), selector)?;
-    let deadline = timeout.map(|seconds| Instant::now() + Duration::from_secs(seconds));
-    let mut tree = link.tree().clone();
+    use ilium_control::waiting::{evaluate, WaitMode};
+    use ilium_ipc::ServerEvent;
+    let panes = selectors
+        .iter()
+        .map(|selector| resolve_pane(link.tree(), selector))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mode = if all { WaitMode::All } else { WaitMode::Any };
+    let deadline =
+        timeout.map(|seconds| tokio::time::Instant::now() + Duration::from_secs(seconds));
     loop {
-        let Some(detail) = ilium_control::pane_detail(&tree, pane_id) else {
+        let result = evaluate(link.tree(), &panes, states, mode).map_err(CtlFailure::usage)?;
+        if result.ready {
             return Ok(Document {
-                value: json!({"pane": pane_id.0, "closed": true}),
-                shape: Shape::Generic,
-            });
-        };
-        // Agents report a turn state; other panes only have a kind.
-        let status = &detail["status"];
-        let state = status["state"]
-            .as_str()
-            .or_else(|| status["kind"].as_str())
-            .unwrap_or_default()
-            .to_owned();
-        if wanted.contains(&state) {
-            return Ok(Document {
-                value: json!({"pane": pane_id.0, "state": state, "closed": false}),
+                value: serde_json::to_value(result)
+                    .map_err(|error| CtlFailure::rejected(error.to_string()))?,
                 shape: Shape::Generic,
             });
         }
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            return Err(CtlFailure::rejected(format!(
-                "pane {} is {state:?}, not one of {states}, after {} s",
-                pane_id.0,
-                timeout.unwrap_or_default()
-            )));
+        // One connection, no timer-driven refresh. timeout_at cancellation only
+        // cancels this receive; it never turns a disconnect into pane closure.
+        let incoming = match deadline {
+            Some(deadline) => {
+                tokio::time::timeout_at(deadline, link.attached.connection.events.recv())
+                    .await
+                    .map_err(|_| {
+                        CtlFailure::rejected(format!(
+                            "selected panes did not reach {states} before the wait deadline"
+                        ))
+                    })?
+            }
+            None => link.attached.connection.events.recv().await,
         }
-        tokio::time::sleep(WAIT_INTERVAL).await;
-        tree = link.fresh_tree().await?;
+        .ok_or_else(|| {
+            CtlFailure::no_session("session disconnected while waiting; pane outcomes are unknown")
+        })?;
+        let (event, _retention) = incoming.into_parts();
+        match event {
+            ServerEvent::TreeSnapshot(tree) | ServerEvent::PaneStateSnapshot { tree, .. } => {
+                link.attached.tree = tree
+            }
+            ServerEvent::PaneStatusChanged { pane_id, status }
+            | ServerEvent::PaneDetectedStateChanged {
+                pane_id, status, ..
+            } => {
+                if link.attached.tree.get(pane_id).is_some() {
+                    link.attached
+                        .tree
+                        .set_pane_status(pane_id, status)
+                        .map_err(|error| CtlFailure::rejected(error.to_string()))?;
+                }
+            }
+            ServerEvent::Error { message } => return Err(CtlFailure::rejected(message)),
+            _ => {}
+        }
     }
 }
 

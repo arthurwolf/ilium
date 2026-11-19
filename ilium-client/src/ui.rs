@@ -239,7 +239,8 @@ fn draw_osm_attribution(frame: &mut Frame, app: &App) -> Rect {
 /// CrosstermBackend assumes the previous print advanced only one cell. That
 /// writes the blank at x+2 on terminals that honor the glyph's full width.
 /// The glyph itself paints the continuation cell; omit the duplicate write.
-fn skip_vs16_continuation_cells(buffer: &mut Buffer, tree_area: Rect) {
+/// Crate-visible so tree tests can apply the same buffer pass the frame uses.
+pub(crate) fn skip_vs16_continuation_cells(buffer: &mut Buffer, tree_area: Rect) {
     let area = buffer.area;
     for row in area.top()..area.bottom() {
         for column in area.left()..area.right().saturating_sub(1) {
@@ -757,7 +758,6 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let plugin_order_ranks = app.plugin_tree_order_ranks();
     // Owned once per frame so the render options can borrow it.
     let blocking_error_facts = app.blocking_error_facts();
-    // Copied out before the mutable tree borrow below; the view facts read the whole app.
     let pane_view_facts = crate::custom_status_live::PaneViewFacts::from_app(app);
     let mut painted_rows = tree_ui::render(
         frame,

@@ -13,14 +13,20 @@
 //! * [`render`] writes a JSON value as JSON, YAML or Markdown.
 //! * [`guide`] holds the agent-facing help topics.
 
+pub mod access;
+pub mod brief;
+pub mod digest;
+pub mod digest_consumers;
 pub mod documents;
 pub mod guide;
 pub mod operation;
 pub mod render;
 pub mod select;
+pub mod signals;
 pub mod view;
+pub mod waiting;
 
 pub use operation::{examples as operation_examples, Operation, OperationError};
 pub use render::{render_document, Format, Shape};
 pub use select::{resolve_node, resolve_pane, resolve_project, SelectError};
-pub use view::{node_view, pane_detail, tree_view, ViewOptions};
+pub use view::{node_view, pane_detail, pane_state_name, tree_view, ViewOptions};

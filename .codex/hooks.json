@@ -1,28 +1,6 @@
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ilium chat context --limit 40 --since-last-read --max-bytes 2048",
-            "timeout": 10,
-            "statusMessage": "Checking ilium chatroom"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ilium chat context --limit 40 --since-last-read --max-bytes 2048",
-            "timeout": 10,
-            "statusMessage": "Checking ilium chatroom"
-          }
-        ]
-      }
-    ]
+    "SessionStart": [],
+    "UserPromptSubmit": []
   }
 }

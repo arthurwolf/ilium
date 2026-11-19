@@ -3,7 +3,7 @@ use std::fmt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ilium_platform::owned_worker::StopToken;
 
@@ -161,7 +161,10 @@ impl<T> Retained<T> {
         if hold.service_slots.is_some() {
             return Err(RejectReason::InvalidCost);
         }
-        hold._debit.reduce_to_result_storage(result_bytes)
+        hold._debit.reduce_to_result_storage(result_bytes)?;
+        hold.trace.input.store(0, Ordering::Release);
+        hold.trace.result.store(result_bytes, Ordering::Release);
+        Ok(())
     }
 
     /// Moves the original payload and its charge to another typed owner.
@@ -263,6 +266,13 @@ impl<J: Job> Drop for Receipt<J> {
 pub(crate) struct JobHold {
     pub(crate) _debit: Debit,
     pub(crate) service_slots: Option<Arc<AtomicUsize>>,
+    pub(crate) trace: Arc<ReservationTrace>,
+}
+
+pub(crate) struct ReservationTrace {
+    pub(crate) name: OnceLock<&'static str>,
+    pub(crate) input: AtomicUsize,
+    pub(crate) result: AtomicUsize,
 }
 
 impl Drop for JobHold {

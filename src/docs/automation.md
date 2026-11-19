@@ -1,5 +1,7 @@
 # Automation
 
+For blocking change feeds, compact digests, pane briefs and multi-pane waits, see [monitoring agents](monitoring-cli.md).
+
 Ilium can send input to panes on your behalf and let agents talk to Ilium. This page covers scheduled input, text triggers, the prompt queue, "Ask for update", creating an agent from an editor line, the progress monitor (`ilium progress`), the project Chatroom, the managed agent instructions that teach agents to use those features, the local HTTP API, and public reset forecasts.
 
 Most of these features type text into a terminal pane and press Enter for you. Ilium cannot know what is on the other side of the pane at that moment, so check the target (a shell, an agent at its prompt, an agent waiting on an approval question) before you rely on an unattended send.
@@ -258,6 +260,8 @@ The record also carries `composer_notice`: `suppressed` means the server did not
 
 Logical waits have no elapsed-time deadline and reject the removed deadline flag as unsupported. They remain pending until a task outcome, monitor/connection failure, clear/replacement, or interruption. Agent tools that yield while a command remains running must retain the same terminal handle. A terminal or outer-tool yield is not completion; preventing model inference at those boundaries requires support from the agent runtime and is not established by the CLI alone.
 
+When a Codex runtime exposes the optional native `ilium_wait` tool, call it directly with the registered monitor ID after independent work is finished. Its pending call avoids ordinary terminal snapshot results; availability depends on the running executable and its tool catalog, not merely on an installed binary. If it is unavailable, continue the same CLI wait handle silently on unchanged yields. That fallback and instructions alone cannot guarantee that model inference stays suspended. Ilium's server continues to run the registered probe, and real outcomes, observation failures and user input remain actionable.
+
 The usual way to run a long job is one command that registers the monitor and waits for it:
 
 ```sh
@@ -409,6 +413,8 @@ Setup does four things, all idempotent:
 
 A project that already has a room gets its integrations repaired when Ilium starts; Ilium never creates a room merely by looking at a project.
 
+To remove a room, right-click its project and choose **Remove chatroom from project**. Ilium removes its managed chatroom instructions and hook commands and preserves the message log in the project's `.ilium` directory. Other instructions and hooks are retained. Chatrooms belong to projects, so removing one affects every session using that project.
+
 ### Use it in the TUI
 
 A project with a room shows a **Chatroom** entry in the tree. Select it to open the room in the right panel:
@@ -495,7 +501,7 @@ The path you type may start with `~/`, be absolute, or be relative to the sessio
 
 The detached server can create agents on request over a small HTTP listener. It is meant for scripts and local tools ("start an agent in project X with this prompt").
 
-> **Security warning.** The listener has **no authentication**. Any process on this machine, running as any user, that can reach `127.0.0.1` can submit a request, and a request starts an agent with a prompt the caller controls. It binds to the loopback interface only and never accepts remote connections, but you must treat the port as a local control surface: do not forward it, do not expose it through containers or tunnels, and do not run untrusted local code that you would not trust to start agents. Change the port if another session or program collides.
+HTTP reads use read access by default. Writes require a bearer token from the session's owner-only runtime token file; ordinary writes need act, while termination needs admin. Set `ILIUM_CONTROL_TOKEN` to the selected token before running the examples below. See [control grants and audit records](monitoring-cli.md#grant-control-and-record-writes). Keep the loopback listener local; the operating-system user owns the token files and raw UI socket.
 
 ### Port
 
@@ -523,6 +529,7 @@ Example:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8872/create_agent \
+  -H "Authorization: Bearer $ILIUM_CONTROL_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"agent_type":"claude","project":"/home/me/dev/app","prompt":"Fix the failing login test"}'
 ```
@@ -531,6 +538,7 @@ With a worktree:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8872/create_agent \
+  -H "Authorization: Bearer $ILIUM_CONTROL_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"agent_type":"codex","project":"app","prompt":"Investigate the slow query","workspace":{"branch":"agent/slow-query","base":"main"}}'
 ```

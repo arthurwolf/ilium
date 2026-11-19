@@ -45,26 +45,6 @@ pub fn parse_start_mode(
     }
 }
 
-/// Fetcher used until an HTTP client is wired in: every request reports the network as
-/// unreachable, so registry commands fall back to the offline cache.
-struct UnreachableFetcher;
-
-impl Fetcher for UnreachableFetcher {
-    fn get(&self, _url: &str) -> Result<Vec<u8>, FetchError> {
-        Err(FetchError::Unreachable)
-    }
-}
-
-fn current_platform() -> Platform {
-    if cfg!(target_os = "windows") {
-        Platform::Windows
-    } else if cfg!(target_os = "macos") {
-        Platform::MacOs
-    } else {
-        Platform::Linux
-    }
-}
-
 /// The real environment for a command: directories, working directory, clock and fetcher.
 pub fn real_cli_env() -> CliEnv {
     let project_dirs = directories::ProjectDirs::from("", "", "ilium");

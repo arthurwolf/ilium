@@ -278,6 +278,23 @@ pub(crate) fn next_frame_delay<'a>(
         .min()
 }
 
+/// Whether `text` contains a joined emoji sequence: a zero-width joiner, an
+/// emoji skin-tone modifier or a tag character (the parts of flag and family
+/// emoji). `unicode-width` sums the parts, so such a sequence can measure 2
+/// cells while terminals draw several glyphs and shift the title. Variation
+/// selectors (U+FE0F) are not joiners and stay valid.
+pub(crate) fn has_joined_emoji_sequence(text: &str) -> bool {
+    text.chars().any(|character| {
+        matches!(
+            character,
+            '\u{200D}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}'
+        )
+    })
+}
+
+const JOINED_EMOJI_SEQUENCE_ERROR: &str =
+    "Joined emoji sequences are not supported; choose one emoji or symbol";
+
 /// Validate user-authored frames against the fixed tree status slot.
 pub fn validate_frames(frames: &[String], maximum_width: usize) -> Result<(), &'static str> {
     if !(2..=13).contains(&frames.len()) {
@@ -292,6 +309,9 @@ pub fn validate_frames(frames: &[String], maximum_width: usize) -> Result<(), &'
         .any(|frame| frame.width() != width || frame.chars().any(char::is_control))
     {
         return Err("Frames must have equal widths and contain no control characters");
+    }
+    if frames.iter().any(|frame| has_joined_emoji_sequence(frame)) {
+        return Err(JOINED_EMOJI_SEQUENCE_ERROR);
     }
     Ok(())
 }
@@ -322,12 +342,14 @@ pub fn validate_visual(visual: &StatusVisual, maximum_width: usize) -> Result<()
             }
         }
         VisualKind::Glyph(glyph) => {
-            if (1..=maximum_width.min(2)).contains(&glyph.width())
-                && !glyph.chars().any(char::is_control)
+            if !(1..=maximum_width.min(2)).contains(&glyph.width())
+                || glyph.chars().any(char::is_control)
             {
-                Ok(())
-            } else {
                 Err("The glyph must fit in one or two terminal cells")
+            } else if has_joined_emoji_sequence(glyph) {
+                Err(JOINED_EMOJI_SEQUENCE_ERROR)
+            } else {
+                Ok(())
             }
         }
         VisualKind::BrailleAnimation {
@@ -633,9 +655,9 @@ pub(crate) fn visual_span(
 #[cfg(test)]
 mod tests {
     use super::{
-        animation_frame_delay, frame, frame_family_of, next_frame_delay, status_span,
-        validate_frames, validate_visual, visual_description, visual_span, MonitorHealthTone,
-        ProgressCue, StatusSpanContext, BRAILLE_PRESETS, FRAME_FAMILIES,
+        animation_frame_delay, frame, frame_family_of, has_joined_emoji_sequence, next_frame_delay,
+        status_span, validate_frames, validate_visual, visual_description, visual_span,
+        MonitorHealthTone, ProgressCue, StatusSpanContext, BRAILLE_PRESETS, FRAME_FAMILIES,
     };
     use crate::config::MotionLevel;
     use ilium_core::status_rule_expression::{
@@ -1042,6 +1064,36 @@ mod tests {
         assert!(validate_frames(&["a".into(), "b".into()], 2).is_ok());
         assert!(validate_frames(&["a".into(), "🌕".into()], 2).is_err());
         assert!(validate_frames(&["a".into(), "\n".into()], 2).is_err());
+    }
+
+    #[test]
+    fn joined_emoji_sequences_are_rejected_while_variation_selectors_stay_valid() {
+        // unicode-width sums the parts of these sequences, so each measures
+        // 1 or 2 cells, yet terminals draw several glyphs for them.
+        let england_flag = "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+        let joined_pair = "a\u{200D}b";
+        let skin_tone = "👍\u{1F3FD}";
+        for sequence in [england_flag, joined_pair, skin_tone] {
+            assert!(has_joined_emoji_sequence(sequence), "{sequence:?}");
+            let glyph = StatusVisual {
+                kind: VisualKind::Glyph(sequence.to_owned()),
+                style: VisualStyle::default(),
+            };
+            assert!(validate_visual(&glyph, 2).is_err(), "{sequence:?}");
+        }
+        // A VS16 symbol is one base character plus a selector: valid, and its
+        // width is the 2 cells the VS16 cell handling already expects.
+        let warning = "⚠\u{FE0F}";
+        assert!(!has_joined_emoji_sequence(warning));
+        assert_eq!(UnicodeWidthStr::width(warning), 2);
+        assert_eq!(validate_frames(&[warning.into(), "✅".into()], 2), Ok(()));
+        // The England flag has the same width as a plain 2-cell frame, so the
+        // joined check (not the width check) must reject it.
+        assert_eq!(UnicodeWidthStr::width(england_flag), 2);
+        assert_eq!(
+            validate_frames(&[england_flag.into(), "✅".into()], 2),
+            Err("Joined emoji sequences are not supported; choose one emoji or symbol")
+        );
     }
 
     #[test]

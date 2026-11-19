@@ -25,6 +25,7 @@ const INPUT_GRACE: Duration = Duration::from_millis(600);
 pub(crate) struct Link {
     pub(crate) attached: AttachedSession,
     socket: LiveSessionSocket,
+    target: Target,
 }
 
 /// Resolves `target` to a live socket and attaches. `start_server` lets a
@@ -35,13 +36,24 @@ pub(crate) async fn open(
     start_server: bool,
 ) -> Result<Link, CtlFailure> {
     let socket = resolve_socket(target, cwd, start_server).await?;
+    open_at(target, socket).await
+}
+
+pub(super) async fn open_at(
+    target: &Target,
+    socket: LiveSessionSocket,
+) -> Result<Link, CtlFailure> {
     let attached = pane_scan::attach(&socket)
         .await
         .map_err(|message| CtlFailure::no_session(format!("cannot attach: {message}")))?;
-    Ok(Link { attached, socket })
+    Ok(Link {
+        attached,
+        socket,
+        target: target.clone(),
+    })
 }
 
-async fn resolve_socket(
+pub(super) async fn resolve_socket(
     target: &Target,
     cwd: &Path,
     start_server: bool,
@@ -131,8 +143,49 @@ impl Link {
         self.attached.detach().await;
     }
 
+    pub(crate) async fn authorize_write(
+        &mut self,
+        operation: &Operation,
+    ) -> Result<(), CtlFailure> {
+        let token =
+            super::credentials::for_operation(&self.target, &self.socket.socket_path, operation)?;
+        let request_id = crate::next_progress_request_id();
+        self.send(ClientRequest::ControlWrite {
+            request_id,
+            token,
+            caller_pane: crate::pane_identity_from_env()
+                .ok()
+                .map(|identity| identity.pane_id),
+            operation: serde_json::to_string(operation)
+                .map_err(|error| CtlFailure::usage(error.to_string()))?,
+        })
+        .await?;
+        loop {
+            let queued = self
+                .attached
+                .connection
+                .events
+                .recv()
+                .await
+                .ok_or_else(|| {
+                    CtlFailure::no_session("connection closed before write authorization")
+                })?;
+            let (event, _retention) = queued.into_parts();
+            match event {
+                ServerEvent::ControlWrite {
+                    request_id: reply,
+                    result,
+                } if reply == request_id => return result.map_err(CtlFailure::rejected),
+                ServerEvent::TreeSnapshot(tree) => self.attached.tree = tree,
+                ServerEvent::Error { message } => return Err(CtlFailure::rejected(message)),
+                _ => {}
+            }
+        }
+    }
+
     /// Carries out `operation` and returns the confirmed result details.
     pub(crate) async fn apply(&mut self, operation: &Operation) -> Result<Value, CtlFailure> {
+        self.authorize_write(operation).await?;
         let before = self.attached.tree.clone();
         if let Operation::Close { pane, worktree } = operation {
             if !matches!(worktree, WorktreeAction::Keep) {

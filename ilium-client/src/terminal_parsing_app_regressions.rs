@@ -452,7 +452,6 @@ pub(crate) fn pooled_app_protects_displayed_and_busy_panes_and_waits_for_retirin
         let (_bank, mut app, ids) = initialized_app(5, budget, select);
         let displayed = ids[0];
         let shared = app.terminal_parsing.as_ref().unwrap().shared.clone();
-        let queue = shared.queue.lock().unwrap();
         let displayed_target = view(&app, displayed)
             .frontend
             .as_ref()
@@ -492,6 +491,8 @@ pub(crate) fn pooled_app_protects_displayed_and_busy_panes_and_waits_for_retirin
         let pin = view(&app, victim).painted_source().pinned().unwrap();
         let old_text = pin.with_screen(|screen| screen.contents());
         let identity = view(&app, victim).identity.clone();
+        // Keep the retired engine claim alive without holding the scheduler lock:
+        // collection must be able to purge commands for the released target.
         let retiring = view(&app, victim).frontend.as_ref().unwrap().target.clone();
         let old_alive = retiring.alive.clone();
         displayed_target
@@ -516,7 +517,6 @@ pub(crate) fn pooled_app_protects_displayed_and_busy_panes_and_waits_for_retirin
         let frontend = view_mut(&mut app, busy).frontend.as_mut().unwrap();
         frontend.pending.clear();
         frontend.output_backpressure = false;
-        drop(queue);
         drop(retiring);
         pump(&mut app, |_| {
             shared.engine_claims.load(Ordering::Acquire) == ids.len() - 1

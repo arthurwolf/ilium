@@ -136,8 +136,10 @@ fn expected_ids() -> BTreeSet<String> {
     ids.insert("TITLE-01".to_owned());
     ids.insert("TITLE-02".to_owned());
     add_range(&mut ids, "TRIGGER", 1, 8);
-    ids.insert("TOOLBAR-01".to_owned());
+    ids.insert("TEXTTRIGGER-01".to_owned());
+    ids.insert("CACHE-01".to_owned());
     ids.insert("CUSTOMAGENT-01".to_owned());
+    ids.insert("TOOLBAR-01".to_owned());
     ids
 }
 
@@ -338,6 +340,45 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         app.pop_modal();
         assert!(matches!(app.mode, Mode::Settings(_)));
         assert_eq!(app.animation_settings, before);
+    }
+}
+
+#[test]
+fn multi_frame_illustration_title_is_fully_visible_at_common_widths() {
+    use crate::config::MotionLevel;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use std::time::Instant;
+
+    // AP-07 has two illustration frames, so its panel title carries the frame count.
+    let topic = catalog::by_id("AP-07").unwrap();
+    assert!(topic.frames.len() > 1, "fixture needs a multi-frame topic");
+    let title = format!("Illustration · frame 1/{}", topic.frames.len());
+    for (width, height) in [(120, 40), (80, 24)] {
+        let state = super::dialog::SettingsHelpState::new("AP-07", 1, MotionLevel::Off);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                super::dialog::render(
+                    frame,
+                    Rect::new(0, 0, width, height),
+                    topic,
+                    &state,
+                    MotionLevel::Off,
+                    Instant::now(),
+                )
+            })
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            screen.contains(&title),
+            "illustration title `{title}` must be fully visible at {width}x{height}"
+        );
     }
 }
 

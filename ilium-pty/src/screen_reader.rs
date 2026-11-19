@@ -67,13 +67,17 @@ impl ScreenReader {
     /// Nonblocking current-only text, with a preflight before allocation.
     /// Oversized or busy screens stay unavailable rather than becoming partial evidence.
     pub fn try_text_with_limit(&self, limit: usize) -> Option<Result<String, &'static str>> {
-        self.try_text_with_generation_and_limit(limit).map(|(_, text)| text)
+        self.try_text_with_generation_and_limit(limit)
+            .map(|(_, text)| text)
     }
 
     /// Read the generation under the same parser guard as the visible text so
     /// consumers can reject out-of-order observations without a race. The
     /// screen's cell count and its text length are both bounded by `limit`.
-    pub fn try_text_with_generation_and_limit(&self, limit: usize) -> Option<(u64, Result<String, &'static str>)> {
+    pub fn try_text_with_generation_and_limit(
+        &self,
+        limit: usize,
+    ) -> Option<(u64, Result<String, &'static str>)> {
         self.try_text_with_generation_and_limits(limit, limit)
     }
 

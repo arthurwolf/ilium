@@ -1,0 +1,54 @@
+From b230eeec8b28903c9399685b17030b45b1d2836b Mon Sep 17 00:00:00 2001
+From: Arthur Wolf <wolf.arthur@gmail.com>
+Date: Sun, 1 Nov 2026 18:42:43 +0100
+Subject: [PATCH] Fix shutdown redraw after terminal resize
+
+---
+ codex-rs/tui/src/app.rs                |  2 +-
+ codex-rs/tui/src/app/warnings_tests.rs | 20 ++++++++++++++++++++
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/codex-rs/tui/src/app.rs b/codex-rs/tui/src/app.rs
+index 80459f41136d..ee35f37c7db4 100644
+--- a/codex-rs/tui/src/app.rs
++++ b/codex-rs/tui/src/app.rs
+@@ -1288,7 +1288,7 @@ impl App {
+     pub(super) fn show_shutdown_feedback(&mut self, tui: &mut tui::Tui) -> Result<()> {
+         self.disable_ambient_pet_before_shutdown(tui)?;
+         self.chat_widget.show_shutdown_in_progress();
+-        let screen_size = tui.terminal.last_known_screen_size;
++        let screen_size = tui.prepare_draw_size()?;
+         self.handle_draw_pre_render(tui, screen_size)?;
+         self.chat_widget.pre_draw_tick();
+         self.render_chat_widget_frame(tui, screen_size)?;
+diff --git a/codex-rs/tui/src/app/warnings_tests.rs b/codex-rs/tui/src/app/warnings_tests.rs
+index 67cf2f394f3e..2dc72c2ace7e 100644
+--- a/codex-rs/tui/src/app/warnings_tests.rs
++++ b/codex-rs/tui/src/app/warnings_tests.rs
+@@ -3,6 +3,26 @@
+ use super::*;
+ use pretty_assertions::assert_eq;
+ 
++#[tokio::test]
++async fn shutdown_feedback_survives_a_terminal_shrink_before_resize_event() -> Result<()> {
++    let mut app = crate::app::test_support::make_test_app().await;
++    let mut tui = crate::tui::test_support::make_test_tui()?;
++    tui.set_owned_screen(true)?;
++    let actual = tui.terminal.size()?;
++    tui.terminal.last_known_screen_size = Size::new(actual.width, actual.height.saturating_add(5));
++
++    app.show_shutdown_feedback(&mut tui)?;
++
++    assert_eq!(tui.terminal.last_known_screen_size, actual);
++    let screen = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal)
++        .content
++        .iter()
++        .map(ratatui::buffer::Cell::symbol)
++        .collect::<String>();
++    assert!(screen.contains("Shutting down"));
++    Ok(())
++}
++
+ #[tokio::test]
+ async fn warnings_hide_and_restore_draft_and_freeze_until_reopened() -> Result<()> {
+     let mut app = crate::app::test_support::make_test_app().await;

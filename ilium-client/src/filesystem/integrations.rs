@@ -124,6 +124,10 @@ impl Job for IntegrationJob {
                     result.statuses.push((target, status));
                 }
             }
+            Self::RemoveRoom { room } => {
+                crate::chatroom::remove(&room.path).map_err(bounded_error)?;
+                result.rooms.push(room_result(room, false, false));
+            }
             Self::Install { targets } => {
                 for target in targets {
                     match install(&target) {

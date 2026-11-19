@@ -55,7 +55,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(17),
+            Self::Progress => Some(18),
         }
     }
 
@@ -772,7 +772,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=17"));
+        assert!(contents.contains("ilium-agent-feature: progress version=18"));
         assert!(contents.contains("you MUST block with `ilium progress wait <monitor_id>`"));
         assert!(contents.contains("--wait"));
         assert!(contents.contains("at least three minutes"));
@@ -788,6 +788,22 @@ mod tests {
             status(&target, AgentFeature::Progress).unwrap(),
             FeatureSetupStatus::Managed
         );
+    }
+
+    #[test]
+    fn progress_instruction_prefers_native_wait_and_explains_capped_fallback() {
+        let instruction = AgentFeature::Progress.instruction();
+        for required in [
+            "`ilium_wait`",
+            "directly, not through `functions.exec`",
+            "no recurring commentary",
+            "cannot guarantee that model inference stays suspended",
+        ] {
+            assert!(
+                instruction.contains(required),
+                "missing wait guidance: {required}"
+            );
+        }
     }
 
     #[test]
@@ -825,7 +841,7 @@ mod tests {
             "while `running`, do every step that does not need its result",
             "when the outcome is unknown",
             "A pasted monitor report is an event inside the current request",
-            "go straight back to `ilium progress wait <monitor_id>`",
+            "return silently to the same wait",
             "Make the probe notice a vanished task",
             "ends every earlier wait",
             "find your monitor by `job_id`",
@@ -1050,7 +1066,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=17"));
+        assert!(updated.contains("version=18"));
         assert!(!updated.contains("version=99"));
     }
 

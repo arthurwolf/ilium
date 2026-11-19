@@ -290,10 +290,26 @@ pub(super) fn publish(
             )
         })?;
     let (value, storage) = event.into_parts();
+    // Keep the catalog commit and monitoring projection in the same order.
+    // Otherwise a later revision could be recorded before an earlier commit.
+    let _monitoring_order = state
+        .events
+        .resource_monitoring_order
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let catalog_revision = match &value {
+        ServerEvent::ResourceSnapshot { catalog, .. } => Some(catalog.revision),
+        _ => None,
+    };
     let outcome = reservation
         .commit(value)
         .map(|_| ())
         .map_err(|e| err("publication", format!("{:?}", e.refusal)));
+    if outcome.is_ok() {
+        if let Some(revision) = catalog_revision {
+            state.events.record_resource_revision(revision);
+        }
+    }
     drop(storage);
     outcome
 }

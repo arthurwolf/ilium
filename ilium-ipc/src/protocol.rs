@@ -1106,6 +1106,39 @@ pub enum ClientRequest {
     /// with a `Plugin` envelope carrying a `ClientReply`. Appended to preserve all prior
     /// request discriminants.
     PluginCall(crate::plugin::PluginCall),
+    /// Read a bounded page from the session monitoring journal.
+    MonitoringEvents {
+        request_id: u64,
+        query: crate::MonitoringQuery,
+    },
+    /// Advance one named consumer's acknowledged monitoring cursor.
+    /// Authorize and durably audit one local automation write before its ordinary IPC requests.
+    ControlWrite {
+        request_id: u64,
+        token: String,
+        caller_pane: Option<NodeId>,
+        operation: String,
+    },
+    MonitoringAck {
+        request_id: u64,
+        consumer: String,
+        cursor: String,
+    },
+    /// Replace a pane and return a correlated PaneCreateFinished outcome.
+    ReplacePaneWithCommandConfirmed {
+        request_id: u64,
+        pane_id: NodeId,
+        command_line: String,
+    },
+}
+
+/// Which client path produced a stored recap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecapTrigger {
+    /// Short recap that rode in the project restructure call.
+    Batch,
+    /// Dedicated per-pane call (refresh click or recap popover) with both lengths.
+    Manual,
 }
 
 impl ClientRequest {
@@ -1115,6 +1148,9 @@ impl ClientRequest {
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
             Self::SignalPaneProcess { .. } => "signal_pane_process",
+            Self::MonitoringEvents { .. } => "monitoring_events",
+            Self::MonitoringAck { .. } => "monitoring_ack",
+            Self::ControlWrite { .. } => "control_write",
             Self::SetStatusScreenWatches { .. } => "set_status_screen_watches",
             Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",
@@ -1183,6 +1219,7 @@ impl ClientRequest {
             Self::UpdateAgentDetectionSettings { .. } => "update_agent_detection_settings",
             Self::TerminatePaneProcess { .. } => "terminate_pane_process",
             Self::ReplacePaneWithCommand { .. } => "replace_pane_with_command",
+            Self::ReplacePaneWithCommandConfirmed { .. } => "replace_pane_with_command_confirmed",
             Self::FreezePane { .. } => "freeze_pane",
             Self::UnfreezePane { .. } => "unfreeze_pane",
             Self::UpdateAntigravityStatusline { .. } => "update_antigravity_statusline",
@@ -1740,4 +1777,18 @@ pub enum ServerEvent {
     /// A `SetStatusScreenWatches` revision was refused as a whole; appended
     /// to preserve earlier event discriminants.
     StatusScreenWatchesRejected(StatusScreenWatchRejection),
+    /// A bounded monitoring page or a query validation error.
+    MonitoringEvents {
+        request_id: u64,
+        result: Result<String, String>,
+    },
+    /// The resulting acknowledged cursor, or a validation error.
+    ControlWrite {
+        request_id: u64,
+        result: Result<(), String>,
+    },
+    MonitoringAck {
+        request_id: u64,
+        result: Result<String, String>,
+    },
 }
