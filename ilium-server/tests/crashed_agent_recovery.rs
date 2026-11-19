@@ -119,6 +119,7 @@ async fn recovery_after_unflushed_crash(
             mouse_tracking: true,
         },
     );
+    ilium_test_fixtures::set_provider_home(&fixture.path, &server.home_dir);
     #[cfg(unix)]
     let launcher = interpreted_launcher.then(|| {
         let directory = server.home_dir.join("interpreted-shim");

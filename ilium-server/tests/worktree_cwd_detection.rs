@@ -31,6 +31,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
         },
     )
     .await;
+    ilium_test_fixtures::set_provider_home(&fake_codex.path, &server.home_dir);
     let subdirectory = server.project_cwd.join("feature-subdirectory");
     std::fs::create_dir(&subdirectory).unwrap();
     let session_id = "7b269c6d-5c89-4df5-9ed5-54ded64abb00";

@@ -129,3 +129,61 @@ fn the_fixture_binary_name_matches_the_bin_target_cargo_builds() {
         Some(FIXTURE_BINARY_NAME)
     );
 }
+
+
+/// Linux session discovery reads the child's initial environment. This check
+/// also proves re-exec preserves the PID returned by spawn and handles inherited
+/// provider overrides without changing the integration-test runner's home.
+#[cfg(target_os = "linux")]
+#[test]
+fn explicit_fixture_home_is_visible_in_the_same_process_start_environment() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let home = tempfile::tempdir().expect("provider home");
+    let runner_home = std::env::var_os("HOME");
+    let runner_codex_home = std::env::var_os("CODEX_HOME");
+    let runner_claude_home = std::env::var_os("CLAUDE_CONFIG_DIR");
+    let installed = install(
+        directory.path(),
+        "codex",
+        &FixtureBehavior::EchoSubmittedLine {
+            prefix: "ready".into(),
+        },
+    );
+    ilium_test_fixtures::set_provider_home(&installed.path, home.path());
+    let mut child = spawn_fixture(
+        Command::new(&installed.path)
+            .env("HOME", directory.path())
+            .env("CODEX_HOME", directory.path().join("inherited-codex"))
+            .env("CLAUDE_CONFIG_DIR", directory.path().join("inherited-claude"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )
+    .expect("spawn fixture with unrelated inherited home");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"home-ready\n")
+        .unwrap();
+    let mut answer = String::new();
+    BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut answer)
+        .unwrap();
+    let homes = ilium_platform::process_info::agent_provider_homes(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(answer.trim_end(), "ready:<home-ready>");
+    assert_eq!(
+        homes,
+        Some(ilium_platform::process_info::AgentProviderHomes {
+            home: home.path().to_path_buf(),
+            codex_home: home.path().join(".codex"),
+            claude_config: home.path().join(".claude"),
+        })
+    );
+    assert_eq!(std::env::var_os("HOME"), runner_home);
+    assert_eq!(std::env::var_os("CODEX_HOME"), runner_codex_home);
+    assert_eq!(std::env::var_os("CLAUDE_CONFIG_DIR"), runner_claude_home);
+}

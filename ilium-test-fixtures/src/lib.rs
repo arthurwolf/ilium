@@ -264,6 +264,61 @@ pub fn install(directory: &Path, name: &str, behavior: &FixtureBehavior) -> Inst
     InstalledFixture { path }
 }
 
+/// Bind only this installed fake agent to the home containing its transcripts.
+/// The sidecar also applies when the server later launches the fixture by PATH
+/// to resume a frozen session; the test process's environment stays untouched.
+pub fn set_provider_home(executable: &Path, home_dir: &Path) {
+    assert!(home_dir.is_absolute(), "fixture provider home must be absolute");
+    let serialized = serde_json::to_vec(home_dir).expect("fixture home serializes");
+    std::fs::write(provider_home_file_for(executable), serialized)
+        .expect("write fixture provider home");
+}
+
+fn provider_home_file_for(executable: &Path) -> PathBuf {
+    let mut path = executable.as_os_str().to_os_string();
+    path.push(".fixture-home.json");
+    PathBuf::from(path)
+}
+
+/// Apply a fake agent's explicit provider home before running its behavior.
+/// Linux reads the process-start environment from procfs, so changing this
+/// process's environment in place would not publish the new values. Re-exec
+/// preserves the provider's PID and argv while updating that kernel evidence.
+/// Other platforms use the test server's explicit home for discovery.
+pub fn initialize_provider_home() -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let executable = std::env::current_exe()?;
+        let bytes = match std::fs::read(provider_home_file_for(&executable)) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let home: PathBuf = serde_json::from_slice(&bytes)?;
+        if !home.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "fixture provider home must be absolute",
+            ));
+        }
+        let homes = [
+            ("HOME", home.clone()),
+            ("CODEX_HOME", home.join(".codex")),
+            ("CLAUDE_CONFIG_DIR", home.join(".claude")),
+        ];
+        if homes.iter().any(|(key, value)| {
+            std::env::var_os(key).as_deref() != Some(value.as_os_str())
+        }) {
+            let mut command = std::process::Command::new(executable);
+            command.args(std::env::args_os().skip(1)).envs(homes);
+            return Err(ilium_platform::process_control::replace_current_process(
+                &mut command,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Spawn a freshly copied fixture, tolerating only the kernel's transient
 /// executable-write conflict. A concurrent fork can inherit the copy's write
 /// descriptor until it execs. A failed exec starts no child, so retry is safe.

@@ -919,6 +919,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let mut server =
         TestServer::start_with_detection_config("live-session-id-discovery-test", detection_config)
             .await;
+    ilium_test_fixtures::set_provider_home(&fake_claude_path, &server.home_dir);
     let transcript_path = write_verified_claude_transcript(&server, resumed_session_id);
     let mut client = server.connect().await;
 
@@ -1233,6 +1234,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         detection_config,
     )
     .await;
+    ilium_test_fixtures::set_provider_home(&fake_codex_path, &server.home_dir);
     write_verified_codex_transcript(&server, resumed_session_id);
     let mut client = server.connect().await;
 
@@ -1340,6 +1342,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         },
     )
     .await;
+    ilium_test_fixtures::set_provider_home(&fake_codex, &server.home_dir);
     write_verified_codex_transcript(&server, session_id);
     let mut client = server.connect().await;
     write_frame(
@@ -1534,6 +1537,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
         detection_config,
     )
     .await;
+    ilium_test_fixtures::set_provider_home(&fake_codex_path, &server.home_dir);
     let transcript_path = write_verified_codex_transcript(&server, session_id);
     let mut client = server.connect().await;
 
@@ -1616,6 +1620,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         detection_config,
     )
     .await;
+    ilium_test_fixtures::set_provider_home(&fake_codex_path, &server.home_dir);
     let old_transcript_path = write_verified_codex_transcript(&server, old_session_id);
     let new_transcript_path = write_verified_codex_transcript(&server, new_session_id);
     let mut client = server.connect().await;

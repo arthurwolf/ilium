@@ -241,7 +241,7 @@ async fn wait_for_detected_replacement(
 #[tokio::test]
 async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity() {
     let fixtures = tempfile::tempdir().expect("fixture directory");
-    install(fixtures.path(), "claude", &FixtureBehavior::Idle);
+    let agent = install(fixtures.path(), "claude", &FixtureBehavior::Idle);
     let _fixture_path = FixturePath::prepend(fixtures.path());
 
     let session_name = "frozen-session-recovery-test";
@@ -251,6 +251,7 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    ilium_test_fixtures::set_provider_home(&agent.path, &server.home_dir);
     write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
     let mut client = attach(&server, session_name).await;
     let frozen_pane_id = create_detected_claude_pane(&mut client).await;
@@ -332,7 +333,7 @@ async fn custom_agent_identity_survives_freeze_and_unfreeze() {
     use ilium_core::custom_agent::CustomAgentIdentity;
 
     let fixtures = tempfile::tempdir().expect("fixture directory");
-    install(fixtures.path(), "claude", &FixtureBehavior::Idle);
+    let agent = install(fixtures.path(), "claude", &FixtureBehavior::Idle);
     let _fixture_path = FixturePath::prepend(fixtures.path());
     let config_variable = ilium_server::paths::CONFIG_DIR_ENV;
     let previous_config = std::env::var_os(config_variable);
@@ -360,6 +361,7 @@ async fn custom_agent_identity_survives_freeze_and_unfreeze() {
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    ilium_test_fixtures::set_provider_home(&agent.path, &server.home_dir);
     write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
     let mut client = attach(&server, session_name).await;
     write_frame(
@@ -523,7 +525,7 @@ async fn custom_agent_identity_survives_freeze_and_unfreeze() {
 #[tokio::test]
 async fn unfreeze_preserves_worktree_ownership() {
     let fixtures = tempfile::tempdir().expect("fixture directory");
-    install(fixtures.path(), "claude", &FixtureBehavior::Idle);
+    let agent = install(fixtures.path(), "claude", &FixtureBehavior::Idle);
     let _fixture_path = FixturePath::prepend(fixtures.path());
 
     let session_name = "frozen-worktree-recovery-test";
@@ -533,6 +535,7 @@ async fn unfreeze_preserves_worktree_ownership() {
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    ilium_test_fixtures::set_provider_home(&agent.path, &server.home_dir);
     run_git(&server.project_cwd, &["init", "--initial-branch=main"]);
     run_git(&server.project_cwd, &["config", "user.name", "Ilium test"]);
     run_git(

@@ -679,7 +679,7 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
         Some("test-device:tui")
     );
     click(&tui, "Synthetic GPU", 0);
-    screen(&tui, "No current owner or waiting reservations.").await;
+    screen(&tui, "No current owner or waiting requests.").await;
     screen(&tui, "Enforced policy: exclusive").await;
     // The detail can render before its refresh finishes. Management actions
     // are deliberately refused while that request is pending. Re-click the
@@ -840,7 +840,7 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
         .unwrap();
     screen(&tui, "Taken").await;
     click(&tui, "Synthetic GPU revised", 0);
-    screen(&tui, "Queue 1").await;
+    screen(&tui, "Waiting · queue 1").await;
     screen(&tui, "QueueWaiter").await;
     // Open the resource's children, then the waiting pane, through real clicks.
     click(&tui, "Synthetic GPU revised", 0);
@@ -1272,7 +1272,7 @@ async fn independent_usb_boards_and_interrupted_wait_keep_authority() {
     .await
     .unwrap();
     click(&tui, "Synthetic board alpha", 0);
-    screen(&tui, "Queue 1").await;
+    screen(&tui, "Waiting · queue 1").await;
     screen(&tui, "BoardAlphaWaiter").await;
     assert!(
         !ilium_client::config::load(&sandbox.config)

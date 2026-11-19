@@ -50,6 +50,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         "codex",
         &FixtureBehavior::HoldArgument { argument_index: 1 },
     );
+    ilium_test_fixtures::set_provider_home(&agent.path, &server.home_dir);
     let directory = server.home_dir.join(".codex/sessions/2026/10/03");
     std::fs::create_dir_all(&directory).unwrap();
     let history = directory.join(format!("rollout-2026-10-03T00-00-00-{HISTORY_ID}.jsonl"));
@@ -350,6 +351,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
             mouse_tracking: false,
         },
     );
+    ilium_test_fixtures::set_provider_home(&agent.path, &server.home_dir);
     let mut client = server.connect().await;
     write_frame(
         &mut client,

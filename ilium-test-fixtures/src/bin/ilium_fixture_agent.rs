@@ -36,6 +36,7 @@ fn main() {
         );
         return;
     }
+    ilium_test_fixtures::initialize_provider_home().expect("initialize fixture provider home");
     let behavior = load_behavior();
     match behavior {
         FixtureBehavior::Idle => linger(),
