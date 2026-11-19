@@ -34,7 +34,6 @@ jobs:
       QUALIFIED_SOURCE_SHA: ${{ inputs.qualified_source_sha }}
       CURRENT_SOURCE_SHA: ${{ github.sha }}
       GH_TOKEN: ${{ github.token }}
-      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -46,6 +45,8 @@ jobs:
           python-version: '3.11'
       - name: Validate exact native run and export only its retained artifact IDs
         id: native
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: >-
           python release/scripts/preview_qualification.py run
           --run-id "$NATIVE_RUN_ID" --source-sha "$QUALIFIED_SOURCE_SHA"
@@ -92,6 +93,7 @@ jobs:
         env:
           PUBLISH: ${{ inputs.publish }}
           GHCR_TOKEN: ${{ github.token }}
+          TMPDIR: ${{ runner.temp }}
         shell: bash
         run: |
           set -euo pipefail
