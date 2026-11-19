@@ -14,6 +14,7 @@ pub mod store;
 pub mod view;
 
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
+use ilium_plugin_sdk::generated::host::kernel_settings::HostKernelSettings;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
@@ -52,14 +53,23 @@ impl ServiceProvider for KanbanServer {
             return ServiceReply::Done(error_reply("not-found", "unknown service method"));
         }
         ServiceReply::Done(match check_set_setting(&call.payload_json) {
-            Ok(()) => "{}".to_string(),
+            Ok((key, value)) => {
+                let mut api = ilium_plugin_sdk::host();
+                match HostKernelSettings::write(&mut *api, KERNEL_TAB.to_owned(), key, value) {
+                    Ok(()) => "{}".to_string(),
+                    Err(error) => serde_json::json!({"error": {
+                        "code": error.code,
+                        "message": error.message
+                    }}).to_string(),
+                }
+            }
             Err(message) => error_reply("invalid-argument", &message),
         })
     }
 }
 
 /// Validates the `set` parameters `{ tab, key, value }` (all strings) against the tab's rows.
-fn check_set_setting(payload_json: &str) -> Result<(), String> {
+fn check_set_setting(payload_json: &str) -> Result<(String, String), String> {
     let payload: serde_json::Value =
         serde_json::from_str(payload_json).map_err(|_| "the payload is not JSON".to_string())?;
     let text_of = |name: &str| {
@@ -72,17 +82,18 @@ fn check_set_setting(payload_json: &str) -> Result<(), String> {
     if tab != KERNEL_TAB {
         return Err(format!("tab {tab} is not owned by this plugin"));
     }
-    match key {
+    let parsed = match key {
         "card_preview" => value
             .parse::<bool>()
-            .map(|_| ())
+            .map(serde_json::Value::Bool)
             .map_err(|_| "card_preview must be true or false".to_string()),
         "column_width" => match value.parse::<i64>() {
-            Ok(width) if (12..=60).contains(&width) => Ok(()),
+            Ok(width) if (12..=60).contains(&width) => Ok(serde_json::json!(width)),
             _ => Err("column_width must be a whole number from 12 to 60".to_string()),
         },
         other => Err(format!("unknown setting {other}")),
-    }
+    }?;
+    Ok((key.to_owned(), parsed.to_string()))
 }
 
 fn error_reply(code: &str, message: &str) -> String {

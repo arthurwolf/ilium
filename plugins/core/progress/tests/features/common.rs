@@ -177,6 +177,7 @@ pub fn progress(host: &mut FakeHost, pane: u64, args: &[&str]) -> Run {
 pub fn run_in_pane(host: &mut FakeHost, pane: u64, args: &[&str]) -> Run {
     set_pane_env(host, Some(pane));
     let invocation = host.cli().invoke(args, b"");
+    host.settle();
     Run {
         stdout: invocation.stdout(),
         exit: invocation.exit_code(),
@@ -208,9 +209,9 @@ impl Open {
 /// Starts `ilium <args>` in `pane` without reading its result yet.
 pub fn start_in_pane(host: &mut FakeHost, pane: u64, args: &[&str]) -> Open {
     set_pane_env(host, Some(pane));
-    Open {
-        invocation: host.cli().invoke(args, b""),
-    }
+    let invocation = host.cli().invoke(args, b"");
+    host.settle();
+    Open { invocation }
 }
 
 /// Registers a monitor with `progress set`, one probe run answering `first_stdout`; returns its id.

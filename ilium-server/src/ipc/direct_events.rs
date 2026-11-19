@@ -16,6 +16,7 @@ pub(crate) struct DirectEventSender {
     sender: mpsc::Sender<QueuedServerEvent>,
     execution: Option<crate::execution::ExecutionClient>,
     error_scope: Option<RequestErrorScope>,
+    client_id: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -196,6 +197,7 @@ impl DirectEventSender {
                 sender,
                 execution: None,
                 error_scope: None,
+                client_id: None,
             },
             DirectEventReceiver(receiver),
         )
@@ -211,9 +213,20 @@ impl DirectEventSender {
                 sender,
                 execution: Some(execution),
                 error_scope: None,
+                client_id: None,
             },
             DirectEventReceiver(receiver),
         )
+    }
+
+    /// Associates requests arriving through this sender with their owning connection.
+    pub(crate) fn with_client_id(mut self, client_id: u64) -> Self {
+        self.client_id = Some(client_id);
+        self
+    }
+
+    pub(crate) fn client_id(&self) -> Option<u64> {
+        self.client_id
     }
 
     pub(crate) async fn send(&self, event: ServerEvent) -> Result<(), ServerEvent> {

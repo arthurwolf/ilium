@@ -140,6 +140,103 @@ fn remote_080_starting_the_job_stops_the_agent_after_freezing_the_pane() {
     assert_eq!(kinds, ["freeze", "terminate"]);
 }
 
+fn real_remote_host() -> (ilium_plugin_sdk::testing::FakeHost, u64) {
+    use ilium_plugin_sdk::primitives::SessionRef;
+    use ilium_plugin_sdk::types::FsPath;
+    let mut host = server_host();
+    let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Idle);
+    host.settings().set("enabled", json!(true)).unwrap();
+    let path = FsPath { scope: "agent-sessions:claude".into(), path: "session.jsonl".into() };
+    host.fs().write(path.clone(), br#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[]}}
+"#);
+    host.agents().set_session(pane, SessionRef { scope: path.scope, path: path.path, session_id: "test-session".into() });
+    (host, pane)
+}
+
+fn start_remote(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) -> Vec<ilium_plugin_sdk::types::Submission> {
+    use ilium_plugin_sdk::types::{MessageEvent, PluginId, PluginSide};
+    host.deliver_one(Event::Message(MessageEvent {
+        from: PluginId(PLUGIN_ID.into()), from_side: PluginSide::Client, from_client: None,
+        channel: "remote-start".into(), payload: json!({ "pane": pane }).to_string().into_bytes(),
+    }))
+}
+
+#[test]
+fn remote_compaction_refuses_to_freeze_when_recovery_storage_fails() {
+    let (mut host, pane) = real_remote_host();
+    host.storage_mut().set_write_error(Some(PluginError::new(
+        ErrorCode::Internal,
+        "storage unavailable",
+    )));
+    let submissions = start_remote(&mut host, pane);
+    assert!(submissions.iter().any(|item| matches!(&item.intent, Intent::Toast(_))));
+    assert!(!submissions.iter().any(|item| matches!(
+        &item.intent,
+        Intent::FreezePane(_) | Intent::TerminatePaneProcess(_)
+    )));
+    assert!(host.jobs().list().is_empty());
+    assert!(host.durable_timers().is_empty(), "failed storage must not leave a watchdog");
+    assert!(host.active_timers().is_empty(), "failed storage must stop polling");
+
+    host.storage_mut().set_write_error(None);
+    let retry = start_remote(&mut host, pane);
+    assert!(retry.iter().any(|item| matches!(&item.intent, Intent::FreezePane(_))));
+}
+
+#[test]
+fn remote_compaction_refuses_to_freeze_without_a_watchdog() {
+    let (mut host, pane) = real_remote_host();
+    host.set_durable_timer_error(Some(PluginError::new(
+        ErrorCode::Internal,
+        "timer unavailable",
+    )));
+    let submissions = start_remote(&mut host, pane);
+    assert!(submissions.iter().any(|item| matches!(&item.intent, Intent::Toast(_))));
+    assert!(!submissions.iter().any(|item| matches!(
+        &item.intent,
+        Intent::FreezePane(_) | Intent::TerminatePaneProcess(_)
+    )));
+    assert!(host.jobs().list().is_empty());
+    assert!(host.durable_timers().is_empty(), "failed watchdog setup must not leave a timer");
+    assert!(host.active_timers().is_empty(), "failed watchdog setup must stop polling");
+
+    host.set_durable_timer_error(None);
+    let retry = start_remote(&mut host, pane);
+    assert!(retry.iter().any(|item| matches!(&item.intent, Intent::FreezePane(_))));
+}
+
+#[test]
+fn remote_compaction_refuses_to_freeze_when_polling_cannot_start() {
+    let (mut host, pane) = real_remote_host();
+    host.inject_failure("timers.set", PluginError::new(ErrorCode::Io, "timer unavailable"));
+    let submissions = start_remote(&mut host, pane);
+    assert!(submissions.iter().any(|item| matches!(&item.intent, Intent::Toast(_))));
+    assert!(!submissions.iter().any(|item| matches!(&item.intent, Intent::FreezePane(_) | Intent::TerminatePaneProcess(_))));
+    assert!(host.durable_timers().is_empty());
+    assert!(host.active_timers().is_empty());
+    assert!(start_remote(&mut host, pane).iter().any(|item| matches!(&item.intent, Intent::FreezePane(_))));
+}
+
+#[test]
+fn compaction_watchdog_retries_after_recovery_state_removal_fails() {
+    let (mut host, pane) = real_remote_host();
+    let started = start_remote(&mut host, pane);
+    assert!(started.iter().any(|item| matches!(&item.intent, Intent::FreezePane(spec) if spec.pane == NodeId(pane))), "the actual remote start must freeze the pane");
+    assert!(host.durable_timers().iter().any(|(name, _)| name == &format!("compaction-watchdog/{pane}")), "the actual remote start must arm its watchdog");
+    host.storage_mut().set_write_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let before = host.submitted().len();
+    host.advance_clock(60 * 60 * 1000);
+    assert!(!host.submitted()[before..].iter().any(|item| matches!(&item.intent, Intent::UnfreezePane(_))));
+    let name = format!("compaction-watchdog/{pane}");
+    let retry_at = host.durable_timers().into_iter()
+        .find_map(|(timer, due)| (timer == name && due > host.clock().now()).then_some(due))
+        .expect("failed recovery state removal must rearm the watchdog");
+    host.storage_mut().set_write_error(None);
+    let before = host.submitted().len();
+    host.advance_clock(retry_at - host.clock().now());
+    assert!(host.submitted()[before..].iter().any(|item| matches!(&item.intent, Intent::UnfreezePane(spec) if spec.pane == NodeId(pane))));
+}
+
 /// REQ: F-080
 #[test]
 fn remote_080_job_progress_events_produce_no_submission() {

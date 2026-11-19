@@ -315,7 +315,7 @@ vendor.ext            0.1.0  <span class="t-warn">refused</span>    refused
 
 ### Idempotency and concurrency
 
-- [LIF-019] `set-enabled(id, true)` on an enabled plugin and `set-enabled(id, false)` on a disabled plugin MUST return `ok` and change nothing, and no event MUST be emitted. Test: call twice and count events.
+- [LIF-019] `set-enabled(id, true)` on an enabled plugin and `set-enabled(id, false)` on a disabled plugin MUST complete successfully without changing state or emitting a state-change event; the request completion event is still delivered. Test: call twice and count events.
 - [LIF-020] The host MUST serialise all transitions of one plugin id. Transitions of different plugin ids MAY run in parallel. Test: issue disable and uninstall at the same time and assert one runs after the other.
 
 How a request behaves while another transition of the same plugin is in flight:
@@ -379,7 +379,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-016]** The host MUST emit `plugin-state-changed` once per state change, in the order the changes happened, to every subscriber with `plugins.manage`.
 - **[LIF-017]** `plugins.list` MUST return one record per installed plugin with every field of the `plugin-info` table, in table order.
 - **[LIF-018]** `enabled` MUST equal the rule above in every state.
-- **[LIF-019]** `set-enabled(id, true)` on an enabled plugin and `set-enabled(id, false)` on a disabled plugin MUST return `ok` and change nothing, and no event MUST be emitted.
+- **[LIF-019]** `set-enabled(id, true)` on an enabled plugin and `set-enabled(id, false)` on a disabled plugin MUST complete successfully without changing state or emitting a state-change event; the request completion event is still delivered.
 - **[LIF-020]** The host MUST serialise all transitions of one plugin id. Transitions of different plugin ids MAY run in parallel.
 - **[LIF-091]** A change MUST be applied to a server under the per-plugin serialisation of [lifecycle states](/pages/reference-plugin-lifecycle-states/).
 - **[LIF-283]** The package states `disabled-untrusted` and `disabled-blocked` MUST follow rows P13 to P16, MUST be stored in `installed.json` and MUST survive a restart. A plugin in either state MUST NOT run, and MUST keep its grants, settings and data.

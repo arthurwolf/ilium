@@ -157,6 +157,18 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let menu_items_fn = if has("menu-provider") {
+        quote! {
+            fn native_menu_items(
+                &mut self,
+                context: #krate::exports::MenuContext,
+            ) -> ::core::option::Option<::std::vec::Vec<#krate::exports::MenuEntry>> {
+                ::core::option::Option::Some(<Self as #krate::MenuProvider>::menu_items(self, context))
+            }
+        }
+    } else {
+        quote! {}
+    };
     let render_fn = if has("views") {
         quote! {
             fn native_render(
@@ -204,6 +216,7 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
             #run_job_fn
             #handle_service_fn
             #handle_hook_fn
+            #menu_items_fn
             #render_fn
         }
     }

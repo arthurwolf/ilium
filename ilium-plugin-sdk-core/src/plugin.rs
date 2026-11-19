@@ -591,6 +591,14 @@ pub trait NativeEntry: Sized {
         let _ = call;
         None
     }
+    /// Dispatches `menu-provider.menu-items`; `None` when the export is absent.
+    fn native_menu_items(
+        &mut self,
+        context: crate::exports::MenuContext,
+    ) -> Option<Vec<crate::exports::MenuEntry>> {
+        let _ = context;
+        None
+    }
     /// Dispatches `views.render`; `None` when the plugin does not export `views`.
     fn native_render(
         &mut self,

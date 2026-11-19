@@ -160,8 +160,7 @@ pub struct AttentionClient {
 
 impl Lifecycle for AttentionClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        self.client.activate();
-        Ok(())
+        self.client.activate()
     }
 }
 

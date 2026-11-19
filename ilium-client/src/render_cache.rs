@@ -788,6 +788,11 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::Rejected(rejection) if rejection.code == "ipc.protocol-mismatch" => {
+            app.status_message = Some(format!("Plugin protocol mismatch: {}", rejection.message));
+            app.status_message_retention = app.processing_derivation_retention.clone();
+            None
+        }
         // Plugin traffic belongs to the client plugin host, not to the render cache. A changed
         // plugin list redraws Settings when it is open.
         event @ (ServerEvent::Plugin(_)
@@ -1170,6 +1175,16 @@ mod tests {
 
     fn app() -> App {
         App::new("test".to_string(), std::env::temp_dir())
+    }
+
+    #[test]
+    fn incompatible_plugin_protocol_is_visible_without_a_plugin_host() {
+        let mut app = app();
+        apply(&mut app, ServerEvent::Rejected(ilium_ipc::plugin::Rejection {
+            code: "ipc.protocol-mismatch".to_owned(),
+            message: "client and server differ".to_owned(),
+        }));
+        assert_eq!(app.status_message.as_deref(), Some("Plugin protocol mismatch: client and server differ"));
     }
 
     #[test]

@@ -408,6 +408,7 @@ impl FsState {
 
     /// Refuses a new asynchronous request while `PENDING_REQUEST_CAP` are pending.
     fn require_capacity(&self) -> Result<(), PluginError> {
+        self.env.ensure_job_request_capacity()?;
         if self.held.len() >= PENDING_REQUEST_CAP {
             return Err(plugin_error(
                 ErrorCode::Busy,
@@ -1757,6 +1758,7 @@ impl HostFs for FsImport {
     }
 
     fn pick(&mut self, spec: PickSpec) -> Result<RequestId, PluginError> {
+        self.env.ensure_job_request_capacity()?;
         if !self.env.holds("fs.pick") {
             return Err(plugin_error(
                 ErrorCode::NotPermitted,

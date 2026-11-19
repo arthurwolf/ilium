@@ -39,6 +39,7 @@ fn port_fence_fingerprint_changes_with_evidence() {
     );
     host.tree().set_screen(pane, rows(&["b"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(
         host.jobs().list().len(),
         1,
@@ -63,6 +64,7 @@ fn port_fence_new_screen_text_reaches_the_new_job_evidence() {
     let (mut host, pane, _) = start_shell_run(&["first marker row"]);
     host.tree().set_screen(pane, rows(&["second marker row"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     let mut jobs = host.jobs().list();
     let latest = jobs.pop().expect("a second job was started");
     let text = String::from_utf8_lossy(&latest.input).to_string();

@@ -64,6 +64,7 @@ fn port_pipeline_provider_failure_on_one_pane_keeps_the_other_pane_text() {
     host.tree().set_screen(first, rows(&["$ one"]));
     host.tree().set_screen(second, rows(&["$ two"]));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let jobs = host.jobs().list();
     assert_eq!(jobs.len(), 2);
     host.jobs().finish(
@@ -161,6 +162,7 @@ fn port_pipeline_cache_reuses_summarized_text_for_unchanged_evidence_only() {
     assert_eq!(record["short"]["text"], words(3));
     host.tree().set_screen(pane, rows(&["b"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(host.jobs().list().len(), 1, "changed evidence starts a job");
 }
 
@@ -171,6 +173,7 @@ fn port_pipeline_agent_without_verified_transcript_is_unavailable_and_never_call
     open_gate(&mut host);
     host.tree().add(agent_pane("worker", "claude"));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert!(host.jobs().list().is_empty());
     let record = first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()));
     assert_eq!(record["state"], "unavailable");
@@ -198,6 +201,7 @@ fn port_pipeline_unavailable_shell_screen_is_unavailable_and_skips_the_model() {
     let pane = host.tree().add(shell_pane("build shell"));
     host.tree().set_screen_unavailable(pane);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert!(host.jobs().list().is_empty());
     let records = jsonl(&host.cli().refresh(&invocation).stdout());
     assert_eq!(first_recap(&records)["state"], "unavailable");
@@ -236,6 +240,7 @@ fn port_pipeline_protected_project_directory_is_denied_without_reading() {
     host.tree().set_pane_directory(pane, "project:.ssh");
     host.tree().set_screen(pane, rows(&["$ ls"]));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert!(host.jobs().list().is_empty());
     let record = first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()));
     assert_eq!(record["state"], "denied");
@@ -288,6 +293,7 @@ fn port_pipeline_failed_pane_leaves_the_other_pane_summary_readable() {
     host.tree().set_screen(first, rows(&["$ one"]));
     host.tree().set_screen(second, rows(&["$ two"]));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let jobs = host.jobs().list();
     host.jobs().finish(
         jobs[0].request,
@@ -365,6 +371,7 @@ fn port_pipeline_failed_answer_is_not_cached_for_unchanged_evidence() {
     let records = finish_run(&mut host, &invocation, b"nonsense".to_vec());
     assert_eq!(first_recap(&records)["state"], "failed");
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(
         host.jobs().list().len(),
         1,
@@ -380,6 +387,7 @@ fn port_pipeline_agent_without_transcript_never_falls_back_to_the_screen() {
     let pane = host.tree().add(agent_pane("worker", "claude"));
     host.tree().set_screen(pane, rows(&["$ visible screen"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(host.screen_reads(), 0);
     assert!(host.transcript_queries().is_empty());
 }
@@ -401,6 +409,7 @@ fn port_pipeline_unavailable_screen_counts_as_unavailable_not_failed() {
     let pane = host.tree().add(shell_pane("build shell"));
     host.tree().set_screen_unavailable(pane);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let records = jsonl(&host.cli().refresh(&invocation).stdout());
     assert_eq!(summary(&records)["unavailable"], 1);
     assert_eq!(summary(&records)["failed"], 0);

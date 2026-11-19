@@ -85,6 +85,7 @@ fn error(code: ErrorCode, message: &str) -> PluginError {
 }
 
 /// A parsed `scheme://host[:port]/path` URL.
+#[derive(Debug)]
 struct ParsedUrl {
     scheme: String,
     host: String,
@@ -913,6 +914,7 @@ impl HttpImport {
 
 impl HostHttp for HttpImport {
     fn fetch(&mut self, request: HttpRequest) -> Result<RequestId, PluginError> {
+        self.env.ensure_job_request_capacity()?;
         let parsed = check_request(&request, &self.env, &self.setting_hosts)?;
         if self.requests.len() >= PENDING_REQUEST_LIMIT {
             return Err(error(

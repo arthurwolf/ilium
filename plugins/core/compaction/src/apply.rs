@@ -209,9 +209,11 @@ fn write_config(
     }
 }
 
-fn load_record(api: &mut dyn HostApi, agent: Agent) -> Option<Record> {
-    let bytes = HostStorage::get(api, Bucket::Global, agent.record_key())?;
-    serde_json::from_slice(&bytes).ok()
+fn load_record(api: &mut dyn HostApi, agent: Agent) -> Result<Option<Record>, String> {
+    HostStorage::get(api, Bucket::Global, agent.record_key())
+        .map_err(|error| format!("Could not read the saved revert record: {}", error.message))?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(|error| format!("Invalid saved revert record: {error}")))
+        .transpose()
 }
 
 /// Prepares writing `value` as the agent's threshold; returns the lines of the confirmation.
@@ -262,7 +264,7 @@ pub fn plan_apply(api: &mut dyn HostApi, agent: Agent, value: u64) -> Result<Vec
 /// Prepares restoring the value the last apply replaced; returns the lines of the confirmation.
 pub fn plan_revert(api: &mut dyn HostApi, agent: Agent) -> Result<Vec<String>, String> {
     let record =
-        load_record(api, agent).ok_or_else(|| format!("No applied {} to revert.", agent.key()))?;
+        load_record(api, agent)?.ok_or_else(|| format!("No applied {} to revert.", agent.key()))?;
     let (text, revision) = read_config(api, agent)?.ok_or_else(|| {
         format!(
             "{} no longer exists; nothing to revert.",

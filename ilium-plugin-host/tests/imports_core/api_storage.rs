@@ -52,7 +52,7 @@ fn bytes(count: usize) -> Vec<u8> {
 }
 
 fn all_keys(fixture: &mut ImportsFixture, bucket: Bucket) -> Vec<String> {
-    fixture.storage().keys(bucket, String::new())
+    fixture.storage().keys(bucket, String::new()).expect("storage read succeeds")
 }
 
 // ---- get ---------------------------------------------------------------------------------------
@@ -67,7 +67,7 @@ fn storage_get_returns_the_stored_value() {
             .put(Bucket::Project, "saves".to_owned(), vec![1, 2, 3]),
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Project, "saves".to_owned()),
+        fixture.storage().get(Bucket::Project, "saves".to_owned()).expect("storage read succeeds"),
         Some(vec![1, 2, 3])
     );
 }
@@ -77,7 +77,7 @@ fn storage_get_returns_the_stored_value() {
 fn storage_get_of_a_missing_key_is_none() {
     let mut fixture = storage_fixture();
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "missing".to_owned()),
+        fixture.storage().get(Bucket::Global, "missing".to_owned()).expect("storage read succeeds"),
         None
     );
 }
@@ -92,7 +92,7 @@ fn storage_get_of_an_empty_stored_value_is_some_empty() {
             .put(Bucket::Global, "empty".to_owned(), Vec::new()),
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "empty".to_owned()),
+        fixture.storage().get(Bucket::Global, "empty".to_owned()).expect("storage read succeeds"),
         Some(Vec::new())
     );
 }
@@ -106,9 +106,9 @@ fn storage_get_is_per_bucket() {
             .storage()
             .put(Bucket::Global, "k".to_owned(), vec![1]),
     );
-    assert_eq!(fixture.storage().get(Bucket::Project, "k".to_owned()), None);
-    assert_eq!(fixture.storage().get(Bucket::Session, "k".to_owned()), None);
-    assert_eq!(fixture.storage().get(Bucket::Shared, "k".to_owned()), None);
+    assert_eq!(fixture.storage().get(Bucket::Project, "k".to_owned()).expect("storage read succeeds"), None);
+    assert_eq!(fixture.storage().get(Bucket::Session, "k".to_owned()).expect("storage read succeeds"), None);
+    assert_eq!(fixture.storage().get(Bucket::Shared, "k".to_owned()).expect("storage read succeeds"), None);
 }
 
 /// REQ: WIT:ilium:host/storage.get
@@ -121,25 +121,25 @@ fn storage_get_does_not_fold_case_or_trim_the_key() {
             .put(Bucket::Global, "Key".to_owned(), vec![1]),
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "key".to_owned()),
+        fixture.storage().get(Bucket::Global, "key".to_owned()).expect("storage read succeeds"),
         None
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, " Key".to_owned()),
+        fixture.storage().get(Bucket::Global, " Key".to_owned()).expect("storage read succeeds"),
         None
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "Key".to_owned()),
+        fixture.storage().get(Bucket::Global, "Key".to_owned()).expect("storage read succeeds"),
         Some(vec![1])
     );
 }
 
 /// REQ: WIT:ilium:host/storage.get
 #[test]
-fn storage_get_of_an_empty_or_over_long_key_is_none_not_an_error() {
+fn storage_get_of_an_empty_or_over_long_key_reports_invalid_argument() {
     let mut fixture = storage_fixture();
-    assert_eq!(fixture.storage().get(Bucket::Global, String::new()), None);
-    assert_eq!(fixture.storage().get(Bucket::Global, "k".repeat(300)), None);
+    assert_eq!(fixture.storage().get(Bucket::Global, String::new()).unwrap_err().code, ErrorCode::InvalidArgument);
+    assert_eq!(fixture.storage().get(Bucket::Global, "k".repeat(300)).unwrap_err().code, ErrorCode::InvalidArgument);
 }
 
 proptest! {
@@ -148,7 +148,7 @@ proptest! {
     fn storage_put_then_get_round_trips_any_value(value in proptest::collection::vec(any::<u8>(), 0..2048)) {
         let mut fixture = storage_fixture();
         prop_assert!(fixture.storage().put(Bucket::Session, "round".to_owned(), value.clone()).is_ok());
-        prop_assert_eq!(fixture.storage().get(Bucket::Session, "round".to_owned()), Some(value));
+        prop_assert_eq!(fixture.storage().get(Bucket::Session, "round".to_owned()).expect("storage read succeeds"), Some(value));
     }
 }
 
@@ -169,7 +169,7 @@ fn storage_put_replaces_the_whole_value() {
             .put(Bucket::Global, "k".to_owned(), vec![9]),
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "k".to_owned()),
+        fixture.storage().get(Bucket::Global, "k".to_owned()).expect("storage read succeeds"),
         Some(vec![9])
     );
 }
@@ -180,7 +180,7 @@ fn storage_put_works_in_every_bucket() {
     let mut fixture = storage_fixture();
     for bucket in BUCKETS {
         expect_ok(fixture.storage().put(bucket, "k".to_owned(), vec![7]));
-        assert_eq!(fixture.storage().get(bucket, "k".to_owned()), Some(vec![7]));
+        assert_eq!(fixture.storage().get(bucket, "k".to_owned()).expect("storage read succeeds"), Some(vec![7]));
     }
 }
 
@@ -260,7 +260,7 @@ fn storage_put_value_of_exactly_1_mib_accepted() {
     assert_eq!(
         fixture
             .storage()
-            .get(Bucket::Global, "big".to_owned())
+            .get(Bucket::Global, "big".to_owned()).expect("storage read succeeds")
             .map(|v| v.len()),
         Some(MIB)
     );
@@ -291,7 +291,7 @@ fn storage_put_refused_value_keeps_the_previous_value() {
         .storage()
         .put(Bucket::Global, "k".to_owned(), bytes(MIB + 1));
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "k".to_owned()),
+        fixture.storage().get(Bucket::Global, "k".to_owned()).expect("storage read succeeds"),
         Some(vec![1, 2])
     );
 }
@@ -328,7 +328,7 @@ fn storage_put_one_byte_past_the_bucket_quota_quota_exceeded() {
             .put(Bucket::Global, "b".to_owned(), bytes(MIB - 1)),
     );
     assert_eq!(code, ErrorCode::QuotaExceeded);
-    assert_eq!(fixture.storage().get(Bucket::Global, "b".to_owned()), None);
+    assert_eq!(fixture.storage().get(Bucket::Global, "b".to_owned()).expect("storage read succeeds"), None);
 }
 
 /// REQ: WIT:ilium:host/storage.put
@@ -411,7 +411,7 @@ fn storage_remove_deletes_the_key() {
             .put(Bucket::Session, "k".to_owned(), vec![1]),
     );
     expect_ok(fixture.storage().remove(Bucket::Session, "k".to_owned()));
-    assert_eq!(fixture.storage().get(Bucket::Session, "k".to_owned()), None);
+    assert_eq!(fixture.storage().get(Bucket::Session, "k".to_owned()).expect("storage read succeeds"), None);
     assert!(all_keys(&mut fixture, Bucket::Session).is_empty());
 }
 
@@ -451,7 +451,7 @@ fn storage_remove_touches_only_the_named_bucket() {
     );
     expect_ok(fixture.storage().remove(Bucket::Global, "k".to_owned()));
     assert_eq!(
-        fixture.storage().get(Bucket::Project, "k".to_owned()),
+        fixture.storage().get(Bucket::Project, "k".to_owned()).expect("storage read succeeds"),
         Some(vec![2])
     );
 }
@@ -497,7 +497,7 @@ fn storage_remove_of_an_empty_or_over_long_key_does_nothing() {
         vec!["keep".to_owned()]
     );
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "keep".to_owned()),
+        fixture.storage().get(Bucket::Global, "keep".to_owned()).expect("storage read succeeds"),
         Some(vec![1])
     );
 }
@@ -530,7 +530,7 @@ fn storage_keys_returns_only_keys_that_start_with_the_prefix() {
         );
     }
     assert_eq!(
-        fixture.storage().keys(Bucket::Session, "pane/".to_owned()),
+        fixture.storage().keys(Bucket::Session, "pane/".to_owned()).expect("storage read succeeds"),
         vec!["pane/1/cursor", "pane/2/cursor"]
     );
 }
@@ -565,10 +565,10 @@ fn storage_keys_prefix_is_case_sensitive() {
     );
     assert!(fixture
         .storage()
-        .keys(Bucket::Global, "abc".to_owned())
+        .keys(Bucket::Global, "abc".to_owned()).expect("storage read succeeds")
         .is_empty());
     assert_eq!(
-        fixture.storage().keys(Bucket::Global, "Ab".to_owned()),
+        fixture.storage().keys(Bucket::Global, "Ab".to_owned()).expect("storage read succeeds"),
         vec!["Abc"]
     );
 }
@@ -625,7 +625,7 @@ proptest! {
         }
         let mut expected: Vec<String> = keys.iter().filter(|key| key.starts_with(&prefix)).cloned().collect();
         expected.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-        prop_assert_eq!(fixture.storage().keys(Bucket::Global, prefix), expected);
+        prop_assert_eq!(fixture.storage().keys(Bucket::Global, prefix).expect("storage read succeeds"), expected);
     }
 }
 
@@ -645,7 +645,7 @@ fn storage_write_batch_applies_every_entry() {
     ));
     assert_eq!(all_keys(&mut fixture, Bucket::Project), vec!["a", "b", "c"]);
     assert_eq!(
-        fixture.storage().get(Bucket::Project, "b".to_owned()),
+        fixture.storage().get(Bucket::Project, "b".to_owned()).expect("storage read succeeds"),
         Some(vec![2])
     );
 }
@@ -754,7 +754,7 @@ fn storage_write_batch_whose_last_entry_breaks_the_quota_keeps_every_previous_va
     assert_eq!(code, ErrorCode::QuotaExceeded);
     assert_eq!(all_keys(&mut fixture, Bucket::Global), vec!["old"]);
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "old".to_owned()),
+        fixture.storage().get(Bucket::Global, "old".to_owned()).expect("storage read succeeds"),
         Some(vec![9])
     );
 }
@@ -801,7 +801,7 @@ fn storage_write_batch_from_a_stale_data_version_conflict() {
     assert_eq!(error.code, ErrorCode::Conflict);
     assert_eq!(error.message, "stale-data-version");
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "k".to_owned()),
+        fixture.storage().get(Bucket::Global, "k".to_owned()).expect("storage read succeeds"),
         Some(vec![1])
     );
 }
@@ -815,7 +815,7 @@ fn storage_write_batch_later_entries_for_one_key_win() {
         vec![put_entry("k", &[1]), put_entry("k", &[2])],
     ));
     assert_eq!(
-        fixture.storage().get(Bucket::Global, "k".to_owned()),
+        fixture.storage().get(Bucket::Global, "k".to_owned()).expect("storage read succeeds"),
         Some(vec![2])
     );
 }
@@ -843,8 +843,8 @@ proptest! {
         prop_assert_eq!(&batched_keys, &all_keys(&mut single, Bucket::Global));
         for key in batched_keys {
             prop_assert_eq!(
-                batched.storage().get(Bucket::Global, key.clone()),
-                single.storage().get(Bucket::Global, key)
+                batched.storage().get(Bucket::Global, key.clone()).expect("storage read succeeds"),
+                single.storage().get(Bucket::Global, key).expect("storage read succeeds")
             );
         }
     }
@@ -924,7 +924,7 @@ fn storage_lease_does_not_touch_the_stored_shared_value() {
     );
     assert!(fixture.storage().lease("index".to_owned(), 1000));
     assert_eq!(
-        fixture.storage().get(Bucket::Shared, "index".to_owned()),
+        fixture.storage().get(Bucket::Shared, "index".to_owned()).expect("storage read succeeds"),
         Some(vec![4])
     );
 }

@@ -266,6 +266,69 @@ fn port_session_conversion_no_second_conversion_is_offered_while_one_is_active()
     assert!(host.deliver_one(convert_click("to-codex", pane)).is_empty());
 }
 
+#[test]
+fn an_unreadable_conversion_list_never_starts_a_second_conversion() {
+    let (mut host, pane) = server_with_pane("claude", true);
+    host.storage_mut().set_read_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let submissions = host.deliver_one(start_message(pane, "codex"));
+    assert!(frozen(&submissions).is_empty(), "the pane must not be frozen when the conversion list cannot be read");
+    assert!(terminated(&submissions).is_empty(), "the agent must not be stopped when the conversion list cannot be read");
+    assert_eq!(toasts(&submissions), 1, "the refusal must be visible");
+}
+
+#[test]
+fn a_conversion_does_not_freeze_a_pane_without_a_watchdog() {
+    let (mut host, pane) = server_with_pane("claude", true);
+    host.set_durable_timer_error(Some(PluginError::new(ErrorCode::Io, "timer unavailable")));
+    let submissions = host.deliver_one(start_message(pane, "codex"));
+    assert!(frozen(&submissions).is_empty(), "no pane may be frozen without a recovery timer");
+    assert!(terminated(&submissions).is_empty(), "the agent must keep running");
+    assert_eq!(toasts(&submissions), 1, "the refusal must be visible");
+    host.set_durable_timer_error(None);
+    let retried = host.deliver_one(start_message(pane, "codex"));
+    assert_eq!(frozen(&retried), [pane], "the failed start must not leave a phantom conversion");
+}
+
+#[test]
+fn watchdog_retries_when_conversion_state_is_temporarily_unreadable() {
+    use ilium_plugin_core_session_convert::flow::{WATCHDOG_MILLIS, WATCHDOG_PREFIX};
+    let (mut host, pane) = server_with_pane("claude", true);
+    host.deliver_one(start_message(pane, "codex"));
+    let name = format!("{WATCHDOG_PREFIX}{pane}");
+    host.storage_mut().set_read_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let before = host.submitted().len();
+    host.advance_clock(WATCHDOG_MILLIS);
+    let failed = host.submitted()[before..].to_vec();
+    assert!(unfrozen(&failed).is_empty());
+    let retry_at = host.durable_timers().into_iter()
+        .find_map(|(timer_name, due)| (timer_name == name && due > host.clock().now()).then_some(due))
+        .expect("a temporary read failure must rearm the watchdog");
+    host.storage_mut().set_read_error(None);
+    let before = host.submitted().len();
+    host.advance_clock(retry_at - host.clock().now());
+    let retried = host.submitted()[before..].to_vec();
+    assert_eq!(unfrozen(&retried), [pane]);
+}
+
+#[test]
+fn watchdog_retries_when_conversion_state_cannot_be_removed() {
+    use ilium_plugin_core_session_convert::flow::{WATCHDOG_MILLIS, WATCHDOG_PREFIX};
+    let (mut host, pane) = server_with_pane("claude", true);
+    host.deliver_one(start_message(pane, "codex"));
+    host.storage_mut().set_write_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let before = host.submitted().len();
+    host.advance_clock(WATCHDOG_MILLIS);
+    assert!(unfrozen(&host.submitted()[before..]).is_empty());
+    let name = format!("{WATCHDOG_PREFIX}{pane}");
+    let retry_at = host.durable_timers().into_iter()
+        .find_map(|(timer_name, due)| (timer_name == name && due > host.clock().now()).then_some(due))
+        .expect("a failed removal must retain a recovery timer");
+    host.storage_mut().set_write_error(None);
+    let before = host.submitted().len();
+    host.advance_clock(retry_at - host.clock().now());
+    assert_eq!(unfrozen(&host.submitted()[before..]), [pane]);
+}
+
 /// REQ: PORT:ilium-client/src/session_conversion.rs::a_stopped_agent_starts_the_worker_and_a_failed_stop_does_not
 #[test]
 fn port_session_conversion_a_stopped_agent_starts_the_worker() {
@@ -376,6 +439,19 @@ fn port_session_conversion_escape_closes_a_failed_dialog_and_unfreezes_the_pane(
     server.deliver_one(start_message(pane, "codex"));
     let reply = server.deliver_one(client_message("close", pane));
     assert_eq!(unfrozen(&reply), [pane]);
+}
+
+#[test]
+fn failed_storage_read_reports_close_failure_and_allows_retry() {
+    let (mut server, pane) = server_with_pane("claude", true);
+    server.deliver_one(start_message(pane, "codex"));
+    server.storage_mut().set_read_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let failed = server.deliver_one(client_message("close", pane));
+    assert_eq!(toasts(&failed), 1, "the user must know the pane is still frozen");
+    assert!(unfrozen(&failed).is_empty());
+    server.storage_mut().set_read_error(None);
+    let retried = server.deliver_one(client_message("close", pane));
+    assert_eq!(unfrozen(&retried), [pane]);
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::escape_while_converting_requests_cancellation

@@ -201,8 +201,11 @@ impl LiveServer {
                         tracing::warn!(%message, "ilium plugin: the live server refused");
                         return Err("session.not-found".to_owned());
                     }
+                    if let ilium_ipc::ServerEvent::Rejected(rejection) = &event {
+                        return Err(rejection.code.clone());
+                    }
                     let ilium_ipc::ServerEvent::Plugin(PluginEnvelope {
-                        body: EnvelopeBody::Control(ControlBody::PluginState { plugin: id, state }),
+                        body: EnvelopeBody::Control(ControlBody::SetEnabledResult { request_seq: 1, plugin: id, state }),
                         ..
                     }) = event
                     else {
@@ -214,11 +217,7 @@ impl LiveServer {
                     if let Some(code) = state.strip_prefix("refused:") {
                         return Err(code.to_owned());
                     }
-                    // The attach snapshot also reports the state the plugin had before;
-                    // only a state on the requested side of the switch is the answer.
-                    if wiring::is_disabled_state(&state) != enabled {
-                        return Ok(state);
-                    }
+                    return Ok(state);
                 }
                 Err("session.unreachable".to_owned())
             };

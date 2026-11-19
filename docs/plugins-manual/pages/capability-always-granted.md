@@ -75,10 +75,10 @@ Storage, settings and codec signatures, in WIT form:
 
 ```text
 enum bucket { global, project, session, shared }
-get: func(bucket: bucket, key: string) -> option<list<u8>>;
+get: func(bucket: bucket, key: string) -> result<option<list<u8>>, plugin-error>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
 remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
-keys: func(bucket: bucket, prefix: string) -> list<string>;
+keys: func(bucket: bucket, prefix: string) -> result<list<string>, plugin-error>;
 write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;
 lease: func(key: string, ttl-millis: u32) -> bool;
 
@@ -160,16 +160,16 @@ struct LaunchCounter {
     heartbeat: Option<TimerId>,
 }
 
-fn read_launch_count() -> u64 {
-    storage::get(Bucket::Project, LAUNCH_COUNT_KEY)
+fn read_launch_count() -> Result<u64, PluginError> {
+    Ok(storage::get(Bucket::Project, LAUNCH_COUNT_KEY)?
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .and_then(|text| text.parse().ok())
-        .unwrap_or(0)
+        .unwrap_or(0))
 }
 
 impl Lifecycle for LaunchCounter {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
-        let count = read_launch_count() + 1;
+        let count = read_launch_count()? + 1;
         storage::put(Bucket::Project, LAUNCH_COUNT_KEY, count.to_string().into_bytes())?;
         log::log(Level::Info, &format!("project opened {count} times"));
         self.heartbeat = Some(timers::set(60_000, Some(60_000))?);

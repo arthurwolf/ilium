@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Guide, backup and restore | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details open><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/" aria-current="page">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Guide, backup and restore</h1>
+
+<p>Plugin data is only safe when a copy of it exists and has been restored at least once. This guide sets the backup cadence, the number of archives to keep, a restore drill, and the recovery targets for plugin data. It also says which copies the host keeps by itself and which ones the administrator must manage. It is normative, and every rule has a requirement id.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="what-is-backed-up-and-by-whom">What is backed up, and by whom</h3>
+<table>
+<thead>
+<tr>
+<th>Copy</th>
+<th>Made by</th>
+<th>Kept by</th>
+<th>Covered by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Whole-host archive (plugin data, buckets, settings; grants with <code>--include-grants</code>, secrets with <code>--include-secrets</code>)</td>
+<td><code>ilium plugin backup &lt;file.tar.zst&gt;</code></td>
+<td>The administrator, at the path given</td>
+<td>HST-652, HST-654</td>
+</tr>
+<tr>
+<td>Single-plugin export (data, buckets, settings values)</td>
+<td><code>ilium plugin export &lt;id&gt; --out &lt;file&gt;</code></td>
+<td>The administrator</td>
+<td>LIF-290 to LIF-292</td>
+</tr>
+<tr>
+<td>Pre-migration copy</td>
+<td>The host, before <code>migrate</code></td>
+<td>The host: only the newest is kept</td>
+<td>LIF-107, LIF-109</td>
+</tr>
+<tr>
+<td>Logs and audit trail</td>
+<td>The host</td>
+<td>The host, on the retention in <a href="/pages/reference-plugin-files/">Plugin files</a></td>
+<td>Log rotation table in <a href="/pages/reference-plugin-files/">Plugin files</a></td>
+</tr>
+</tbody>
+</table>
+<p>The host never writes a whole-host archive on its own schedule. The cadence, the number of archives and the restore drill below are the administrator's job.</p>
+<h3 id="shared-hosts-each-user-has-their-own-stores">Shared hosts: each user has their own stores</h3>
+<p>On a host where several OS users run Ilium, each user has separate stores: grants, consents, trust, secrets, the audit log and the plugin install directory, all under that user's own directories (<a href="/pages/guide-enterprise-deployment/">SEC-194</a>). The one shared item is a system-wide install, which users cannot write (<a href="/pages/guide-enterprise-deployment/">HST-687</a>).</p>
+<p><code>ilium plugin backup</code> reads the stores of the OS user that runs it. One run therefore captures one user's plugin data and nothing else. On a shared host, a run by a single user leaves out every other user's data. The exit status is still 0, and the restore drill still passes, because the archive it produced is internally valid. The administrator must cover each user separately:</p>
+<ul>
+<li>Keep a list of every OS user that holds plugin data. The manual defines no command that lists those users, so the list comes from the host's account records.</li>
+<li>Run <code>ilium plugin backup</code> once for each user, as that user, with one archive per user and a file name that names the user. Each user then has their own job under <a href="#cadence-and-retention">HST-970</a>, their own set of archives under <a href="#cadence-and-retention">HST-971</a>, and their own restore drill under <a href="#restore-drill">HST-973</a>.</li>
+<li>Restore a user's archive under the same OS account, into a scratch root (<a href="#restore-drill">HST-974</a>). On a different machine the restored <code>trust.json</code> is kept as <code>trust.json.tampered-&lt;YYYYMMDD-HHmmss&gt;</code> (<a href="/pages/reference-plugin-files/">HST-959</a>), and that user must re-establish each publisher with <code>ilium plugin trust add</code>.</li>
+</ul>
+<p><strong>Purging a user.</strong> <code>ilium plugin admin purge-user &lt;user&gt; --yes</code>, the command proposed in <a href="/pages/guide-enterprise-deployment/">HST-689</a> (owner to confirm), deletes that user's plugin data, storage, grants, logs and cache. It refuses a user whose session server is running (<code>purge.user-active</code>). It does not delete archives or exports that the administrator wrote elsewhere, the same as <a href="#deletion-and-export">HST-977</a>. Before a purge made for a privacy request, take an archive of that user first, under the same rule as <a href="#deletion-and-export">HST-978</a>, so the data can be restored if the request is withdrawn. A user's archive does not hold the audit log (<a href="/pages/reference-plugin-files/">HST-960</a>), so the system audit entry that <code>purge-user</code> writes is the only record of the purge that the host keeps.</p>
+<h3 id="cadence-and-retention">Cadence and retention</h3>
+<ul>
+<li>[HST-970] An administrator who keeps plugin data MUST run <code>ilium plugin backup</code> at least once every 24 hours (proposed, owner to confirm) from a scheduled job, and the job MUST fail loudly when the command exits non-zero. Test: schedule the job, stop the server, and read the job's exit status.</li>
+<li>[HST-971] The administrator MUST keep at least the 7 newest archives (proposed, owner to confirm) and MUST keep them on a different disk from the live <code>&lt;data&gt;/plugins</code> folder. <code>ilium plugin backup</code> MUST NOT delete any archive, including an older one at the same path, unless <code>--force</code> is given. Test: write 8 archives, then read the folder listing.</li>
+<li>[HST-972] An archive MUST be treated as data: it holds plugin data and, with <code>--include-secrets</code>, credentials. The administrator MUST store it with the same access limit as the plugin data folder. Test: list the owner and mode of an archive written by the command.</li>
+</ul>
+<h3 id="archive-encryption-and-off-site-copies">Archive encryption and off-site copies</h3>
+<p><strong>No archive leaves the host unencrypted.</strong> The host does not encrypt archives in this version. <code>ilium plugin backup</code> writes plain bytes, and the command prints that fact and the archive path on each run (<a href="/pages/reference-plugin-files/">HST-962</a>, <a href="/pages/reference-secrets/#storage-at-rest">SEC-958</a>). An archive made with <code>--include-secrets</code> holds credentials in that same readable form, so it is a credential store, not only a data backup.</p>
+<p>On the host, the archive is protected by its owner-only mode (<a href="/pages/reference-plugin-files/">HST-962</a> sets 0600, <a href="#cadence-and-retention">HST-972</a> requires the same limit as the data folder) and by whatever disk encryption the administrator applies (<a href="/pages/reference-secrets/#storage-at-rest">SEC-958</a>). No Ilium option takes a passphrase for an archive. <code>ILIUM_KEY_PASSPHRASE</code> unlocks publisher signing keys only (<a href="/pages/reference-signing-and-trust/">PKG-211</a>), and the manual defines no use of it for <code>backup</code> or <code>restore</code>.</p>
+<p>Rules for copies that leave the host (not numbered, as the administrator's own procedure):</p>
+<ul>
+<li>Encrypt an archive before it goes to any storage the administrator does not fully control, such as an off-site server, a cloud bucket, removable media or a share another party can reach. The manual names no encryption tool; the administrator chooses one.</li>
+<li>Keep the key or passphrase apart from the encrypted copy: not in the same folder, bucket or script, and never on a command line. This follows the rule of <a href="/pages/guide-publishing/">PKG-494</a>. A lost key makes the encrypted copy unrecoverable, so keep the key in a second safe place as well.</li>
+<li>Before relying on an encrypted copy, decrypt it into a scratch root and run <code>ilium plugin restore &lt;file&gt; --dry-run</code> on the decrypted file, as in the drill above. Delete the decrypted file once the drill result is recorded.</li>
+<li>The host's erasure does not reach copies outside Ilium (<a href="/pages/reference-plugin-files/">HST-962</a>). When a plugin's data must be gone everywhere, delete each off-site copy and its key separately, as <a href="#deletion-and-export">HST-977</a> requires for the copies the administrator keeps.</li>
+</ul>
+<h3 id="restore-drill">Restore drill</h3>
+<p>A backup is not known to work until it has been restored. The drill below uses the same commands as a real restore, but changes nothing in the live data.</p>
+<ol>
+<li>Check the newest archive with <code>ilium plugin restore &lt;file&gt; --dry-run</code>. The dry run validates the manifest and every entry hash and lists what would change. It changes no file.</li>
+<li>Restore that archive into a scratch data root, never into the live one, with the live session server stopped or not started.</li>
+<li>Start the plugins in the scratch root and read <code>ilium plugin list</code> and the data of one plugin you know.</li>
+<li>Record the archive name, the date, the result of each step, and the time the restore took.</li>
+</ol>
+<ul>
+<li>[HST-973] The administrator MUST run the restore drill at least once a month (proposed, owner to confirm) and after every change of host version. A dry run that exits non-zero, or lists a hash mismatch, MUST count as a failed drill. Test: flip one byte of an entry in a copy of the archive, run <code>--dry-run</code>, and read the exit status and the listing.</li>
+<li>[HST-974] A drill MUST restore into a scratch data root. A restore into a live data root while a session server runs MUST be refused with <code>restore.server-running</code> (HST-653). Test: start a server and run <code>ilium plugin restore</code> against its data root, and read the error code.</li>
+</ul>
+<h3 id="recovery-targets">Recovery targets</h3>
+<p>These are targets for planning. They are not guarantees the host makes.</p>
+<ul>
+<li>[HST-975] For plugin data, the recovery point objective MUST be no more than 24 hours (proposed, owner to confirm), which is the backup cadence of HST-970. Data written after the newest archive is lost on restore. Test: write data, wait past the cadence, restore, and count the lost writes.</li>
+<li>[HST-976] For a single plugin's data in an archive up to 1 GiB (proposed, owner to confirm), the restore MUST complete within 15 minutes (proposed, owner to confirm) on the reference machine, timed from the first <code>restore</code> command to the final result line. Test: time one restore of a 1 GiB archive on the reference machine and record the result in the drill log.</li>
+</ul>
+<h3 id="deletion-and-export">Deletion and export</h3>
+<ul>
+<li>[HST-977] Deleting plugin data, with <code>ilium plugin uninstall &lt;id&gt; --purge</code> or the Delete data choice in the uninstall dialog, MUST NOT delete a whole-host archive or a single-plugin export that the administrator wrote elsewhere. The administrator MUST delete those copies separately when the data must be gone everywhere. Test: export a plugin, purge it, and check that the export file still exists.</li>
+<li>[HST-978] Before the administrator purges a plugin for a privacy request, the administrator MUST take an export or an archive of that plugin, so that the data can be restored if the request is withdrawn or wrongly scoped. Test: follow the runbook of <a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a> and check the export exists before the purge.</li>
+</ul>
+<h3 id="common-failures">Common failures</h3>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>restore.format-unsupported</code></td>
+<td>The archive has an unknown major format (HST-654)</td>
+<td>Restore with a host that wrote the archive, then take a new archive</td>
+</tr>
+<tr>
+<td><code>restore.host-newer</code></td>
+<td>The archive was written by a newer host (HST-654)</td>
+<td>Install that host version, or pass <code>--force</code> after reading the release notes</td>
+</tr>
+<tr>
+<td>Dry run lists a hash mismatch</td>
+<td>The archive was damaged or edited (HST-653)</td>
+<td>Do not restore it. Use the previous archive and check the copy process</td>
+</tr>
+<tr>
+<td><code>restore.server-running</code></td>
+<td>A session server is running on the data root (HST-653)</td>
+<td>Stop the server, or restore into a scratch root</td>
+</tr>
+<tr>
+<td><code>package.platform-unsupported</code> after a restore on another system</td>
+<td>The plugin does not run on this operating system (HST-655)</td>
+<td>The data is kept. Install a build for this platform, or leave the plugin refused at load</td>
+</tr>
+</tbody>
+</table>
+<h3 id="after-a-restore-verify-and-roll-back">After a restore: verify and roll back</h3>
+<p>A restore that finished without an error message is not yet a good restore. A plugin can restore cleanly and still fail when it starts, because its code does not accept the restored data or because the data came from another version. Check each restored plugin before you let users work with it.</p>
+<ol>
+<li>Run <code>ilium plugin list --json</code> and read the state of each restored plugin. A plugin in <code>failed</code> or <code>stopped-by-failure</code> has a problem.</li>
+<li>Run <code>ilium plugin health</code> and read the exit code with the table in <a href="/pages/ops-crash-isolation-health-and-kill-switch/">Crash isolation, health checks and the kill switch</a>.</li>
+<li>Run <code>ilium plugin logs &lt;id&gt; --tail 100</code> for each restored plugin. Look for <code>restart.scheduled</code>, <code>deactivate.deadline</code> and any trap line.</li>
+<li>Read the crash record of each plugin that failed (<code>ilium plugin status &lt;id&gt;</code>), and keep a copy before you change anything.</li>
+</ol>
+<p>The restore is complete only when every restored plugin is in its state from before the backup, or in a state you accept and have written down.</p>
+<p>Before you restore over live data, keep the state you have now. Take a new archive with <code>ilium plugin backup</code> immediately before the restore, and keep the pre-restore copy that the host writes for each session snapshot (<code>&lt;name&gt;.pre-restore.json</code>). Do not write these copies by hand.</p>
+<ul>
+<li><strong>[OPS-212]</strong> After every restore the administrator MUST run the four checks above for each restored plugin, in that order, and MUST NOT give users access to a plugin whose check shows <code>failed</code>, <code>stopped-by-failure</code> or a crash record written after the restore. Test: restore an archive of a fixture plugin whose <code>activate</code> traps, run the four checks, and assert that the plugin is listed as failed with a crash record and that the procedure stops there. (proposed, owner to confirm)</li>
+<li><strong>[OPS-213]</strong> Before a restore into a live data root, the administrator MUST create a new archive with <code>ilium plugin backup</code> and MUST keep that archive until the restored data has passed the checks of OPS-212. Test: run a restore into a live root and assert that a new archive exists, dated before the restore, and that the restore is refused while no archive exists. (proposed, owner to confirm)</li>
+<li><strong>[OPS-214]</strong> When a restored plugin fails the checks of OPS-212, the administrator MUST return the data to its pre-restore state by restoring the archive of OPS-213 with <code>ilium plugin restore &lt;file&gt; --dry-run</code> first and then <code>--replace</code> or <code>--merge</code>. <code>--replace</code> removes the plugins that the archive does not hold, so the administrator MUST use it only when no plugin was installed after the archive was made, and <code>--merge</code> keeps those plugins. The administrator MUST NOT run either command until the dry run shows the list of changes and the administrator has read it. A restore MUST run with the session server stopped, as HST-653 requires. Test: restore a broken archive, roll back with the pre-restore archive, and assert that the plugin's data matches the data before the first restore. (proposed, owner to confirm)</li>
+<li><strong>[OPS-215]</strong> During a rollback the administrator MUST NOT use <code>--discard-data</code> on any plugin, because it deletes data that a later check might need. Data is deleted only by a purge under <a href="#deletion-and-export">HST-978</a>, after an export. Test: run a rollback with a plugin whose data is newer than the archive and assert that no data was deleted and that the export step was required before any purge. (proposed, owner to confirm)</li>
+<li><strong>[OPS-216]</strong> The administrator MUST write the result of the checks of OPS-212 in the restore drill log with the archive name, the date, and one line for each restored plugin with its state and its exit code. Test: read the drill log after a restore of two plugins and count one line for each plugin. (proposed, owner to confirm)</li>
+</ul>
+<h3 id="where-the-other-rules-are">Where the other rules are</h3>
+<ul>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a> for the steps when a plugin has damaged its own data.</li>
+<li><a href="/pages/guide-data-migration/">Data migration</a> for the copies the host makes before a migration.</li>
+<li><a href="/pages/reference-plugin-files/">Plugin files</a> for where each copy lives.</li>
+</ul>
+<h2 id="requirement-statements">Requirement statements</h2>
+<ul>
+<li><strong>[HST-970]</strong> An administrator who keeps plugin data MUST run <code>ilium plugin backup</code> at least once every 24 hours (proposed, owner to confirm) from a scheduled job, and the job MUST fail loudly when the command exits non-zero.</li>
+<li><strong>[HST-971]</strong> The administrator MUST keep at least the 7 newest archives (proposed, owner to confirm) and MUST keep them on a different disk from the live <code>&lt;data&gt;/plugins</code> folder. <code>ilium plugin backup</code> MUST NOT delete any archive, including an older one at the same path, unless <code>--force</code> is given.</li>
+<li><strong>[HST-972]</strong> An archive MUST be treated as data: it holds plugin data and, with <code>--include-secrets</code>, credentials. The administrator MUST store it with the same access limit as the plugin data folder.</li>
+<li><strong>[HST-973]</strong> The administrator MUST run the restore drill at least once a month (proposed, owner to confirm) and after every change of host version. A dry run that exits non-zero, or lists a hash mismatch, MUST count as a failed drill.</li>
+<li><strong>[HST-974]</strong> A drill MUST restore into a scratch data root. A restore into a live data root while a session server runs MUST be refused with <code>restore.server-running</code> (HST-653).</li>
+<li><strong>[HST-975]</strong> For plugin data, the recovery point objective MUST be no more than 24 hours (proposed, owner to confirm), which is the backup cadence of HST-970. Data written after the newest archive is lost on restore.</li>
+<li><strong>[HST-976]</strong> For a single plugin's data in an archive up to 1 GiB (proposed, owner to confirm), the restore MUST complete within 15 minutes (proposed, owner to confirm) on the reference machine, timed from the first <code>restore</code> command to the final result line.</li>
+<li><strong>[HST-977]</strong> Deleting plugin data, with <code>ilium plugin uninstall &lt;id&gt; --purge</code> or the Delete data choice in the uninstall dialog, MUST NOT delete a whole-host archive or a single-plugin export that the administrator wrote elsewhere. The administrator MUST delete those copies separately when the data must be gone everywhere.</li>
+<li><strong>[HST-978]</strong> Before the administrator purges a plugin for a privacy request, the administrator MUST take an export or an archive of that plugin, so that the data can be restored if the request is withdrawn or wrongly scoped.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/guide-administration/"><small>Previous</small>Plugin administration guide</a><a class="next" href="/pages/guide-ci-recipes/"><small>Next</small>CI recipes</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-is-backed-up-and-by-whom">What is backed up, and by whom</a></li><li class="l2"><a href="#shared-hosts-each-user-has-their-own-stores">Shared hosts: each user has their own stores</a></li><li class="l2"><a href="#cadence-and-retention">Cadence and retention</a></li><li class="l2"><a href="#archive-encryption-and-off-site-copies">Archive encryption and off-site copies</a></li><li class="l2"><a href="#restore-drill">Restore drill</a></li><li class="l2"><a href="#recovery-targets">Recovery targets</a></li><li class="l2"><a href="#deletion-and-export">Deletion and export</a></li><li class="l2"><a href="#common-failures">Common failures</a></li><li class="l2"><a href="#after-a-restore-verify-and-roll-back">After a restore: verify and roll back</a></li><li class="l2"><a href="#where-the-other-rules-are">Where the other rules are</a></li><li class="l2"><a href="#requirement-statements">Requirement statements</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

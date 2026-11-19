@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Author onboarding | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Manual</b></p>
+<h1>Author onboarding</h1>
+
+<p>This page is the path a new plugin author walks: create a project, check the layout it produced, run the local development loop, run the tests, and find out why a plugin failed. It does not repeat the command reference. Each step links to the page that owns the rule, and the requirement IDs here cover only the order of steps and the behaviour an author relies on in the first days.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The Ilium plugin command line (<code>ilium plugin</code>), as set up in <a href="/pages/getting-started-toolchain/">Set up a toolchain</a>.</li>
+<li>The toolchain for your language: Rust with the WebAssembly target, or TypeScript with Bun. The exact versions are in <a href="/pages/getting-started-toolchain/">Set up a toolchain</a>.</li>
+<li>A running Ilium session in the project directory for the <code>dev</code> step. The <code>dev</code> command never starts one ([DEV-180]).</li>
+<li>About 30 minutes for the first pass through this page.</li>
+</ul>
+<h2 id="the-five-steps">The five steps</h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Command</th>
+<th>Owner page</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Create</td>
+<td><code>ilium plugin new</code></td>
+<td><a href="/pages/reference-project-templates/">Project templates</a></td>
+<td>The folder holds the template files and passes <code>check</code></td>
+</tr>
+<tr>
+<td>2. Verify</td>
+<td><code>check</code>, <code>lint</code>, <code>test</code>, <code>build</code></td>
+<td><a href="/pages/reference-plugin-cli/">Plugin CLI</a></td>
+<td>Each command exits with 0</td>
+</tr>
+<tr>
+<td>3. Develop</td>
+<td><code>ilium plugin dev</code></td>
+<td><a href="/pages/reference-plugin-cli/#dev">Plugin CLI</a></td>
+<td>The dev copy runs and reloads after a save</td>
+</tr>
+<tr>
+<td>4. Test</td>
+<td><code>ilium plugin test</code></td>
+<td><a href="/pages/testing/">Testing plugins</a> and <a href="/pages/reference-test-harness/">Test harness reference</a></td>
+<td>Every fixture passes</td>
+</tr>
+<tr>
+<td>5. Debug</td>
+<td>log, trace and inspector</td>
+<td><a href="/pages/debugging/">Debugging</a> and <a href="/pages/reference-debugging-tools/">Debugging tools</a></td>
+<td>The trap or wrong output has a <code>file:line</code> and a reason</td>
+</tr>
+</tbody>
+</table>
+<h2 id="step-1-create-the-project">Step 1: create the project</h2>
+<p>A project is created from one template. The template chooses which sides exist. The example below creates a server-side Rust plugin for the id <code>example.hello</code>.</p>
+<pre><code>ilium plugin new ~/src/hello-ilium --id example.hello --lang rust --template server
+</code></pre>
+<ul>
+<li><strong>[ONB-001]</strong> <code>plugin new</code> MUST create the common files listed in <a href="/pages/reference-project-templates/#common-files">Project templates</a> and the source files of the chosen template, and nothing else outside <code>&lt;dir&gt;</code>.</li>
+<li><strong>[ONB-002]</strong> The publisher of a new project MUST be the operating system user name unless <code>--publisher</code> is given, and the display name MUST be the last label of the id unless <code>--name</code> is given.</li>
+</ul>
+<p>The layout a new author sees:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Who writes it</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.json</code></td>
+<td>Author</td>
+<td>Id, sides, grants, and the help and settings entries of the plugin (<a href="/pages/reference-manifest/">Plugin manifest</a>)</td>
+</tr>
+<tr>
+<td><code>Cargo.toml</code> or <code>package.json</code></td>
+<td>Author</td>
+<td>Marks the language. The build reads it to choose the toolchain ([DEV-002])</td>
+</tr>
+<tr>
+<td><code>Cargo.lock</code> or <code>bun.lock</code></td>
+<td>Toolchain</td>
+<td>Pins the dependencies. <code>build --locked</code> needs it ([DEV-053])</td>
+</tr>
+<tr>
+<td><code>src/</code></td>
+<td>Author</td>
+<td>Source of each side</td>
+</tr>
+<tr>
+<td><code>help/overview.md</code></td>
+<td>Author</td>
+<td>Help topic shown in the help screen</td>
+</tr>
+<tr>
+<td><code>tests/fixtures/*.json</code></td>
+<td>Author</td>
+<td>Inputs for <code>test</code></td>
+</tr>
+<tr>
+<td><code>tests/fixtures/*.expect.json</code></td>
+<td>Author</td>
+<td>Expected results for the matching fixture</td>
+</tr>
+<tr>
+<td><code>tests/golden/*.txt</code></td>
+<td><code>test --update</code></td>
+<td>Expected renders, for templates with a view</td>
+</tr>
+<tr>
+<td><code>dist/&lt;side&gt;.wasm</code>, <code>dist/build.json</code></td>
+<td><code>build</code></td>
+<td>Built components and build record. Never edit them by hand</td>
+</tr>
+<tr>
+<td><code>.ilium/</code></td>
+<td>Ilium</td>
+<td>Coverage output (<code>test --coverage</code>) and other tool output. Listed in the template <code>.gitignore</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[ONB-003]</strong> The author MUST NOT edit files under <code>dist/</code> by hand. <code>build</code> MUST be the only writer of <code>dist/&lt;side&gt;.wasm</code> and <code>dist/build.json</code> ([DEV-050], [DEV-051]), and <code>test --coverage</code> MUST write its output under <code>.ilium/coverage/</code>.</li>
+</ul>
+<h2 id="step-2-verify-the-fresh-project">Step 2: verify the fresh project</h2>
+<p>A fresh project passes four commands with zero warnings. Run them in this order, as the README of the template lists them.</p>
+<pre><code>ilium plugin check
+ilium plugin lint --deny warnings
+ilium plugin test
+ilium plugin build
+</code></pre>
+<p><code>test</code> needs the built component, so on a fresh clone <code>build</code> MUST run before <code>test</code> ([DEV-080]).</p>
+<ul>
+<li><strong>[ONB-004]</strong> A fresh project MUST pass the four commands above with exit code 0 and no warning, in that order. The template guarantees this state ([DEV-045]). If a fresh project fails one of these commands, the author SHOULD treat it as a template or toolchain problem and report it, rather than edit the template files (proposed, owner to confirm).</li>
+<li><strong>[ONB-005]</strong> <code>test</code> on a project with no built component for its side MUST fail with <code>test.component-missing</code> and exit with 1. The author MUST run <code>build</code> and rerun <code>test</code>.</li>
+</ul>
+<h3 id="language-detection">Language detection</h3>
+<ul>
+<li><strong>[ONB-006]</strong> A project with only <code>Cargo.toml</code> MUST build as Rust, and a project with only <code>package.json</code> MUST build as TypeScript. A project with both files MUST fail with <code>toolchain.language-ambiguous</code>, and a project with neither MUST fail with <code>toolchain.language-unknown</code> ([DEV-002]). The author MUST keep one language per project.</li>
+</ul>
+<h3 id="toolchain-missing">Toolchain missing</h3>
+<ul>
+<li><strong>[ONB-007]</strong> When a toolchain is missing, <code>build</code> MUST stop with a <code>toolchain.*</code> code and exit with 4 ([DEV-012], [DEV-055]). The author installs the named tool and reruns the command. Running <code>doctor</code> lists every missing item with status <code>fail</code> and also exits with 4.</li>
+</ul>
+<h3 id="local-checks-that-stay-offline">Local checks that stay offline</h3>
+<ul>
+<li><strong>[ONB-008]</strong> <code>check</code> and <code>lint</code> MUST run without a network connection. <code>check --print-schema</code> MUST also run offline and print the manifest schema ([DEV-070], [DEV-075]).</li>
+</ul>
+<h2 id="step-3-the-development-loop">Step 3: the development loop</h2>
+<p><code>dev</code> builds the plugin, installs it as a development copy, rebuilds after each save and reloads the running instance. Start the session first: open <code>ilium</code> in the project directory, so that the session named <code>default</code> of that directory is the one <code>dev</code> finds ([DEV-004]).</p>
+<pre><code>cd ~/src/hello-ilium
+ilium plugin dev
+</code></pre>
+<p>The loop has these states. The arrows are the only transitions the author can cause or observe.</p>
+<pre><code>Idle --save--&gt; Queued --300 ms quiet--&gt; Building
+Building --ok--&gt; Reloading --&gt; Running
+Building --error--&gt; Running (old instance kept, errors printed)
+Running --Ctrl+C--&gt; Stopped (exit 130)
+</code></pre>
+<p>A save during a build is queued, and one more build then runs for all queued saves ([DEV-186]).</p>
+<ul>
+<li><strong>[ONB-009]</strong> <code>dev</code> MUST start a rebuild 300 ms after the last file change, and MUST ignore changes under <code>dist/</code>, <code>target/</code>, <code>node_modules/</code>, <code>.ilium/</code>, <code>.git/</code> and the paths in <code>.gitignore</code> ([DEV-185]).</li>
+<li><strong>[ONB-010]</strong> On a successful rebuild, <code>dev</code> MUST reload the server side first and then each attached client side. Each reload MUST print one <code>reload</code> record. A failed rebuild MUST print the compiler errors, keep the running instance, and send no <code>deactivate</code> ([DEV-187]). The author fixes the error and saves again; no restart is needed.</li>
+<li><strong>[ONB-011]</strong> The development copy MUST be installed as tier T3 with the <code>dev</code> badge and with a data folder of its own. A real install of the same id MUST not share that data folder ([DEV-181]). If a real install of the id is already present, <code>dev</code> MUST fail with <code>dev.id-installed</code> and exit with 1, unless <code>--replace-installed</code> is given ([DEV-183]).</li>
+<li><strong>[ONB-012]</strong> <code>dev</code> MUST build with debug information by default, so that a trap names <code>file:line</code>. <code>--release</code> MUST omit it ([DEV-182]).</li>
+<li><strong>[ONB-013]</strong> Ctrl+C in <code>dev</code> MUST deactivate the plugin with reason <code>disabled</code>, uninstall the development copy, keep its data folder unless <code>--purge-on-exit</code> is given, and exit with 130 ([DEV-189]).</li>
+<li><strong>[ONB-014]</strong> Restore bytes above 1 MiB MUST be dropped on reload, and the <code>reload</code> record MUST show <code>restore_dropped</code> true with <code>restored_bytes</code> 0 ([DEV-188]). An author who sees this MUST treat the reload as having lost its restore state and MUST NOT rely on that state surviving a reload (proposed, owner to confirm: the page does not yet name the storage API an author should use for large state).</li>
+</ul>
+<p>Worked example of one save. The author edits <code>src/lib.rs</code> at 10:02:00.000 and saves again at 10:02:00.200. <code>dev</code> queues both saves and starts one build at 10:02:00.500. That build passes. <code>dev</code> reloads the server side, prints one <code>reload</code> record with <code>restore_dropped</code> false, and the session shows the new behaviour. Had the build failed, the old instance would stay active and the compiler errors would appear in the <code>dev</code> output.</p>
+<h2 id="step-4-the-test-loop">Step 4: the test loop</h2>
+<p>A fixture is a JSON file of events and grants. An expectation file with the same base name, <code>&lt;name&gt;.expect.json</code>, states what the outcome must be. The full fixture and match-mode format is in <a href="/pages/reference-test-harness/">Test harness reference</a>.</p>
+<pre><code>ilium plugin test
+ilium plugin test --fixture 'tests/fixtures/*.json' --seed 7
+</code></pre>
+<ul>
+<li><strong>[ONB-015]</strong> A fixture with no expectation file MUST pass and print the warning <code>test.no-expectation</code>. The author SHOULD add an expectation for every fixture before the first CI run (proposed, owner to confirm: the warning is advisory today, and this page sets the team expectation, not a rule of the host).</li>
+<li><strong>[ONB-016]</strong> <code>test</code> MUST exit with 0 when every case passes, 3 when a case fails or traps, and 1 when a fixture cannot be read ([DEV-087]). A mismatch MUST print a <code>diff</code> record.</li>
+<li><strong>[ONB-017]</strong> A package with two sides MUST be given <code>--side</code> for <code>test</code>, or the command fails with <code>usage.missing-argument</code> ([DEV-085]). A one-side project needs no flag.</li>
+<li><strong>[ONB-018]</strong> <code>test --update</code> MUST rewrite only the expectation and golden files that differ and MUST print one <code>test.updated</code> warning for each file rewritten ([DEV-086]). The author reads the diff in version control before committing the rewrite.</li>
+<li><strong>[ONB-019]</strong> <code>test</code> MUST NOT run the project's own unit tests. Those run with <code>cargo test</code> or <code>bun test</code> in native mode, and <code>test --coverage</code> is the only form of <code>test</code> that starts them ([DEV-089]).</li>
+</ul>
+<h2 id="step-5-when-something-fails">Step 5: when something fails</h2>
+<p>Start with the exit code of the command, then the record it printed. The table maps each code to the first place to look.</p>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th>Meaning for an author</th>
+<th>First step</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Done</td>
+<td>None</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Build, install or read failure</td>
+<td>Read the <code>error</code> record and its code</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Wrong flag or argument. No files were written</td>
+<td>Run the command with <code>--help</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Findings, a failing case or a trap</td>
+<td>Read the <code>diff</code>, <code>finding</code> or trap reason</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Missing tool or failed <code>doctor</code> item</td>
+<td>Install the named tool</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Plugin, package or key not found</td>
+<td>Check the id and the path</td>
+</tr>
+<tr>
+<td>6</td>
+<td>No session reachable</td>
+<td>Start <code>ilium</code> in the project directory</td>
+</tr>
+<tr>
+<td>130</td>
+<td>Interrupted by Ctrl+C</td>
+<td>Rerun the command</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[ONB-020]</strong> An author who sees exit code 3 from <code>test</code> MUST read the first <code>diff</code> or trap record before changing the code, and MUST NOT update the expectation file to hide a trap ([DEV-084]). <code>test --update</code> is for an intended change of output only.</li>
+<li><strong>[ONB-021]</strong> An author who sees a trap MUST use the <code>file:line</code> of the trap and the reason in its record. For a trap in a release build, which has no debug information, the author MUST rebuild with <code>dev</code> or <code>build --debug</code> before reading the position ([DEV-182]).</li>
+</ul>
+<p>For the causes behind each code, and for the logs, traces and inspector views that show runtime state, read <a href="/pages/debugging/">Debugging</a> and then <a href="/pages/reference-debugging-tools/">Debugging tools</a>. The failure modes of <code>dev</code> itself are in <a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a>.</p>
+<h2 id="decisions-this-page-does-not-settle">Decisions this page does not settle</h2>
+<ul>
+<li>The command that launches a session for <code>dev</code> is <code>ilium</code> in the project directory. The page does not add a separate onboarding command, because none is defined in the command reference. Proposed, owner to confirm: keep it that way until a <code>doctor</code>-style first-run check is specified.</li>
+<li>CI pipelines should run <code>build --locked</code> so that a stale lockfile fails the build ([DEV-053]). The rule is stated in the command reference; the requirement to use it in CI is proposed, owner to confirm, and belongs in <a href="/pages/guide-ci-recipes/">CI recipes</a>.</li>
+</ul>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>A project directory that already holds files: <code>new</code> fails with <code>new.dir-not-empty</code> unless <code>--force</code> is given, and <code>--force</code> never deletes a file ([DEV-041]).</li>
+<li>A plugin id that starts with <code>ilium.</code>: <code>new</code> fails with <code>new.id-reserved</code> unless <code>--first-party</code> is given ([DEV-042]).</li>
+<li><code>dev</code> in a project whose id is already installed as a real plugin: see [ONB-011].</li>
+<li>A save while <code>dev</code> is building: the save is queued, not dropped ([DEV-186]).</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command line</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+</ul>
+
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-five-steps">The five steps</a></li><li class="l2"><a href="#step-1-create-the-project">Step 1: create the project</a></li><li class="l2"><a href="#step-2-verify-the-fresh-project">Step 2: verify the fresh project</a></li><li class="l3"><a href="#language-detection">Language detection</a></li><li class="l3"><a href="#toolchain-missing">Toolchain missing</a></li><li class="l3"><a href="#local-checks-that-stay-offline">Local checks that stay offline</a></li><li class="l2"><a href="#step-3-the-development-loop">Step 3: the development loop</a></li><li class="l2"><a href="#step-4-the-test-loop">Step 4: the test loop</a></li><li class="l2"><a href="#step-5-when-something-fails">Step 5: when something fails</a></li><li class="l2"><a href="#decisions-this-page-does-not-settle">Decisions this page does not settle</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

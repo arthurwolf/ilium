@@ -648,6 +648,7 @@ impl Drop for ProcessImport {
 
 impl HostProcess for ProcessImport {
     fn run(&mut self, spec: ProcessSpec) -> Result<RequestId, PluginError> {
+        self.env.ensure_job_request_capacity()?;
         validate_spec(&spec, true)?;
         self.require_run_grant(&spec.program)?;
         let working_folder = match &spec.cwd {

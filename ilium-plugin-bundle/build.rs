@@ -42,9 +42,9 @@ const PENDING_SIDES: &[&str] = &[];
 const SETTINGS_FILE: &str = "bundle-build.conf";
 /// The keys of the settings file.
 const SETTINGS_KEYS: &[&str] = &["mode", "locked", "offline", "target-dir"];
-/// The mode when neither the settings file nor ILIUM_PLUGIN_BUNDLE_MODE names one: an
-/// ordinary workspace build does not pay for the wasm build.
-const DEFAULT_MODE: &str = "skip";
+/// A normal build must include every declared component, including when the settings file
+/// is absent. Manifest-only catalogues remain available for explicitly selected checks.
+const DEFAULT_MODE: &str = "strict";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {

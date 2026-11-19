@@ -61,7 +61,7 @@ Topic ids are global. A topic id is `<plugin-id>/<local-id>`, where `<local-id>`
 | Function | Rust | TypeScript | WIT | Meaning |
 |---|---|---|---|---|
 | `list()` | `plugins::list() -> Vec<PluginInfo>` | `list()`, returns `PluginInfo[]` | `list<plugin-info>` | Returns every installed plugin, including disabled and failed ones. |
-| `set-enabled(plugin, enabled, scope)` | `plugins::set_enabled(plugin: &str, enabled: bool, scope: &str) -> Result<(), PluginError>` | `setEnabled(plugin, enabled, scope)`, throws `PluginError` | `result<_, plugin-error>` | Turns a plugin on or off. The call returns once the change is recorded. |
+| `set-enabled(plugin, enabled, scope)` | `plugins::set_enabled(plugin: &str, enabled: bool, scope: &str) -> Result<RequestId, PluginError>` | `setEnabled(plugin, enabled, scope)`, returns a request ID or throws `PluginError` | `result<request-id, plugin-error>` | Starts a plugin state change; `request-completed` reports its confirmed result. A timeout means the outcome may still be applied. |
 
 The record `plugin-info` has twenty fields. The WIT in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/) adds `state`, `side-states`, `scope`, `disabled-reason` and `health` to the six below, and nine distribution fields: `publisher`, `publisher-key`, `source`, `channel`, `pinned`, `update-available`, `deprecated`, `yanked` and `held-until`. `list()` never contacts a registry. `set-enabled` also takes a `scope`: `global`, `project` or `session` (see [Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)), and a global change reaches every running session within 2 seconds ([Plugin scope and sessions](/pages/reference-plugin-scope-and-sessions/)). The first six fields:
 
@@ -209,7 +209,7 @@ Illustrative, not generated: the help pane for the quick start topic, and the Se
 
 ### Lifecycle effects
 
-`set-enabled(id, false)` takes effect at once. The call returns `ok` when the change is recorded. The plugin then receives `deactivate(disabled)` within its deadline. Its contributions are withdrawn, and its pending requests are cancelled. Enabling records the change and activates the plugin by its activation rules: a `startup` plugin at once, and a lazy plugin at its next trigger. See [lifecycle](/pages/lifecycle/) for the full order of activation and deactivation.
+`set-enabled(id, false)` returns a request ID after admission. A successful `request-completed` event confirms the change was recorded; a timeout leaves the outcome uncertain and the caller must reconcile the listed state. The disabled plugin receives `deactivate(disabled)` within its deadline. Its contributions are withdrawn, and its pending requests are cancelled. Enabling follows the plugin's activation rules: a `startup` plugin starts at once, and a lazy plugin at its next trigger. See [lifecycle](/pages/lifecycle/) for the full order of activation and deactivation.
 
 <div class="note">
 <p>Turning a plugin on clears its <code>failed</code> flag and starts its failure count again. The plugin does not stay in the failed state after a successful enable.</p>

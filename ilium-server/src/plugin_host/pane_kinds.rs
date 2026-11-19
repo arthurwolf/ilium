@@ -6,6 +6,7 @@
 //! the server asks before it creates such a pane: does the kind exist, and which plugin owns it.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use ilium_core::PluginPaneKind;
 use serde_json::Value;
@@ -20,9 +21,10 @@ pub(crate) struct PaneKindEntry {
 }
 
 /// Every basic pane kind of the catalogue, by global kind id.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct PaneKinds {
     by_id: BTreeMap<String, PaneKindEntry>,
+    states: Option<Arc<Mutex<BTreeMap<String, String>>>>,
 }
 
 impl PaneKinds {
@@ -77,7 +79,13 @@ impl PaneKinds {
                 );
             }
         }
-        Self { by_id }
+        Self { by_id, states: None }
+    }
+
+    /// Restricts admission to plugins the runtime has loaded and not disabled or failed.
+    pub(crate) fn with_states(mut self, states: Arc<Mutex<BTreeMap<String, String>>>) -> Self {
+        self.states = Some(states);
+        self
     }
 
     /// The kind with this global id, if a catalogue plugin contributes it.
@@ -95,6 +103,15 @@ impl PaneKinds {
         let entry = self
             .get(kind_id)
             .ok_or_else(|| format!("no plugin contributes the pane kind {kind_id}"))?;
+        if let Some(states) = &self.states {
+            let available = states.lock().ok().and_then(|states| states.get(&entry.plugin).cloned())
+                .is_some_and(|state| matches!(state.as_str(), "running" | "loaded" | "manifest-only"));
+            // An executing owner may create its own pane during activation, before the
+            // runtime has published the new state. Other callers must see an admitted owner.
+            if !available && requester != Some(entry.plugin.as_str()) {
+                return Err(format!("plugin {} is not available for pane creation", entry.plugin));
+            }
+        }
         if requester.is_some_and(|plugin| plugin != entry.plugin) {
             return Err(format!(
                 "the pane kind {kind_id} belongs to {}, not to the plugin that asked",
@@ -149,6 +166,23 @@ mod tests {
     }
 
     #[test]
+    fn pane_admission_tracks_the_owner_runtime_state() {
+        let states = Arc::new(Mutex::new(BTreeMap::new()));
+        let kinds = PaneKinds::of_manifests([("ilium.core.kanban", KANBAN)]).with_states(Arc::clone(&states));
+        let id = "ilium.core.kanban.board";
+        assert!(kinds.admit(id, None).is_err());
+        assert!(kinds.admit(id, Some("ilium.core.kanban")).is_ok());
+        for state in ["loaded", "running", "manifest-only"] {
+            states.lock().unwrap().insert("ilium.core.kanban".into(), state.into());
+            assert!(kinds.admit(id, None).is_ok(), "{state}");
+        }
+        for state in ["disabled", "failed:trap", "stopped"] {
+            states.lock().unwrap().insert("ilium.core.kanban".into(), state.into());
+            assert!(kinds.admit(id, None).is_err(), "{state}");
+        }
+    }
+
+    #[test]
     fn broken_manifests_and_other_primitives_contribute_nothing() {
         let terminal_kind = r#"{"contributes": {"pane_kinds": [
             {"id": "tty", "title": "TTY", "primitive": "terminal"},
@@ -160,7 +194,7 @@ mod tests {
             ("example.tty", terminal_kind),
             ("example.empty", "{}"),
         ]);
-        assert_eq!(kinds, PaneKinds::default());
+        assert!(kinds.by_id.is_empty());
     }
 
     #[test]

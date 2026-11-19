@@ -76,7 +76,7 @@ pub mod stores;
 pub mod sync;
 pub mod telemetry;
 pub mod telemetry_history;
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod text;
 pub mod theme;

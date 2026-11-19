@@ -166,7 +166,11 @@ impl Handler for Counter {
                 continue;
             };
             if command == COUNT {
-                let current = storage::get(Bucket::Project, KEY)
+                let Ok(saved) = storage::get(Bucket::Project, KEY) else {
+                    submissions.push(toast("Could not read the count".into()));
+                    continue;
+                };
+                let current = saved
                     .map(|bytes| decode_count(&bytes))
                     .unwrap_or(0);
                 let next = current + 1;
@@ -258,6 +262,7 @@ const RESET: &str = "example.counter/reset";
 /// Adds one and saves. Returns the new count, or a short reason.
 fn bump() -> Result<u64, String> {
     let current = storage::get(Bucket::Project, KEY)
+        .map_err(|_| "could not read the count".to_string())?
         .map(|bytes| decode_count(&bytes))
         .unwrap_or(0);
     let next = current + 1;
@@ -382,7 +387,7 @@ mod tests {
         host.deliver(vec![command(COUNT)]);
         host.deliver(vec![command(COUNT)]);
         // With the testing feature, storage::get reads the storage of the fake host of this test.
-        let stored = storage::get(Bucket::Project, KEY).expect("saved");
+        let stored = storage::get(Bucket::Project, KEY).expect("read succeeds").expect("saved");
         assert_eq!(decode_count(&stored), 2);
     }
 }

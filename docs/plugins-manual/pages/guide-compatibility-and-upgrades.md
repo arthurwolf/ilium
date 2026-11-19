@@ -211,7 +211,7 @@ impl Migrator for NotesPlugin {
         if from >= 2 || to < 2 {
             return Ok(());
         }
-        let Some(blob) = storage::get(Bucket::Global, "notes") else {
+        let Some(blob) = storage::get(Bucket::Global, "notes")? else {
             return Ok(()); // nothing to convert, or a second run
         };
         for (index, note) in split_notes(&blob).into_iter().enumerate() {

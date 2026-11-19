@@ -601,7 +601,7 @@ impl HostMedia for MediaImport {
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodeRequest, FrameSource, MediaBackend, MediaImport, VideoFiles};
+    use super::{DecodeRequest, FramePoll, FrameSource, MediaBackend, MediaImport, VideoFiles};
     use crate::imports::env::ImportEnv;
     use crate::imports::fs::FsImport;
     use ilium_plugin_api::generated::host::media::{HostMedia, VideoInfo};

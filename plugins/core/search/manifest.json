@@ -10,7 +10,8 @@
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0",
     "exports": [
-      "job-runner"
+      "job-runner",
+      "service-provider"
     ]
   },
   "client": {
@@ -24,6 +25,7 @@
     "server": [
       "inference.embed",
       "tree.read",
+      "agent.read",
       "terminal.read-screen",
       "fs.read:project",
       "jobs.run",

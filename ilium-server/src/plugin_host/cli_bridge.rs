@@ -373,6 +373,29 @@ mod tests {
         (routes, receiver)
     }
 
+    #[test]
+    fn stalled_consumer_has_bounded_output_and_receives_failure() {
+        let (routes, mut receiver) = route_for(3);
+        for _ in 0..=256 {
+            routes.route(CliChunk::Stdout {
+                invocation: 3,
+                data: vec![b'x'; 64 * 1024],
+            });
+        }
+        let mut bytes = 0usize;
+        let mut failed = false;
+        while let Ok(chunk) = receiver.try_recv() {
+            match chunk {
+                CliChunk::Stdout { data, .. } | CliChunk::Stderr { data, .. } => {
+                    bytes += data.len();
+                }
+                CliChunk::Exit { code, .. } => failed = code != 0,
+            }
+        }
+        assert!(bytes <= 16 * 1024 * 1024, "queued output must be bounded");
+        assert!(failed, "overflow must end the invocation with an error");
+    }
+
     /// REQ: API-005
     #[test]
     fn chunks_reach_their_route_in_order_and_the_exit_ends_it() {

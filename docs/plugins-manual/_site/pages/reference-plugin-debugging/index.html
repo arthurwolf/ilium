@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Debugging a running plugin | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/" aria-current="page">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Debugging a running plugin</h1>
+
+<p>This page defines the target debug workflow for a plugin: a debug build that keeps symbols, attaching a debugger to a running plugin, and turning a trap backtrace from a release component back into source lines. Release builds strip DWARF and source maps ([DEV-303]), so this workflow is the only way to see source lines. The tools that show what a plugin did are in <a href="/pages/reference-debugging-tools/">Debugging tools</a>. This page describes target behaviour; it does not claim the behaviour exists today.</p>
+<p>Requirement ids of this page are in the range <code>DEV-876</code> to <code>DEV-878</code>. The complete list is in <a href="/pages/reference-requirements-dev-tooling/">Requirements of the developer tooling lane</a>.</p>
+<h3 id="rules">Rules</h3>
+<ul>
+<li>
+<p><strong>[DEV-876]</strong> <code>ilium plugin build</code> without <code>--release</code> MUST produce a debug component that keeps DWARF information and, for TypeScript, an inline source map, and MUST write <code>dist/&lt;name&gt;.debug.json</code> that records the <code>input_hash</code> of the build. A debug component MUST NOT be accepted by <code>pack</code> or <code>publish</code>; they fail with <code>package.debug-build</code>.</p>
+</li>
+<li>
+<p><strong>[DEV-877]</strong> <code>ilium plugin debug &lt;dir&gt;</code> MUST start the plugin in a session and open a debugger endpoint on a loopback address with a random port. It MUST print the endpoint in an <code>artifact</code> record of kind <code>debug-endpoint</code>. It MUST refuse to bind a non-loopback address and fail with <code>debug.not-loopback</code>. The endpoint MUST close when the session ends.</p>
+</li>
+<li>
+<p><strong>[DEV-878]</strong> <code>ilium plugin symbolize &lt;trap.json&gt; --debug-info &lt;file&gt;</code> MUST map each frame of a trap backtrace to a source file, line and function name when the debug information matches the <code>input_hash</code> in the trap record. When the hash differs it MUST fail with <code>debug.hash-mismatch</code> and print no guessed lines. A frame with no information MUST be printed as its function name only.</p>
+</li>
+</ul>
+<h3 id="access-to-the-debugger-endpoint">Access to the debugger endpoint</h3>
+<p>The rules below are not numbered. They complete [DEV-877]. A loopback address keeps other machines out, but it does not keep out other processes on the same machine, so the endpoint has its own gates.</p>
+<ul>
+<li><strong>Off by default.</strong> The endpoint exists only while someone runs <code>ilium plugin debug &lt;dir&gt;</code> in a terminal. A setting, a grant or a plugin call never opens one, and a plugin cannot ask for a debugger.</li>
+<li><strong>Per-session secret.</strong> When the session starts, <code>ilium plugin debug</code> draws a 256-bit secret from the operating system random source. It writes the secret to a token file in the owner-only runtime folder that also holds the HTTP API token: folder mode 0700, file mode 0600 (<a href="/pages/reference-network-egress/">Network egress</a>, [SEC-098]). The <code>debug-endpoint</code> artifact record names the endpoint and the token file path. It never contains the secret, so the secret stays out of logs and copies of the terminal output.</li>
+<li><strong>Authentication first.</strong> The first message of every client is the secret. A connection that sends no secret, or a wrong one, gets one reply with the code <code>debug.unauthenticated</code> and is closed. Before a client authenticates, the endpoint sends it no session data. Each refusal adds one <code>debug.unauthenticated</code> diagnostic to the output of <code>ilium plugin debug</code> and one record to the <a href="/pages/reference-audit-log/">audit log</a>.</li>
+<li><strong>One client at a time.</strong> The endpoint accepts one authenticated client. A second client, even one with the secret, gets <code>debug.busy</code>, and the first client stays attached. The output of <code>ilium plugin debug</code> prints a <code>warning</code> record with the same code.</li>
+<li><strong>Ends with the session.</strong> The endpoint closes when the session ends ([DEV-877]). The host then deletes the token file, so a later session has a new secret and an old secret is refused.</li>
+<li><strong>Stated limit.</strong> The token file is readable by any process that runs as the same user. Such a process can attach if it reads the file. The secret keeps out other users and processes that cannot read the file. A plugin's helper cannot reach the runtime folder ([SEC-098]), so a plugin cannot read the token.</li>
+</ul>
+<p>A debugger client reads only the data of the paused plugin:</p>
+<ul>
+<li><strong>Frames and values.</strong> The call stack with source positions from [DEV-878], and the locals and linear memory of that plugin instance. It never reads the memory of the server or of another plugin's helper.</li>
+<li><strong>Settings.</strong> The plugin's own settings. A secret row is returned as <code>&lt;redacted&gt;</code>, the same replacement that <code>settings.read-kernel</code> uses for kernel secrets (<a href="/pages/reference-secrets/">Secrets</a>).</li>
+<li><strong>Grants.</strong> The name and state of each grant (granted, declined or revoked). The debugger does not list the values behind a grant, such as file contents or clipboard text. Those values are visible only inside linear memory, under the next rule.</li>
+<li><strong>Memory and secrets.</strong> A byte range of linear memory that holds a plugin secret, in one of the forms that the redaction steps of <a href="/pages/reference-secrets/">Secrets</a> match, is returned with those bytes set to zero and a <code>debug.redacted</code> note. A secret in a form that the redaction steps do not match is not found. The Secrets page states the same limit for logs.</li>
+<li><strong>Environment.</strong> Only the environment that the helper gives the plugin, which is rebuilt for each helper ([SEC-021]). The server's environment and the API token are never returned.</li>
+</ul>
+<p>Tests for these rules:</p>
+<ul>
+<li>A connection with no secret, a wrong secret and the secret of an earlier session each get <code>debug.unauthenticated</code>, receive no session data, and are closed. The session keeps running.</li>
+<li>The token file has mode 0600 in a 0700 folder, differs between two sessions, and is gone after the session ends.</li>
+<li>A plugin helper cannot open the token file ([SEC-098] test).</li>
+<li>A second authenticated client gets <code>debug.busy</code>, and the first client still reads frames.</li>
+<li>A secret in the settings reads as <code>&lt;redacted&gt;</code>. A plugin secret written into linear memory reads as zero bytes at its place. The server's environment variables are absent from the environment read.</li>
+<li>Without <code>ilium plugin debug</code>, no debugger port is open for the plugin.</li>
+</ul>
+<h3 id="debugger-protocol-and-editor-attach">Debugger protocol and editor attach</h3>
+<p>The rules below are not numbered. They complete [DEV-877], [DEV-876] and [DEV-715]. They say which protocol the endpoint speaks and how an editor or a command-line debugger attaches.</p>
+<p><strong>Wire protocol.</strong> The endpoint speaks the Debug Adapter Protocol (DAP) over a plain TCP connection on the loopback port. Messages use the standard DAP framing: a <code>Content-Length</code> header, an empty line and a JSON body. The endpoint is a DAP server that the client connects to, so the client uses the <code>attach</code> request, never <code>launch</code>: the plugin is already running in the session. The host does not expose the Wasmtime debugging interface directly, and a client cannot send raw Wasmtime commands.</p>
+<p><strong>Authentication in the protocol.</strong> The first message of a client is the secret (<a href="#access-to-the-debugger-endpoint">Access to the debugger endpoint</a>), sent as one line of 64 hexadecimal characters followed by a newline, before any DAP message. After the host accepts the secret, the connection carries DAP only. A client that cannot send a secret line cannot attach, so a generic DAP client needs the adapter command below.</p>
+<p><strong>Client setup.</strong> <code>ilium plugin debug &lt;dir&gt;</code> prints a <code>debug-endpoint</code> <code>artifact</code> record with the host, the port and the token file path. An author attaches in one of two ways:</p>
+<ul>
+<li><strong>VS Code.</strong> Run <code>ilium plugin debug &lt;dir&gt; --adapter</code> in a terminal task. It starts a local stdio-to-endpoint bridge that reads the printed port and the token file, sends the secret, and then passes DAP messages in both directions. The <code>launch.json</code> entry has <code>"request": "attach"</code>, <code>"type": "ilium-wasm"</code> and a <code>debugServer</code> field that holds the port the <code>debug-endpoint</code> record printed. The bridge reads the token file itself, so the secret is never written into <code>launch.json</code>. If <code>launch.json</code> is committed, it holds only the port placeholder <code>${input:ilium-debug-port}</code>.</li>
+<li><strong>Command line.</strong> Any DAP client that can run a command as its adapter, such as a terminal DAP client, uses <code>ilium plugin debug &lt;dir&gt; --adapter</code> as that command. A plain <code>lldb</code> or <code>gdb</code> cannot attach: they do not speak DAP.</li>
+</ul>
+<p><strong>Sides that can be debugged.</strong> The debugger attaches to one plugin side per session. <code>server</code>, <code>client</code> and <code>scene</code> components can each be debugged when the build is a debug build ([DEV-876]). Without <code>--side</code>, <code>ilium plugin debug</code> attaches to the only declared side. When the manifest declares several sides, the command fails with <code>usage.side-required</code> and names the sides. Only the Wasm component is debugged. A helper process of the plugin, the host and the other side of the plugin are not reachable; their frames never appear in a stack.</p>
+<p><strong>Source maps for TypeScript.</strong> The debug build keeps an inline source map ([DEV-876]). The host maps each Wasm frame to a TypeScript file and line with that map and sends the TypeScript position to the client as the DAP stack frame. Breakpoints set in a <code>.ts</code> file are translated the other way. A breakpoint on a line that the map does not cover is reported as unverified with the reason <code>no source map for this line</code> and never fires. The separate <code>dist/&lt;side&gt;.wasm.map</code> file of a release build ([DEV-715]) is not used by the debugger. A source file whose content differs from the one recorded in the map is shown, and a <code>warning</code> record names the file.</p>
+<p><strong>Protocol version mismatch.</strong> The first DAP <code>initialize</code> request carries the client's DAP version in <code>adapterID</code> and <code>clientID</code> fields. The host supports the DAP version of <code>ilium:plugin@0.1.0</code>. When the client requires a version the host does not support, the host answers the <code>initialize</code> request with <code>success: false</code>, the code <code>debug.protocol-unsupported</code>, and the host's supported versions in the message, then closes the connection. The session keeps running and the endpoint stays open for a client with a matching version. The output of <code>ilium plugin debug</code> adds one <code>diagnostic</code> record with the same code, and the exit code follows <a href="/pages/reference-plugin-cli/#exit-codes">Plugin command-line reference</a> only when the session ends.</p>
+<p>Tests for these rules:</p>
+<ul>
+<li>A DAP client connected through <code>--adapter</code> attaches, reads a stack and continues, and a client that sends <code>launch</code> is refused with an error response.</li>
+<li>A TypeScript debug build resolves a frame to the <code>.ts</code> line, and a breakpoint on an unmapped line is reported unverified.</li>
+<li>Two sides declared and no <code>--side</code> fail with <code>usage.side-required</code>.</li>
+<li>A client that requires an unsupported DAP version gets <code>debug.protocol-unsupported</code>, the connection closes, and a second client with a supported version attaches.</li>
+</ul>
+<h3 id="pauses-and-deadlines">Pauses and deadlines</h3>
+<p>A debug session can pause a call at a breakpoint or while stepping. These rules say how the pause interacts with the limits of the call. The limits are the ones of <a href="/pages/reference-errors-and-limits/">Errors and limits</a>, such as <code>event_deadline_ms</code> and <code>activate_deadline_ms</code>.</p>
+<ul>
+<li><strong>Pause time is not deadline time.</strong> The deadline clock of a call stops when the debugger pauses the call and starts again when the call resumes. A developer who steps through a call does not get <code>trap.deadline</code> from the time spent in the pause.</li>
+<li><strong>Own running time still counts.</strong> The part of the call that runs between pauses counts toward its deadline as usual. A call that runs 2,100 ms without a pause still traps at a 2,000 ms <code>activate_deadline_ms</code>, with <code>trap.deadline</code> and the normal limit.</li>
+<li><strong>Only the paused call.</strong> A call of another plugin that waits for the paused plugin keeps its own deadline. If that deadline passes while the other plugin is paused, the other call traps as it would if a plugin were slow.</li>
+<li><strong>Memory ceiling unchanged.</strong> <code>memory_mib</code> is not a time limit, so a pause does not change it. A paused instance keeps its memory, and growth after the resume is checked as in a normal run (<code>trap.memory</code>, <a href="/pages/reference-errors-and-limits/">Errors and limits</a>). The debugger never allocates guest memory to answer a read.</li>
+<li><strong>Difference from tests.</strong> <code>ilium plugin test --component</code> runs without a debugger, so it has no pauses. A debug run can take longer in wall time than a test run, but pause time never causes a trap. The trap outcome of a call therefore depends only on its running time, which is the same in both runs.</li>
+</ul>
+<p>Tests for these rules:</p>
+<ul>
+<li>An <code>activate</code> paused for 3,000 ms at a breakpoint and then resumed returns <code>ok</code> when its own running time is under 2,000 ms.</li>
+<li>The same component, with 2,100 ms of running time and no pause, traps with <code>trap.deadline</code>.</li>
+<li>A call with a 1,000 ms pause and 1,900 ms of running time returns <code>ok</code>, and the same call with 2,100 ms of running time traps with <code>trap.deadline</code>, whatever the pause.</li>
+<li>A pause followed by growth past <code>memory_mib</code> traps with <code>trap.memory</code>.</li>
+</ul>
+<h3 id="failure-behaviour">Failure behaviour</h3>
+<p>Each rule names its failure code. A failure prints a <code>diagnostic</code> record in JSONL or one line on standard error in text, and the process exit code follows <a href="/pages/reference-plugin-cli/#exit-codes">Plugin command-line reference</a>.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements of the developer tooling lane</a></li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-plugin-cli-dev-failure-modes/"><small>Previous</small>Failure modes of the dev command</a><a class="next" href="/pages/reference-plugin-test-harness/"><small>Next</small>Test harness contract for CI</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#rules">Rules</a></li><li class="l2"><a href="#access-to-the-debugger-endpoint">Access to the debugger endpoint</a></li><li class="l2"><a href="#debugger-protocol-and-editor-attach">Debugger protocol and editor attach</a></li><li class="l2"><a href="#pauses-and-deadlines">Pauses and deadlines</a></li><li class="l2"><a href="#failure-behaviour">Failure behaviour</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

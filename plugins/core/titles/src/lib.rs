@@ -35,7 +35,7 @@ impl Handler for TitlesServer {
             // kernel reports only lines it rebuilt exactly while the shell owns the terminal.
             if let Event::UserLineSubmitted(line) = event {
                 let has_agent =
-                    HostTree::get(&mut api, line.pane).is_some_and(|view| view.agent.is_some());
+                    HostTree::get(&mut *api, line.pane).is_some_and(|view| view.agent.is_some());
                 submissions.extend(shell_title::rename_for_line(
                     line.pane, &line.text, has_agent,
                 ));

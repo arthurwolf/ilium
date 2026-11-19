@@ -148,6 +148,7 @@ pub fn chat_stdin(host: &mut FakeHost, args: &[&str], stdin: &[u8]) -> Run {
     let mut full = vec!["chat"];
     full.extend_from_slice(args);
     let invocation = host.cli().invoke(&full, stdin);
+    host.settle();
     Run {
         out: invocation.stdout(),
         err: invocation.stderr(),

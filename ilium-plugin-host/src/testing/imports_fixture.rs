@@ -194,7 +194,7 @@ struct FixtureStorage {
     errors: Arc<FixtureDiagnostics>,
 }
 impl HostStorage for FixtureStorage {
-    fn get(&mut self, bucket: Bucket, key: String) -> Option<Vec<u8>> {
+    fn get(&mut self, bucket: Bucket, key: String) -> Result<Option<Vec<u8>>, PluginError> {
         self.import.get(bucket, key)
     }
     fn put(&mut self, bucket: Bucket, key: String, value: Vec<u8>) -> Result<(), PluginError> {
@@ -203,7 +203,7 @@ impl HostStorage for FixtureStorage {
     fn remove(&mut self, bucket: Bucket, key: String) -> Result<(), PluginError> {
         self.import.remove(bucket, key)
     }
-    fn keys(&mut self, bucket: Bucket, prefix: String) -> Vec<String> {
+    fn keys(&mut self, bucket: Bucket, prefix: String) -> Result<Vec<String>, PluginError> {
         self.import.keys(bucket, prefix)
     }
     fn write_batch(
@@ -212,6 +212,9 @@ impl HostStorage for FixtureStorage {
         entries: Vec<ilium_plugin_api::generated::host::Entry>,
     ) -> Result<(), PluginError> {
         self.import.write_batch(bucket, entries)
+    }
+    fn compare_exchange(&mut self, bucket: Bucket, key: String, expected: Option<Vec<u8>>, value: Option<Vec<u8>>) -> Result<bool, PluginError> {
+        self.import.compare_exchange(bucket, key, expected, value)
     }
     fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
         let wall = self.clock.0.lock().unwrap().wall;

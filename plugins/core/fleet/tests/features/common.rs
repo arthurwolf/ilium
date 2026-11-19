@@ -103,6 +103,7 @@ pub fn summary(all: &[Value]) -> Value {
 /// Runs `ilium <args>` through the fake command line and returns (stdout, stderr, exit code).
 pub fn run_cli(host: &mut FakeHost, args: &[&str], stdin: &[u8]) -> (String, String, Option<u8>) {
     let invocation = host.cli().invoke(args, stdin);
+    host.settle();
     (
         invocation.stdout(),
         invocation.stderr(),

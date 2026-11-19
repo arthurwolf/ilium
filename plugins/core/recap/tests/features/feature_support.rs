@@ -117,6 +117,7 @@ pub fn editor_pane(name: &str) -> TreeNode {
 /// Runs `ilium <args>` (args start with the command name) and returns (stdout, stderr, exit code).
 pub fn run_cli(host: &mut FakeHost, args: &[&str]) -> (String, String, Option<u8>) {
     let invocation = host.cli().invoke(args, b"");
+    host.settle();
     (
         invocation.stdout(),
         invocation.stderr(),

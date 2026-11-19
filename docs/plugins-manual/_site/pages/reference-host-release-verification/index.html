@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Host release verification | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/" aria-current="page">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Host release verification</h1>
+
+<p>This page explains how to confirm that the Ilium host you downloaded is the release that was published. It covers the <code>SHA256SUMS</code> file that every release ships, the checks the installer makes, and the build attestations that tie an archive to the release build. It does not cover plugin packages. Those are checked with the package checksum and signature described in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</p>
+<p>A <strong>release</strong> is one tagged version of the host, for example <code>v0.1.0</code>. A <strong>release archive</strong> is the compressed file for one platform. <strong><code>SHA256SUMS</code></strong> is the text file published with the release. It holds one line per archive: a 64-character lowercase SHA-256 hash, two spaces, and the archive file name. An <strong>attestation</strong> is a signed record from the build system that names the files it built and the workflow that built them.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>The download page for the release, which links <code>SHA256SUMS</code> and the build attestations.</li>
+<li>A SHA-256 tool on your system: <code>sha256sum</code>, <code>shasum -a 256</code> or <code>openssl dgst -sha256</code>.</li>
+<li>For attestation checks, the GitHub CLI (<code>gh</code>).</li>
+<li>The package checks for plugins: <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</li>
+</ul>
+<h2 id="what-a-release-ships">What a release ships</h2>
+<p>Every release publishes one <code>SHA256SUMS</code> file beside the archives. The file lists every archive of that release, one line each. The installer script reads the same file.</p>
+<ul>
+<li>[SEC-428] A release MUST publish a <code>SHA256SUMS</code> file that lists every release archive with its SHA-256 hash, one line per archive.</li>
+<li>[SEC-429] A user who checks a download by hand MUST compare the archive's SHA-256 hash with the line in <code>SHA256SUMS</code> that carries the same archive name, and MUST run the attestation check before running the archive.</li>
+<li><strong>[OPS-236]</strong> Every release MUST publish the debug symbol files for the build id of each host binary it ships, next to <code>SHA256SUMS</code>, so that the frames of a host crash record can be resolved against that release (proposed, owner to confirm).</li>
+</ul>
+<h2 id="terms-and-formats">Terms and formats</h2>
+<ul>
+<li><strong>Archive inventory</strong>: the five archives the installer expects in <code>SHA256SUMS</code>: <code>ilium-linux-x86_64.tar.gz</code>, <code>ilium-linux-aarch64.tar.gz</code>, <code>ilium-windows-x86_64.zip</code>, <code>ilium-macos-aarch64.tar.gz</code> and <code>ilium-macos-x86_64.tar.gz</code> (<code>release/install.sh</code>, <code>checksum_archives</code>).</li>
+<li><strong>Record</strong>: one line of <code>SHA256SUMS</code>. A valid record is exactly 66 characters plus the length of the file name: 64 lowercase hexadecimal characters, two spaces, then the name. The name starts with a letter or digit and holds only letters, digits, <code>.</code>, <code>_</code> and <code>-</code>.</li>
+<li>
+<p><strong>Hash tool</strong>: <code>sha256sum</code>, <code>shasum -a 256</code> or <code>openssl dgst -sha256</code>. The installer uses the first one it finds and stops with <code>A SHA-256 tool is required: sha256sum, shasum, or openssl</code> when none exists.</p>
+</li>
+<li>
+<p>[SEC-433] The installer MUST accept <code>SHA256SUMS</code> only when it holds exactly one valid record for each of the five archives of the archive inventory, with no other record, no duplicate name and no blank or extra line. Any other file MUST stop the install with <code>Malformed, duplicate or missing checksum record</code>.</p>
+</li>
+</ul>
+<h2 id="inputs-outputs-and-limits">Inputs, outputs and limits</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inputs</td>
+<td>The archive and <code>SHA256SUMS</code> of one release tag, fetched over HTTPS only</td>
+<td><code>release/install.sh</code></td>
+</tr>
+<tr>
+<td>Download limits</td>
+<td>15 seconds to connect, 300 seconds per download</td>
+<td><code>release/install.sh</code></td>
+</tr>
+<tr>
+<td>Latest fallback</td>
+<td>None. A missing asset ends the install with <code>HTTPS download failed (network, rate limit, or missing release asset); no latest fallback</code></td>
+<td><code>release/install.sh</code></td>
+</tr>
+<tr>
+<td>Free staging space</td>
+<td>At least 64 MiB, or <code>At least 64 MiB of free staging space is required</code></td>
+<td><code>release/install.sh</code></td>
+</tr>
+<tr>
+<td>Unpacked tar size</td>
+<td>1024 bytes to 2000000000 bytes, a multiple of 512, or <code>Unbounded or truncated tar archive</code></td>
+<td><code>release/install.sh</code></td>
+</tr>
+<tr>
+<td>Output on success</td>
+<td>The installed files. On failure the installer exits 1 and unpacks nothing</td>
+<td><code>release/install.sh</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[SEC-434] The installer MUST download the archive and <code>SHA256SUMS</code> over HTTPS from the same release tag, MUST NOT fall back to another release when a download fails, and MUST work in a private staging directory so that a failed check leaves no installed file.</li>
+</ul>
+<h2 id="what-the-installer-checks">What the installer checks</h2>
+<p>The installer script downloads the archive and <code>SHA256SUMS</code> from the same release, then stops before it unpacks anything when the check fails. Each failure has a fixed message.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Failure message</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SHA256SUMS</code> has a record for every archive of the release</td>
+<td><code>Malformed, duplicate or missing checksum record</code></td>
+<td>Nothing is unpacked.</td>
+</tr>
+<tr>
+<td>The selected archive name has exactly one record</td>
+<td><code>Malformed, duplicate or missing checksum record</code></td>
+<td>Nothing is unpacked.</td>
+</tr>
+<tr>
+<td>The record hash equals the SHA-256 of the downloaded archive</td>
+<td><code>Archive SHA-256 mismatch</code></td>
+<td>Nothing is unpacked.</td>
+</tr>
+<tr>
+<td>The archive is a valid gzip file</td>
+<td><code>Malformed gzip archive or exhausted staging space</code></td>
+<td>Nothing is installed.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>
+<p>[SEC-430] The installer MUST compare the archive hash with <code>SHA256SUMS</code> before it decompresses or unpacks the archive, and MUST stop with <code>Archive SHA-256 mismatch</code> when the two hashes differ.</p>
+</li>
+<li>
+<p><strong>[SEC-016]</strong> Every host release MUST publish <code>SHA256SUMS.sig</code>, a detached Ed25519 signature over the exact bytes of <code>SHA256SUMS</code> made with a release-archive key that is distinct from the blocklist release key and the feed key; its public half is printed on the download page and in the release notes, and <code>release/install.sh</code> MUST verify it before the hash check when the key is given with <code>--release-key &lt;key_id&gt;</code>, stopping with <code>SHA256SUMS signature mismatch</code> on failure (proposed, owner to confirm).</p>
+</li>
+</ul>
+<h2 id="check-a-download-by-hand">Check a download by hand</h2>
+<p>Run these steps in the directory that holds the archive and the <code>SHA256SUMS</code> file you downloaded from the same release page.</p>
+<ol>
+<li>Compute the hash of the archive. With <code>sha256sum</code>, run <code>sha256sum &lt;archive-name&gt;</code>.</li>
+<li>Find the line in <code>SHA256SUMS</code> whose second field is the same archive name, and compare the first field with the hash from step 1. The two MUST be identical.</li>
+<li>Check the build attestation of the archive with <code>gh attestation verify &lt;archive-name&gt; --repo arthurwolf/ilium</code>. The command MUST report a verified attestation for the release workflow of the repository before you run the archive.</li>
+</ol>
+<p>A matching hash shows that the archive is the file listed in <code>SHA256SUMS</code>. It does not, by itself, show who built the file. The attestation check adds that proof.</p>
+<p>Example of a good manual check (the hash shown is a placeholder):</p>
+<pre><code>$ sha256sum ilium-linux-x86_64.tar.gz
+&lt;64 hex characters&gt;  ilium-linux-x86_64.tar.gz
+$ grep ' ilium-linux-x86_64.tar.gz$' SHA256SUMS
+&lt;the same 64 hex characters&gt;  ilium-linux-x86_64.tar.gz
+$ gh attestation verify ilium-linux-x86_64.tar.gz --repo arthurwolf/ilium
+</code></pre>
+<ul>
+<li>[SEC-435] A hash comparison MUST use the whole 64-character value and the exact archive name. A user who finds no line for the archive, or more than one, MUST treat the download as failed.</li>
+</ul>
+<h2 id="offline-verification">Offline verification</h2>
+<p>This section applies to a site that cannot reach the download page or GitHub. The attestation check of [SEC-429] needs GitHub, so an offline site cannot run it itself. The hash check still works offline, once the files are copied in.</p>
+<ul>
+<li>[SEC-960] A site without GitHub access MUST run the attestation check of [SEC-429] on a connected machine, against the same archive bytes that the site will receive, and MUST NOT carry the archive into the site until that check reports a verified attestation. The hash of the archive MUST be computed again on the offline site.</li>
+<li>[SEC-961] A mirror of a host release MUST hold the five archives of the archive inventory and the <code>SHA256SUMS</code> of one release tag, with the file names and bytes unchanged. A mirror MUST NOT edit, rebuild or re-sign <code>SHA256SUMS</code>, and MUST NOT combine files from two release tags.</li>
+<li>[SEC-962] Each offline verification MUST leave a written record with the release tag, the archive name, the SHA-256 hash, the time of the check in <code>YYYY-MM-DD HH:mm:ss</code>, the machine that ran the attestation check and the result. A record without the attestation result MUST NOT be used as proof that the archive is genuine.</li>
+</ul>
+<p>A matching hash on the offline site shows that the archive is the file listed in <code>SHA256SUMS</code>, as in [SEC-429]. It shows nothing about the builder, so the record of [SEC-962] is the only proof of origin that the site keeps.</p>
+<p>Decision needed: whether each release should also publish an attestation bundle, a file that <code>gh attestation verify</code> can check without contacting GitHub. Default I would use: no bundle for now, because this page does not yet confirm that the GitHub CLI supports offline bundle checks in the version the project documents. Until the bundle or a detached signature exists, an offline site has no install path from a local archive: the installer of [SEC-434] downloads over HTTPS only, so this page does not define an offline install.</p>
+<h2 id="what-the-host-reports-about-itself">What the host reports about itself</h2>
+<p>The host does not re-check the release archive at start. The checks above run once, in the installer, before the files are installed. To see which build is running, use:</p>
+<ul>
+<li>
+<p><code>ilium --version --verbose</code>, which prints the version and the path of the third-party notices file, or <code>notices: missing</code> when that file is absent (<a href="/pages/reference-trust-and-supply-chain/">SEC-423</a>).</p>
+</li>
+<li>
+<p>[SEC-436] The host MUST NOT claim, in <code>ilium --version --verbose</code> or in any other output, that its own archive passed verification. Verification belongs to the installer and to the user, before the first run.</p>
+</li>
+</ul>
+<p>Decision needed: whether each release should also publish a detached signature over <code>SHA256SUMS</code>, made with a release key that users trust in advance.</p>
+<ul>
+<li>Default I would use: keep the build attestation as the only signed proof for now. The releases already carry attestations from the build workflow, and the release key that signs the blocklist is not designed to sign release archives, so reusing it would widen its role.</li>
+<li>Option: add a detached signature file, such as <code>SHA256SUMS.sig</code>, made with a key that is separate from the blocklist release key, and an installer check for it. This lets a user verify the list without the GitHub CLI, at the cost of a second key to manage and rotate.</li>
+</ul>
+<h2 id="failures">Failures</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Archive SHA-256 mismatch</code></td>
+<td>The archive changed after publication, or the download was cut short</td>
+<td>Download the archive again from the same release page. Do not run it.</td>
+</tr>
+<tr>
+<td><code>Malformed, duplicate or missing checksum record</code></td>
+<td><code>SHA256SUMS</code> is incomplete or was edited</td>
+<td>Download <code>SHA256SUMS</code> again. If the error repeats, report the release tag.</td>
+</tr>
+<tr>
+<td><code>gh attestation verify</code> reports no attestation</td>
+<td>The file is not the one the release workflow built</td>
+<td>Do not run the file. Report the release tag and the file name.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[SEC-437] After any failed check the installer MUST exit with status 1, MUST print the fixed message of the failed check, and MUST NOT leave an unpacked or half-installed host.</li>
+<li>[SEC-438] An invalid gzip stream MUST stop the install with <code>Malformed gzip archive or exhausted staging space</code>. This check runs only after the hash check has passed.</li>
+</ul>
+<h2 id="how-a-running-host-learns-of-a-new-release">How a running host learns of a new release</h2>
+<p>The checks above run when you install. A host that is already running learns of a newer release through the update check described here. The check only tells the operator that a release exists. It never downloads, unpacks or installs a host.</p>
+<p><strong><code>channels.json</code></strong> is a release asset published beside <code>SHA256SUMS</code> and signed with the release key of [SEC-426]. It settles the open decision of <a href="/pages/reference-release-rollout/">Release rollout</a> about where the channel and rollout percentage of a host release are stored. The installer of [PKG-954] reads the same file. For each channel (<code>stable</code>, <code>beta</code>, <code>dev</code>, [PKG-953]) it holds these fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tag</code></td>
+<td>The release tag, for example <code>v0.2.0</code>.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>The version string of that release.</td>
+</tr>
+<tr>
+<td><code>rollout_percent</code></td>
+<td>0 to 100. 0 means the release is paused ([PKG-958]). The cohort rule of [PKG-956] decides whether this host is offered it.</td>
+</tr>
+<tr>
+<td><code>minimum_supported_version</code></td>
+<td>The oldest host version the project still supports. A host older than this shows the notice as <code>unsupported</code>.</td>
+</tr>
+<tr>
+<td><code>notes_url</code></td>
+<td>The release notes page.</td>
+</tr>
+<tr>
+<td><code>archive_urls</code></td>
+<td>One HTTPS URL per archive of the archive inventory.</td>
+</tr>
+<tr>
+<td><code>sha256sums_url</code></td>
+<td>The HTTPS URL of the <code>SHA256SUMS</code> of that tag.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="setting-cadence-and-what-is-sent">Setting, cadence and what is sent</h3>
+<ul>
+<li><code>[host] update_check = off|notify</code>. The default is <code>notify</code>. <code>off</code> makes no request. A policy file can lock the value (<a href="/pages/reference-admin-policy/">Admin policy</a>), and a locked value cannot be changed from the settings page.</li>
+<li>The check runs at start and then every 24 hours while the host runs, each time after a random delay of up to 1 hour. A failed check backs off as in HST-693 and never blocks start.</li>
+<li>The request is an HTTPS GET of <code>channels.json</code> for the selected channel. It carries only a <code>User-Agent</code> of the form <code>ilium/&lt;version&gt;</code>. It sends no identifier, no cookie, no session name, no plugin list and no path.</li>
+<li><code>--offline</code> makes no request and the notice shows nothing. On a connection that the operating system marks as metered, the check runs only at start and is skipped when the cached answer is under 24 hours old.</li>
+<li>The host verifies the signature of <code>channels.json</code> before it reads any field. A bad signature, a malformed file or a channel without an entry ends the check silently for the user and writes a log line with the reason. The host never uses a cached value that failed verification.</li>
+<li><strong>[SEC-017]</strong> <code>channels.json</code> MUST carry an <code>issued</code> time and the host MUST refuse a <code>channels.json</code> whose <code>issued</code> is earlier than the cached one or more than 24 h in the future, keeping the cached copy and writing a log line; it MUST be signed with the release-archive key of the detached <code>SHA256SUMS.sig</code> rule and not with the blocklist release key (proposed, owner to confirm).</li>
+</ul>
+<h3 id="what-the-operator-sees">What the operator sees</h3>
+<p>When the offered release is newer than the running version and this host is in the rollout cohort, the status bar shows <code>Update available: &lt;version&gt;</code> and <code>ilium version --json</code> reports <code>"update_available": {"version": ..., "tag": ..., "notes_url": ...}</code>. Otherwise the field is <code>null</code>. The notice does not replace the <code>Update: &lt;advisory id&gt;</code> badge of [SEC-968]. That badge comes from the advisories the running release was built with, which cannot know about later releases. The notice tells the operator to follow the install steps of this page and of <a href="/pages/reference-install-and-update/">Install and update</a>. The host does not install itself. A rollback target is kept as HST-513 requires.</p>
+<ul>
+<li>[SEC-434] applies to any later install: HTTPS only, the same release tag, no fallback.</li>
+<li>Requirement IDs for the file format, the setting and the notice are not yet in a requirements file. The behaviour above is proposed, owner to confirm.</li>
+</ul>
+<h2 id="official-installation-channels-and-distribution-packages">Official installation channels and distribution packages</h2>
+<table>
+<thead>
+<tr>
+<th>Channel</th>
+<th>Official</th>
+<th>Signed by the project</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Release archives with <code>release/install.sh</code> and <code>SHA256SUMS</code></td>
+<td>Yes</td>
+<td>Hashes and attestation, as in [SEC-428] and [SEC-429]</td>
+</tr>
+<tr>
+<td>A package repository or package-manager formula maintained by the project</td>
+<td>Only when the release page lists it</td>
+<td>Only as that listing states</td>
+</tr>
+<tr>
+<td>A package built by a distribution, a company or a person</td>
+<td>No</td>
+<td>Not by the project</td>
+</tr>
+</tbody>
+</table>
+<p>The release page is the only list of official channels. A channel that it does not list is not official.</p>
+<p>A third-party package MUST keep these things:</p>
+<ul>
+<li><code>THIRD-PARTY-NOTICES</code> next to the binary, so that <code>ilium --version --verbose</code> prints its path and not <code>notices: missing</code> ([SEC-423]).</li>
+<li>The <code>.build.json</code> provenance file next to each binary ([PKG-301] describes the install layout).</li>
+<li>The core plugins inside the binary. A package must not remove or replace them.</li>
+<li><code>[host] update_check = off</code>, set by the package, when the package manager updates the host, so that the notice does not point away from the package manager.</li>
+</ul>
+<p><code>ilium --version --verbose</code> prints a <code>channel:</code> line. Its value is <code>archive</code> for the installer, the name written by the package for a package, and <code>unknown</code> when the build file is missing. A package that does not write the name is shown as <code>unknown</code>.</p>
+<p>To report a bug in a package the project did not build, first reproduce it with an official archive of the same version. If it reproduces, report it with the <code>ilium --version --verbose</code> output. If it does not, report it to the package maintainer. The project does not support a package it does not list.</p>
+<h2 id="code-signing-of-host-binaries-on-macos-and-windows">Code signing of host binaries on macOS and Windows</h2>
+<p>Platform signing is separate from the checks above. The state of each platform is:</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Signature</th>
+<th>Verify with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS archives</td>
+<td>Not signed or notarized by default (proposed, owner to confirm)</td>
+<td><code>codesign -dv --verbose=4 &lt;file&gt;</code> and <code>spctl -a -vv &lt;file&gt;</code></td>
+</tr>
+<tr>
+<td>Windows binaries</td>
+<td>No Authenticode signature by default (proposed, owner to confirm)</td>
+<td><code>signtool verify /pa /v &lt;file&gt;</code>, or the Digital Signatures tab of the file properties</td>
+</tr>
+<tr>
+<td>Linux archives</td>
+<td>Not applicable</td>
+<td>Not applicable</td>
+</tr>
+</tbody>
+</table>
+<p>Until a signature is published, Gatekeeper on macOS reports that the developer cannot be verified, and SmartScreen on Windows shows a warning for an unrecognised app. The supported way past either is to verify the archive by [Check a download by hand], then allow it: on macOS, remove the quarantine flag with <code>xattr -d com.apple.quarantine &lt;file&gt;</code> or use the Open Anyway button in System Settings, and on Windows choose More info and Run anyway. A managed fleet that blocks unsigned binaries MUST NOT be told to bypass its policy. It should wait for a signed release, or re-sign the binary with its own certificate and record that in its own inventory.</p>
+<p>When the project starts to sign, the release notes name the signing identity, and a rotation or revocation of the certificate is announced in the release notes and in <a href="/pages/reference-release-key-compromise/">Release key compromise</a>. A valid platform signature shows who signed the file. It does not replace the <code>SHA256SUMS</code> check or the attestation check of [SEC-429], and a signed file that fails either still MUST NOT be run. Requirement IDs for platform signing are not yet written. The statements above are proposed, owner to confirm.</p>
+<h2 id="what-this-page-does-not-cover">What this page does not cover</h2>
+<ul>
+<li>Plugin package checksums and signatures: <a href="/pages/reference-signing-and-trust/">Signing and trust</a>.</li>
+<li>Release notices, licences and the notices path: <a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a>.</li>
+<li>Loss of the release key and the blocklist key rules: <a href="/pages/reference-release-key-compromise/">Release key compromise</a>.</li>
+<li>Installer steps, versions and updates: <a href="/pages/reference-install-and-update/">Install and update</a>.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust</a> for plugin package signatures.</li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a> for the release notices and licence checks.</li>
+<li><a href="/pages/reference-install-and-update/">Install and update</a> for the installer steps.</li>
+</ul>
+<p>Contract: <code>ilium:plugin@0.1.0</code>.</p>
+<h2 id="older-host-minors-for-the-compatibility-matrix">Older host minors for the compatibility matrix</h2>
+<p>The <a href="/pages/guide-backwards-compatibility-test-matrix/">backwards-compatibility matrix</a> runs a plugin against a host at N-1, N and N+1, so every host minor inside its support period must stay available to a test job. The release record names, for each minor, the copy the project keeps: the signed release archives of that minor, or the source tag with its locked dependency file and the <code>wit_hashes</code> of that minor. The location of each copy is listed in the support matrix named in <a href="/pages/release-process/">Release process</a>.</p>
+<h2 id="requirement-statements">Requirement statements</h2>
+<ul>
+<li><strong>[SEC-428]</strong> Every release MUST publish a <code>SHA256SUMS</code> file that lists every release archive with its SHA-256 hash, one line per archive.</li>
+<li><strong>[SEC-429]</strong> A user who checks a download by hand MUST compare the archive hash with the matching <code>SHA256SUMS</code> line and MUST run the attestation check before running the archive.</li>
+<li><strong>[SEC-430]</strong> The installer MUST compare the archive hash with <code>SHA256SUMS</code> before it decompresses or unpacks the archive, and MUST stop with <code>Archive SHA-256 mismatch</code> when the two hashes differ.</li>
+<li><strong>[SEC-433]</strong> The installer MUST accept <code>SHA256SUMS</code> only with exactly one valid record for each of the five release archives, otherwise <code>Malformed, duplicate or missing checksum record</code>.</li>
+<li><strong>[SEC-434]</strong> The installer MUST download archive and <code>SHA256SUMS</code> over HTTPS from the same tag, with no fallback to another release, in a private staging directory.</li>
+<li><strong>[SEC-435]</strong> A hash comparison MUST use the whole 64-character value and the exact archive name; no line or several lines means the download failed.</li>
+<li><strong>[SEC-436]</strong> The host MUST NOT claim in its output that its own archive passed verification.</li>
+<li><strong>[SEC-437]</strong> After any failed check the installer MUST exit 1, print the fixed message and leave no unpacked or half-installed host.</li>
+<li><strong>[SEC-438]</strong> An invalid gzip stream MUST stop the install with <code>Malformed gzip archive or exhausted staging space</code>, after the hash check.</li>
+<li><strong>[SEC-960]</strong> A site without GitHub access MUST run the attestation check of SEC-429 on a connected machine, against the same archive bytes that the site will receive, and MUST NOT carry the archive into the site until that check reports a verified attestation. The hash of the archive MUST be computed again on the offline site.</li>
+<li><strong>[SEC-961]</strong> A mirror of a host release MUST hold the five archives of the archive inventory and the <code>SHA256SUMS</code> of one release tag, with the file names and bytes unchanged. A mirror MUST NOT edit, rebuild or re-sign <code>SHA256SUMS</code>, and MUST NOT combine files from two release tags.</li>
+<li><strong>[SEC-962]</strong> Each offline verification MUST leave a written record with the release tag, the archive name, the SHA-256 hash, the time of the check in <code>YYYY-MM-DD HH:mm:ss</code>, the machine that ran the attestation check and the result. A record without the attestation result MUST NOT be used as proof that the archive is genuine.</li>
+<li><strong>[DEV-198]</strong> The release pipeline MUST keep, for every host minor inside its support period, either the signed release archives of that minor, or the source tag with its locked dependency file and the <code>wit_hashes</code> of that minor, and MUST publish the location of that copy in the support matrix.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-host-aggregate-limits/"><small>Previous</small>Reference, host aggregate limits</a><a class="next" href="/pages/reference-host-soak-and-load-testing/"><small>Next</small>Soak and endurance testing</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#what-a-release-ships">What a release ships</a></li><li class="l2"><a href="#terms-and-formats">Terms and formats</a></li><li class="l2"><a href="#inputs-outputs-and-limits">Inputs, outputs and limits</a></li><li class="l2"><a href="#what-the-installer-checks">What the installer checks</a></li><li class="l2"><a href="#check-a-download-by-hand">Check a download by hand</a></li><li class="l2"><a href="#offline-verification">Offline verification</a></li><li class="l2"><a href="#what-the-host-reports-about-itself">What the host reports about itself</a></li><li class="l2"><a href="#failures">Failures</a></li><li class="l2"><a href="#how-a-running-host-learns-of-a-new-release">How a running host learns of a new release</a></li><li class="l3"><a href="#setting-cadence-and-what-is-sent">Setting, cadence and what is sent</a></li><li class="l3"><a href="#what-the-operator-sees">What the operator sees</a></li><li class="l2"><a href="#official-installation-channels-and-distribution-packages">Official installation channels and distribution packages</a></li><li class="l2"><a href="#code-signing-of-host-binaries-on-macos-and-windows">Code signing of host binaries on macOS and Windows</a></li><li class="l2"><a href="#what-this-page-does-not-cover">What this page does not cover</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l2"><a href="#older-host-minors-for-the-compatibility-matrix">Older host minors for the compatibility matrix</a></li><li class="l2"><a href="#requirement-statements">Requirement statements</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

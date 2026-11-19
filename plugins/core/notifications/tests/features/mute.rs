@@ -6,7 +6,8 @@ use ilium_plugin_core_notifications::NotificationsServer;
 use ilium_plugin_sdk::host::Bucket;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, AgentActivity, DeactivationReason, Event, UiAction, ViewTarget,
+    ActionKind, ActionValue, AgentActivity, DeactivationReason, ErrorCode, Event, Intent,
+    PluginError, UiAction, ViewTarget,
 };
 
 use crate::common::*;
@@ -92,6 +93,30 @@ fn mute_047_the_flag_survives_a_restart_of_the_plugin() {
     host.activate::<NotificationsServer>();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
     assert!(sounds(&finish_turn(&mut host, node, 1)).is_empty());
+}
+
+#[test]
+fn a_failed_mute_write_keeps_the_previous_behavior_and_can_be_retried() {
+    let mut host = server_host();
+    host.storage_mut().set_write_error(Some(PluginError::new(ErrorCode::Io, "storage unavailable")));
+    let failed = host.deliver_one(Event::UiAction(UiAction {
+        view: ViewTarget::Popup("notifications".to_string()),
+        key: "sound-mute".to_string(),
+        action_id: String::new(),
+        kind: ActionKind::Toggled,
+        value: Some(ActionValue::Flag(true)),
+    }));
+    assert!(failed.iter().any(|submission| matches!(submission.intent, Intent::Toast(_))),
+        "a failed mute change must be visible");
+    assert_eq!(host.storage().get(Bucket::Global, "muted"), None);
+    let first = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
+    assert_eq!(sounds(&finish_turn(&mut host, first, 1)), ["finished"]);
+
+    host.storage_mut().set_write_error(None);
+    mute(&mut host, true);
+    assert_eq!(host.storage().get(Bucket::Global, "muted"), Some(b"1".to_vec()));
+    let second = add_pane(&mut host, "another-agent", Some(AgentActivity::Working));
+    assert!(sounds(&finish_turn(&mut host, second, 2)).is_empty());
 }
 
 /// REQ: F-047

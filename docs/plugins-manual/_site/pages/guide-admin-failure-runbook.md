@@ -1,0 +1,356 @@
+# Administrator failure runbook
+
+## Administrator failure runbook
+
+Use this page when a plugin on a managed machine causes trouble. Find the symptom in the first table, then follow its section. Each section gives the exact `ilium` commands, the policy keys that stop a plugin, the audit events to look for, and the time limits that decide what happens next. The stance and the policy file itself are explained in the [Plugin administration guide](/pages/guide-administration/).
+
+Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]`, collected in [User and administrator requirements](/pages/reference-requirements-user-admin/).
+
+<div class="note">
+<p>Decision status. The platform is not implemented. The commands and keys below are the ones the other pages of this manual define. Items the manual does not settle are listed in [Open decisions](#open-decisions).</p>
+</div>
+
+### You need
+
+- Shell access as the administrator, and the policy file for the machine (`/etc/ilium/policy.toml` on Linux, see [Administration guide](/pages/guide-administration/#write-the-policy)).
+- The id of the plugin, and for a key problem the `key_id` of the signing key (`ilium plugin trust list --json`).
+- The audit log of each affected user, at `$XDG_STATE_HOME/ilium/audit/audit.jsonl` on Linux (default `~/.local/state/ilium/audit/audit.jsonl`).
+
+### Triage by symptom
+
+Each symptom has one severity level from the [operational severity scale](/pages/ops-incident-response/). Record that level in the incident record.
+
+| Symptom | Section | First command | Severity level |
+|---|---|---|---|
+| A plugin traps, is slow, or shows `degraded` or `failed` | [Bad plugin](#bad-plugin) or [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` | Level 3 |
+| An update failed, or the plugin went back to an older version | [Failed update](#failed-update) | `ilium plugin status <id> --json` | Level 3 |
+| Ilium stops or restarts again and again at start | [Crash loop](#crash-loop) | `ilium --safe-mode=third-party` | Level 2 |
+| Requests from a plugin time out | [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` | Level 3 |
+| A publisher's signing key is known or suspected to be leaked | [Compromised signing key](#compromised-signing-key) | `ilium plugin trust list --json` | Level 1 |
+
+### Bad plugin
+
+A plugin that misbehaves but involves no key follows these steps. Each step is reversible until the last.
+
+1. **Get a working screen.** Run `ilium --safe-mode=third-party`. This loads no T2 or T3 plugin and changes nothing on disk. The flag is not stored, so the next normal start returns to the earlier state. [LIF-180]
+2. **Find the plugin, if it is not known.** Run `ilium plugin bisect start`, then answer `good` or `bad` after each test, until the record names one plugin in `found`. Finish with `ilium plugin bisect reset`. The bisect changes only the session, never the saved set. [LIF-184]
+3. **Stop it for everyone.** Add the id to `plugins.deny_ids` in the policy file. Ilium reads the policy at server start, so the plugin is disabled at the next start and shows `Blocked by policy`. Its data stays on disk. A running plugin is not stopped by an edit alone.
+4. **Remove it.** Run `ilium plugin uninstall <id>`. Without `--purge` the data folder, storage and stored settings stay, and grants and failure counters are deleted. Run `ilium plugin uninstall <id> --purge` only when the data is no longer needed; it also deletes the plugin log and the compiled cache for the plugin. [PKG-294, PKG-295]
+5. **Check who had it.** Search the audit log for the plugin id: `jq -r 'select(.plugin_id=="<id>")' "$XDG_STATE_HOME/ilium/audit/audit.jsonl"`.
+
+Policy keys that stop an installed plugin: `plugins.deny_ids` (glob on ids, refusal `policy.id-denied`), `packages.allowed_tiers`, `packages.allow_third_party` and the publisher rules. `plugins.allow_ids` refuses ids outside its globs, and `grants.deny` only removes the grant; the plugin keeps running without it. [SEC-186, SEC-198, admin policy]
+
+Audit events to look for: `policy-loaded`, `policy-violation`, `safe-mode`, `grant-revoked`.
+
+### Failed update
+
+An update that fails is handled by the host first. The rules below say when it rolls back by itself and when you do it by hand.
+
+- **Automatic rollback.** If the first `activate` of the new version returns an error, traps or misses its deadline, the host returns to the previous version at once, marks the new version `skip`, logs `update.rolled-back` and shows the toast `Update failed, rolled back`. This failure is not counted in the failure window. [LIF-075]
+- **No automatic rollback later.** A failure after a successful first `activate` follows the normal failure window (see [Watchdog timeouts](#watchdog-timeouts)) and never rolls back by itself. Use the manual steps below.
+- **Manual rollback.** Run `ilium plugin rollback <id>`. It makes the one previous version in `store/` active again. Only one previous version is kept on disk, so a second rollback is not possible. With no previous version the command fails with `install.no-previous`. [PKG-290, LIF-076]
+- **Data newer than the old version.** A rollback to a version whose `data_version` is lower than the stored data is refused with `migration.data-newer`, exit 1. Choose `--restore-backup` (restore the pre-update snapshot) or `--discard-data` (drop the newer data) explicitly. The host never converts newer data downward. [PKG-288]
+- **Skip mark.** A rolled-back version is not offered by `ilium plugin update` until a newer version exists or someone runs `ilium plugin install <file> --unskip`. [PKG-292]
+- **Interrupted update.** A crash or power loss before the registry commit leaves `installed.json` unchanged; the old version keeps running. Run the update again. [PKG-269, PKG-271]
+- **Lock held.** A second transaction that waits 30 s for the install lock fails with `install.locked`, exit code 4. Wait for the first to finish; the lock releases on process exit.
+- **Staged candidate that never switches.** A staged update becomes active when the plugin is idle or at the next server start. `ilium plugin restart <id>` forces the switch. [PKG-278]
+
+Audit and log events: `update.rolled-back`. Policy keys: none needed; to block a bad release use `publishers.deny` (see [Compromised signing key](#compromised-signing-key)) or `plugins.deny_ids`.
+
+### Crash loop
+
+A crash mark is written as soon as a start begins and removed when startup completes. A mark left behind means that start did not finish. [LIF-186, LIF-294]
+
+- **The guard.** Three crashes during start within 5 minutes make the next start use `third-party` safe mode and open the recovery page. The guard clears after one start that stays up for 5 minutes after startup completed. A stop before that point keeps the marks.
+- **What to do.** Run `ilium --safe-mode=third-party` and follow [Bad plugin](#bad-plugin) steps 2 to 4 to find and stop the plugin that the crashes point to.
+- **Evidence.** Before you remove anything, keep a copy of the crash records: `ilium plugin support-bundle <id> --out <file>` writes a zip with `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`. The `<file>` must not exist already; the command fails with `support-bundle.exists` otherwise. [USR-221, DEV-832]
+- **Handling the bundle.** A bundle can hold personal data: credential headers, URL parameters and home paths are redacted, but other text in a plugin's log is not, so `log.txt` may contain names, messages or other personal data. Treat every bundle as sensitive. Send it outside your organisation only to the plugin's `security_contact` or to the Ilium project contact in the escalation path, and only over a channel your organisation approves. Keep it no longer than the retention in the Open decisions table (proposed, owner to confirm), and delete every copy at the end of that period, including copies in tickets and mail. Before any transfer, read `log.txt` and remove or refuse the bundle if it holds data you may not share. [USR-960, USR-961, USR-962]
+- **Helper crashes.** A helper is restarted at most 5 times in 10 minutes. After the sixth crash the T2 and T3 plugins of that session stop with the reason `helper.unstable`. Clear each affected plugin with `ilium plugin reset-failures <id>` once the cause is fixed. [LIF-134]
+
+Audit and log events: `safe-mode` (written at each safe-mode start). Crash records live in the server state folder, not in the plugin data folder. [USR-229]
+
+### Watchdog timeouts
+
+Every export call runs under a deadline. A call that runs past its deadline is interrupted by the host; a slow helper is killed. [LIF-125, LIF-132]
+
+- **Failure window.** Failures are counted per plugin, per side and per scope in a sliding window of 10 minutes. The first counted failure restarts the side after 1 s, the second after 5 s, and the third stops that side with `stopped-by-failure`. No restart is scheduled after the third. [LIF-027, LIF-028, LIF-029, LIF-030]
+- **Notice text.** The user sees `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap>. Turn it on again in Settings > Plugins.` [USR-130]
+- **Hung helper.** The server pings the helper every 1 s. Three missed answers, or no reply 500 ms after a deadline, make the server send SIGTERM and then SIGKILL after 2 s. The event is `helper.hung`, and one failure is counted. [LIF-132, HST-171]
+- **Requests with no reply.** A request that gets no reply within its timeout completes as `timed-out` for the plugin. The examples given are 30 s for a command or service reply and 120 s for inference. [LIF-131]
+- **Degraded, not failed.** `degraded` is shown, not stopped, when a threshold in [Health and watchdog](/pages/reference-health-and-watchdog/) is met: 5 or more near-misses in 5 minutes, 768 or more of 1,024 queued events in 1 minute, or 1 or more rate-limit or quota results in 5 minutes.
+- **Recovery.** Run `ilium plugin reset-failures <id>` to clear the window and the failure stop. Enabling the plugin, or installing an update, clears it too. [LIF-036]
+- **Metrics.** Counters are kept in memory for 24 hours, in hourly buckets, and reset at each server restart. Read them with `ilium plugin status <id> --json` before a restart if you need them. [LIF-135, LIF-136]
+
+Accuracy: a hard deadline of `D` traps the call between `D` and `D` + 20 ms of wall time on a host that is not overloaded. Do not expect a call to trap at exactly `D`. [LIF-125]
+
+### Compromised signing key
+
+Use this section when a publisher's private key may be exposed. The key controls who may install that publisher's plugins, so each step below stops the key's plugins at the next opportunity.
+
+1. **Revoke the key on each machine.** Run `ilium plugin trust revoke <key_id> --reason compromised`. The entry is written to the user's trust store. Plugins signed by the key move to `disabled-blocked` with the reason `trust.key-revoked`, and they stay off until a user runs `enable --accept-risk` or installs an update signed by another trusted key of the same publisher (lifecycle row P16). [PKG-243; lifecycle row P15]
+2. **Block it by policy on managed machines.** Put the 64-character fingerprint in `publishers.deny`, or remove it from `publishers.allow`. A plugin signed by a denied key is refused with `policy.publisher-denied`, and an installed plugin that violates a publisher rule is disabled at the next start. [SEC-186, admin policy]
+3. **Find the plugins.** Run `ilium plugin trust list --json` for the key status, then `ilium plugin status --json` for each installed plugin.
+4. **Do not remove the key instead.** `ilium plugin trust remove <key_id> --force` also disables the plugins, but they return as soon as the key is trusted again. Use `revoke` for a compromised key. [PKG-226]
+5. **Leave users a way forward.** A `disabled-blocked` plugin starts again only with `ilium plugin enable <id> --accept-risk`, or with an update signed by another trusted key of the same publisher. Tell users which of the two applies.
+
+Audit events to look for: `trust-add`, `trust-remove`, `signature-failure`, `blocklist-hit`, `policy-violation`. The revocation itself is logged as `trust.key-revoked`.
+
+If the publisher still controls the key, the publisher can issue a rotation statement to a new key. That is the publisher's step and the host accepts it only from a key that is currently trusted for the same publisher. [PKG-238, PKG-241]
+
+### Data-exposure incident
+
+Use this section when a plugin sent, exposed or stored user data it should not have. A leaked key is handled above; this section is for the data itself, and it applies even when no key is involved. Write down the moment you became aware of the problem first, because the notice deadline in step 4 counts from that moment.
+
+1. **Contain.** On each affected machine run `ilium plugin kill <id> --reason "data exposure"`. It works without a network, stops the plugin on the server and in every attached client, cancels its pending requests as `cancelled`, and writes `plugin.killed` to the audit log. [HST-516, HST-517] Add the id to `plugins.deny_ids` as well, so the plugin stays off after the next start. Do not uninstall or purge yet: uninstall deletes the grants (see [Bad plugin](#bad-plugin) step 4), and the purge deletes the data you need in step 3.
+2. **Preserve.** Before anything else changes, keep three copies: the audit log, written out with `ilium plugin audit --export <file>` (it ends with an anchor line that `--verify` checks later, [SEC-449]); the output of `ilium plugin status <id> --json`; and a support bundle, `ilium plugin support-bundle <id> --out <file>` [USR-221]. The bundle holds plugin log text that may contain personal data, so handle it under [Crash loop](#crash-loop) rules.
+3. **Scope.** Establish which users, sessions and data were affected. Record the answers per machine and per user in the incident record.
+   - **Users and sessions.** Each user has one audit file [SEC-220]. Check every user's file on the machine, not only your own. Each record carries `session` and `actor`. Start from the first `install` or `update` of the affected version and stop at the kill from step 1.
+   - **What it could reach.** Look for `grant-given` records with the plugin id. Read grants such as `terminal.read-screen`, `fs.read:project` and `tree.read`, and data-leaving grants such as `http` and `inference`, mean the plugin could read or send that data [Threat model](/pages/reference-threat-model/).
+   - **Where it sent data.** `egress-host-first-use` records the first request from the plugin to each host, not every request. `process-run` records programs it started, and `write-outside-data` records writes outside its data and cache folders. A host that is missing from these lines does not prove that nothing was sent to it.
+   - **What it stored.** The audit log holds no plugin data and no setting values [Administration guide](/pages/guide-administration/#keep-the-audit-trail). Look in the plugin's data folders, `<data>/plugins/data/<id>/` and `<data>/plugins/storage/<id>/`, and its cache folder `<cache>/plugins/<id>/` ([Plugin files](/pages/reference-plugin-files/)). They show what the plugin kept, not what it sent.
+   - **What was sent.** The content of data that left the machine can only come from the publisher, from the receiving service, or from the plugin log inside the support bundle. If none of these shows it, write "unknown" in the record. Do not write "none".
+4. **Notify, in this order.** The manual does not set the internal order (see [Open decisions](#open-decisions)). The order below is a recommendation.
+   1. Your organisation's privacy or security owner, who decides on legal duties.
+   2. The plugin's `security_contact` [SEC-325]. Report the flaw there first, as the [escalation path](#escalation-path) step 1 requires, and send only the evidence it needs, over a channel your organisation approves [USR-960].
+   3. The Ilium project contact, only if the flaw is in the host [escalation path](#escalation-path) step 2.
+   4. The affected users: which plugin, which data, the dates, and what they should do, such as reviewing the grants or changing credentials they gave the plugin.
+
+   The manual sets no notification deadline. If your organisation is a controller under the EU General Data Protection Regulation, Article 33 requires notice to the supervisory authority without undue delay and, where feasible, within 72 hours of becoming aware of a personal data breach. Article 34 requires telling the affected people without undue delay when the risk is high. Confirm the duty and its clock with your legal owner. The 72 hours run from awareness, which is why step 1 starts with recording the time.
+5. **Close.** Keep the evidence for the retention period in [Open decisions](#open-decisions) and delete every copy at its end [USR-961]. Only after the evidence is kept, decide whether to uninstall the plugin, purge its data or keep it, and tell the users which.
+
+Audit events to look for: `grant-given`, `install`, `update`, `egress-host-first-use`, `process-run`, `write-outside-data` and `plugin.killed`.
+
+### Time limits
+
+| Limit | Value | Source |
+|---|---|---|
+| Deadline trap window | `D` to `D` + 20 ms | [LIF-125](/pages/reference-health-and-watchdog/) |
+| Heartbeat to a helper | every 1 s; a hung helper after 3 missed answers (3 s) | [LIF-132](/pages/reference-health-and-watchdog/) |
+| Helper past its deadline | 500 ms before the helper is killed | [LIF-132](/pages/reference-health-and-watchdog/) |
+| Kill sequence | SIGTERM, then SIGKILL after 2 s | [HST-171](/pages/reference-host-helper/) |
+| Failure window | 10 minutes, sliding | [LIF-027](/pages/lifecycle/#failure-counting-and-restart) |
+| Restart after first and second failure | 1 s, then 5 s | [LIF-028, LIF-029](/pages/lifecycle/#failure-counting-and-restart) |
+| Helper restarts before the side stops | at most 5 in 10 minutes | [LIF-134](/pages/reference-health-and-watchdog/) |
+| Crash-loop guard trigger | 3 crashes during start within 5 minutes | [LIF-186](/pages/user-safe-mode-and-troubleshooting/) |
+| Crash-loop guard reset | one start that stays up 5 minutes after startup | [LIF-294](/pages/user-safe-mode-and-troubleshooting/) |
+| Install lock wait | 30 s, then `install.locked` | [PKG-270](/pages/reference-install-and-update/) |
+| Audit queue when the file cannot be written | up to 1,000 records, retry every 10 s | [Administration guide](/pages/guide-administration/#keep-the-audit-trail) |
+| Automatic update check (when enabled) | at server start, then every 24 hours with up to 1 hour of random delay | [PKG-301](/pages/reference-install-and-update/) |
+| Metrics retention | 24 hours, hourly buckets, reset at restart | [LIF-135, LIF-136](/pages/reference-health-and-watchdog/) |
+| Security report acknowledgement | 3 working days; first assessment 10 working days | [SEC-321](/pages/reference-security-response/) |
+| Vulnerability embargo | 90 days from the report, or until a fix | [SEC-321](/pages/reference-security-response/) |
+| Publisher silence before a blocklist entry | 30 days | [SEC-326](/pages/reference-security-response/) |
+| Emergency kill, server side (run on the machine) | 1 s after the command | [HST-517](#emergency-kill-switch-for-one-plugin) |
+| Emergency kill, each attached client | 5 s after the command | [HST-517](#emergency-kill-switch-for-one-plugin) |
+| Policy or blocklist change, running plugin | At the next server start. A live reload that stops a running plugin within 10 seconds of the file change is proposed and not yet accepted by its owner; until then, the next start applies | [SEC-188](/pages/reference-admin-policy/) and [Stopping a blocked plugin now](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now) |
+| Mirror sync to a machine without network | No interval is defined; `ilium plugin mirror sync` runs only when an administrator starts it | [PKG-410](/pages/reference-registry/) |
+| Bundle metadata on an air-gapped machine | `snapshot.json` should expire within 7 days; an expired bundle is refused unless `--offline` is given | [PKG-367, PKG-365](/pages/reference-registry/) |
+
+### Isolated fleet: propagation and acknowledgement
+
+A machine without network access receives no push from anyone. The manual defines no sync schedule that reaches it. Its policy, blocklist and mirror files change only when an administrator copies them there. So the worst-case delay is the administrator's own transfer time, plus the local times in the table above. Nothing in the manual bounds the transfer time, so the organisation must set it.
+
+1. **Choose the action the machine can apply by itself.**
+   - For active harm, run `ilium plugin kill <id> --reason <text>` on each machine [HST-516]. It stops a running plugin within 1 s without a restart [HST-517]. A policy edit does not do this, as the next item explains.
+   - For a plugin that must stay off, write `plugins.deny_ids` or `packages.blocklist_file` into the local policy file. The change applies at the next server start [SEC-188]. Until then a running plugin keeps running, so combine it with the kill command.
+   - The `kill` key of the policy [LIF-301] is specified to apply within 60 s without a restart [LIF-303]. That behaviour is target behaviour, so use the command until it is shipped.
+2. **Acknowledge on each machine.** Do not count a machine as blocked until it confirms. On that machine, run `ilium plugin status <id> --json`. After a kill it shows `disabled-by-admin`; after a policy start it shows `Blocked by policy`. Then find the matching audit line: `plugin.killed` for the kill, or `policy-loaded` and `policy-violation` for a policy change. Record the machine, the time, the state and the audit record's `seq` in the change record.
+3. **Collect the proof.** Export each machine's audit log with `ilium plugin audit --export <file>` and check it centrally with `--verify`, against the anchor line [SEC-449]. A machine whose confirmation is missing, or whose export does not verify, stays on the list as "not confirmed" until it is checked again.
+4. **Re-check.** Repeat step 2 when the machine next connects to the site network, and after each policy or mirror change, because a later change can override an earlier one.
+
+### Policy keys used in this runbook
+
+| Key | Type | Effect here |
+|---|---|---|
+| `plugins.deny_ids` | list of globs | Stops a plugin by id at the next start |
+| `plugins.allow_ids` | list of globs | Only these ids may run |
+| `packages.allowed_tiers` | list | Limits the tiers that install |
+| `packages.allow_third_party` | boolean | Refuses all third-party plugins when false |
+| `publishers.allow` | list of fingerprints | Only these signing keys are accepted |
+| `publishers.deny` | list of fingerprints | Refuses these signing keys |
+| `packages.blocklist_file` | path | Extra local blocklist |
+| `grants.deny` | list | Removes grants; does not disable the plugin |
+| `audit.sink`, `audit.max_mib`, `audit.keep_days` | | Where the audit log goes, and its rotation |
+
+A policy file that is malformed, or that a normal user can write, is ignored or refused as described in [Plugin policy](/pages/reference-admin-policy/). `ilium plugin doctor` warns when the policy disables a tier that the platform allows.
+
+### Audit events
+
+| Event | Meaning | Section |
+|---|---|---|
+| `policy-loaded` | The policy was read at start | [Bad plugin](#bad-plugin) |
+| `policy-violation` | A plugin or file breaks the policy | [Bad plugin](#bad-plugin) |
+| `safe-mode` | The server started in safe mode | [Crash loop](#crash-loop) |
+| `grant-revoked` | A grant was removed | [Bad plugin](#bad-plugin) |
+| `signature-failure`, `integrity-failure`, `blocklist-hit` | A package or load check failed | [Compromised signing key](#compromised-signing-key) |
+| `trust-add`, `trust-remove` | The trust store changed | [Compromised signing key](#compromised-signing-key) |
+| `update.rolled-back` | A candidate failed its first activation and the host returned | [Failed update](#failed-update) |
+| `helper.hung`, `helper.unstable` | The helper was killed, or stopped after too many crashes | [Watchdog timeouts](#watchdog-timeouts) |
+
+The names are those used by the pages that define them. The audit log lists the first group; see [Audit log](/pages/reference-audit-log/) for the full list and each record's fields.
+
+### Audit chain verification
+
+The audit log is a chain: each record carries the hash of the record before it, so an edit in the middle of the file breaks the chain. `ilium plugin audit --verify` re-computes the chain and reports what it finds. Run it on a schedule, because a broken chain is only visible when someone checks it. See [Audit log](/pages/reference-audit-log/) for the record format and each finding.
+
+| Result | Exit code | Meaning | What the administrator does |
+|---|---|---|---|
+| `ok` | 0 | The chain is intact | Record the date and the result. No further step |
+| `torn-tail` only | 0 | The last line is incomplete, usually after a power loss or a crash during a write | Record the byte offset. Check that the file `audit-torn-<seq>` exists after the next server start. No security step |
+| `broken` at a `seq` | 3 | A record was changed, or the chain was started again | Treat it as an incident. Follow the steps below |
+| `missing-file` | 3 | A file between two `seq` values is not in the folder | Treat it as an incident. Follow the steps below |
+| `reset-at` | Not `ok`. The source page does not give an exit code yet | A record starts a new chain with a zero hash, which is not the first record | Treat it as an incident. Follow the steps below. Do not read the result as `ok` |
+| `unknown-schema` | 3 | A record uses a schema value that this verifier does not know | Upgrade the verifying host to the same version as the server, then run it again. Do not treat it as tampering |
+
+For an incident finding, do these steps in order:
+
+1. Stop changing the audit folder, and do not start a server on it until step 2 is done, because a server start moves a torn tail out of the file ([SEC-956](/pages/reference-audit-log/)).
+2. Copy the whole audit folder to a separate location, and keep the copy read-only. Keep the original where it is.
+3. Write down the first finding with its `seq` and the exit code.
+4. Follow [Data-exposure incident](#data-exposure-incident) or [Compromised signing key](#compromised-signing-key), depending on what the records show, and use the escalation path below.
+
+- **[OPS-221]** The administrator MUST run `ilium plugin audit --verify` at least once a week (proposed, owner to confirm) from a scheduled job, and MUST also run it after each incident and before an audit export is sent outside the organisation. Test: schedule the job, let it run, and assert that its result is stored with the date of the run.
+- **[OPS-222]** The administrator MUST record each verification result with the date, the exit code and the first finding, and MUST NOT close an incident while its last verification result is not `ok`, unless the only finding is `torn-tail` that the rule of OPS-223 explains. Test: run the verification on a clean log and on a log with one changed record, and assert that the records show exit 0 with `ok` and exit 3 with the first broken `seq`.
+- **[OPS-223]** When the only finding is `torn-tail` (exit 0, as [SEC-957](/pages/reference-audit-log/) states), the administrator MUST record the byte offset, MUST check after the next server start that the partial bytes were moved to `audit-torn-<seq>` as [SEC-956](/pages/reference-audit-log/) requires, and MUST NOT treat the finding as a broken chain. Test: append half a JSON line to a copy of the log, run the verification, and assert exit 0 with the `torn-tail` line and its byte offset.
+- **[OPS-224]** When the verification reports `broken`, `missing-file` or `reset-at`, the administrator MUST follow the four incident steps above before any other action, MUST keep the copy of the folder unchanged, and MUST name the first finding in the incident record. Test: change one record in a copy of the audit folder, run the verification, and assert exit 3 with the first broken `seq`, and that the incident steps keep the copy unchanged.
+- **[OPS-225]** When the verification reports `unknown-schema` with exit code 3, the administrator MUST upgrade the verifying host and run the check again before drawing any conclusion, because [SEC-134](/pages/reference-audit-log/) requires a newer schema to be read only by a verifier that knows it. Test: write a record with a schema value one higher than the verifier knows, run the verification, and assert exit 3 with `unknown-schema` and the `seq` of that record, and no finding of tampering.
+
+### Escalation path
+
+1. **The publisher.** The plugin's manifest may name a `security_contact` (SEC-325). `ilium plugin inspect <file>` shows it. Report a flaw in a plugin to that contact, not to the Ilium project, unless the flaw is in the host.
+2. **The Ilium project, for a host flaw.** Report to the security contact in `SECURITY.md` or in `ilium --version --verbose`. Until that address is published the contact is the placeholder `security@ilium.example` (SEC-320). Include the version, platform, steps, expected and actual result, and whether a plugin was involved.
+3. **The release blocklist.** If a publisher does not answer a serious report within 30 days, the Ilium project may add the package or key to the release blocklist (SEC-326). On your own machines, use `packages.blocklist_file` or `publishers.deny` now; do not wait for the project.
+
+Who inside your organisation is told, and in what order, is not defined in the manual. See [Open decisions](#open-decisions).
+
+### Incident record and post-incident review
+
+Every section above tells you to "write it in the incident record". This section defines that record, so that incidents on different machines can be compared and handed to a publisher with the evidence the publishing guide asks for.
+
+**Where it lives.** The record is an entry in your site's change record, the same place where HST-992 requires you to document a copy of plugin logs on another machine. The manual does not prescribe a tool. The entry must be readable by the administrators who respond, and it must not hold the evidence itself: it holds the hashes and storage locations of the evidence. A support bundle can hold personal data ([USR-960], [USR-962]), so the bundle stays in storage with owner-only modes (0600 for files, 0700 for folders) and the record only points to it.
+
+**Fields.** Write one record per incident. Open it at the moment you first notice the problem, because the notification clocks in [Data-exposure incident](#data-exposure-incident) count from that moment.
+
+| Field | What to write | Where the value comes from |
+|---|---|---|
+| Incident id | One id from your change-record system, never reused. | Your change record. |
+| First noticed | Time `YYYY-MM-DD HH:mm:ss` with time zone, and how: user report, alert rule, the recovery page after the crash-loop guard, or an audit review. | Your own clock and the alert or ticket. |
+| Severity level | One level of the [operational severity scale](/pages/ops-incident-response/), taken from the triage table of this page, or a higher level if the impact is wider. | The triage table above. |
+| Acknowledged | Time `YYYY-MM-DD HH:mm:ss` with time zone when the named owner of the level accepted the incident, and the owner's name or role. | Your change record and the owner's reply. |
+| Machines | Each affected machine, with the host version from `ilium --version --verbose`. | The command on each machine. |
+| Plugins | Each plugin id with the installed version and the version before it. | `ilium plugin status <id> --json`. |
+| Audit sequence range | Per machine and user: first and last audit record of the incident, and the file it was exported to. Start at the first `install` or `update` of the affected version and stop at `plugin.killed`. | `ilium plugin audit --export <file>`, later checked with `--verify` against its anchor line ([SEC-449]). |
+| Actions taken | One line per action with its time and the administrator: kill, `plugins.deny_ids`, `packages.blocklist_file` or `publishers.deny` entries, trust revocation, rollback, safe mode. | The shell history and the `plugin.killed`, `trust-remove` and `safe-mode` events. |
+| Kill-switch and quarantine entries pushed | Each entry, its text, the time it was pushed and the machines that acknowledged it. A machine without acknowledgement is "not confirmed". | [Isolated fleet](#isolated-fleet-propagation-and-acknowledgement). |
+| Evidence | For each audit export, status output and support bundle: file name, SHA-256 hash, storage location, and the date by which every copy must be deleted. | `sha256sum <file>`; the deletion date follows [USR-961]. |
+| User impact | Users and sessions affected, what they saw, and the data reached, with "unknown" where it cannot be shown. Never write "none" for what you could not establish. | Scope step of the data-exposure section. |
+| Closed | Time of closure and the name of the person who closed it. | Your change record. |
+
+**Failure modes of the record.**
+
+- A field you cannot fill is written as "unknown" with the reason. An empty field is not accepted at closure.
+- An evidence entry without a hash is not evidence: the publisher cannot tell whether the file was changed after the incident.
+- A record is closed only when its evidence is stored and the review below is started. The 90-day retention period of [USR-961] (proposed, owner to confirm) runs from the closure time.
+- When the incident is an active exploit, the project writes its own public post-mortem [SEC-729]. Your record is the input of your report to the project and does not replace it.
+
+**Post-incident review, within 7 days of closure.** The 7 days are a recommendation of this manual (proposed, owner to confirm). Tick each item in the record.
+
+1. **Crash-loop guard.** If the incident involved start crashes, confirm that the guard cleared: one start has stayed up for 5 minutes after startup completed ([Crash loop](#crash-loop)). If a machine is still in `third-party` safe mode, write why.
+2. **Alerts.** List the alert rules that should have fired and did not, from the audit events in the table above, and fix or add each rule. Write the time between the first audit record of the problem and the time you noticed it.
+3. **Permanence.** For each temporary entry in the actions list, decide whether it becomes permanent: a `plugins.deny_ids` or `packages.blocklist_file` entry, a `publishers.deny` entry, or a revoked key. Record the decision and the owner. An entry that is left temporary needs a date to remove it.
+4. **Report.** Send the publisher report to the plugin's `security_contact` (or the host report to the Ilium project contact) as the [escalation path](#escalation-path) requires, with the version, steps, expected and actual result, and the SHA-256 hash of the support bundle. Send the bundle itself only after you have read its `log.txt` and only to those recipients ([USR-960], [USR-962]). Record the date of the report. If there is no answer within 30 days, the release blocklist step in the escalation path applies.
+5. **Reproduction.** Where the fault can be shown without user data, record how it was turned into a test fixture, so the report can be reproduced and the fault does not return ([AUT-316]).
+6. **Follow-ups.** Record each follow-up with an owner and a date: policy changes, documentation gaps, changes to the Open decisions table below.
+
+## Registry backup and disaster recovery
+
+This section is target behaviour for the public plugin system. This section is for the operator of a registry. It sets the backup and restore procedure for the registry index and how to rebuild it.
+
+- [PKG-708] A registry operator MUST back up the signed index and the signed metadata at least daily, MUST keep the registry signing key in a separate backup under its own access control, and MUST test a restore at least once a quarter. A restore MUST bring back the last signed head or a later one, never an older version of `plugins/<id>.json`.
+- [PKG-709] A registry MUST be able to rebuild its index from the signed releases alone. After a restore or a rebuild the operator MUST verify every signature and package digest, compare the result with the transparency log head, and publish the verification result. The registry MUST NOT serve a rebuilt index to clients until that check passes.
+
+### Open decisions
+
+| Subject | Choice in this manual | Consequence |
+|---|---|---|
+| Command for a compromised key | `ilium plugin trust revoke <key_id> --reason compromised` (PKG-243). The [Administration guide](/pages/guide-administration/#respond-to-a-bad-plugin) step 5 uses `ilium plugin trust remove <key_id> --force` instead. | With `revoke`, plugins stay off until a user accepts the risk. With `remove --force`, they return as soon as the key is trusted again. The two pages must agree before release. |
+| Revoking a key in the system store | PKG-243 says the administrator revokes keys in the system store, but no command or file format for it is given. | Until the platform owner defines it, the runbook uses `publishers.deny` for machine-wide blocking. |
+| Security contact address | `security@ilium.example`, a placeholder (SEC-320). | Host flaws have no real destination until the project publishes one. |
+| Clearing crash marks by hand | None documented. The guard clears itself after 5 minutes of stable running (LIF-294). | An administrator who wants to clear marks at once has no supported command. |
+| Text of the notice for a policy-disabled plugin | SEC-186 gives `Disabled by your administrator`. The lifecycle table and the Administration guide give `Blocked by policy`. | An administrator searching for the notice text may find the other one. |
+| Internal escalation inside an organisation | Not defined. | Each administrator must set their own contact order. |
+| Retention of a support bundle kept as evidence | 90 days after the incident is closed (proposed, owner to confirm). | LIF-314 has the host delete bundles older than 14 days at the next start. A copy kept longer must be stored outside that location. |
+| Recipients of a bundle outside the organisation | Only the plugin's security contact or the Ilium project contact. | Other recipients (vendors, consultants, customers) are not covered by the manual and need the organisation's own approval. |
+| Notification deadline and internal order for a data-exposure incident | Not set by the manual. The order in [Data-exposure incident](#data-exposure-incident) is a recommendation. | The organisation's privacy owner must confirm the order and any legal deadline. The 72-hour rule of EU GDPR Article 33 applies only to organisations it covers. |
+
+### Requirements
+
+- [USR-230] The runbook MUST give, for each of the five symptoms in its triage table, a first command that exists in the CLI reference and a section that lists the policy keys and audit events for that symptom. Test: check each row against the CLI reference and each named key against the policy reference.
+- [USR-231] An administrator MUST be able to stop a plugin for all users by its id without deleting its data, using `plugins.deny_ids` and the next server start. Test: add the id to `plugins.deny_ids`, restart the server, and assert the state `Blocked by policy` and that the data folder still exists.
+- [USR-232] On a compromised signing key the administrator MUST run `ilium plugin trust revoke <key_id> --reason compromised` and MUST NOT rely on `trust remove --force` as the response. Test: revoke a key used by an installed plugin and assert the plugin state `disabled-blocked` with the reason `trust.key-revoked`.
+- [USR-233] The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. Test: compare each value in the time-limits table with its source page.
+- [USR-234] The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. Test: run the `jq` command of the Bad plugin section on a fixture audit log and search each event name in the source pages.
+- [USR-235] The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. Test: check the page for the three steps and the open decision row.
+- [USR-960] An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's `security_contact` or the Ilium project contact, over a channel the organisation approves. Test: check the procedure against the recipient rule in the escalation path, and confirm the Open decisions row names the same recipients.
+- [USR-961] An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends. Test: keep a bundle copy past the period in a test ticket and assert that the retention row and the 14-day host cleanup of LIF-314 are both stated on the page.
+- [USR-962] Before a support bundle leaves the machine or the organisation, an administrator MUST read its `log.txt` and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive. Test: give a fixture bundle with a personal name in `log.txt` to a reviewer and assert that the reviewer finds the procedure stops the transfer.
+- **[USR-966]** The incident record MUST store one severity level from the scale of [Operational incident response](/pages/ops-incident-response/), taken from the triage table of this page, and the time at which the owner of that level acknowledged the incident.
+
+### Emergency kill switch
+
+An operator who learns that one plugin version is harmful needs to stop it on every machine at once, without waiting for each user to disable it. This section is the target behaviour. It is different from disabling one plugin on one machine and from a registry yank, which only blocks new installs.
+
+- [LIF-301] A policy file MUST be able to list a plugin id and a version range under a `kill` key. A host that loads such a policy MUST refuse to activate any installed version inside a listed range, MUST stop a running instance of it with reason `policy`, and MUST log `policy.kill` once per plugin id.
+- [LIF-302] A killed version MUST stay installed and its data MUST stay untouched, so lifting the `kill` entry and reloading policy MUST let the plugin start again without a reinstall.
+- [LIF-303] A kill MUST take effect on a running host within 60 s of the policy file changing, MUST NOT need a server restart, and MUST apply before the crash-loop guard counts the stop as a failure.
+
+## Emergency kill switch for one plugin
+
+The registry blocklist acts on a release schedule and on publisher decisions. When a plugin is causing harm now, an administrator needs a switch that acts at once on every attached client and on the server.
+
+- **[HST-516]** The host MUST provide `ilium plugin kill <plugin-id> --reason <text>`, which MUST stop the server side and every attached client side of the plugin, set it to `disabled-by-admin`, and prevent reactivation until `ilium plugin unkill <plugin-id>`. It MUST work in safe mode and without a network.
+- **[HST-517]** The kill switch MUST take effect on the server within 1 s and on every attached client within 5 s of the command, MUST cancel the pending requests of the plugin as `cancelled`, and MUST write an audit event `plugin.killed` with the administrator, the reason and the time. A client that reconnects later MUST learn the killed state before it activates the plugin.
+
+### Recover a disabled side
+
+Target behaviour. After the third failure inside 10 minutes the host disables a side and waits for a manual enable ([API-041]). This section is the recovery procedure.
+
+- [API-093] The host MUST offer `ilium plugin enable <id>` and an administrator bulk form for every disabled plugin, MUST show the crash record of [API-092] before it enables, and MUST clear the restart window on an enable so that the 10-minute count starts again at zero. An enable MUST NOT clear the crash record before the plugin has run for 10 minutes without a trap.
+
+### See also
+
+- [Plugin administration guide](/pages/guide-administration/)
+- [Plugin policy](/pages/reference-admin-policy/)
+- [Audit log](/pages/reference-audit-log/)
+- [Troubleshooting plugins](/pages/user-troubleshooting/)
+- [Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)
+- [Health and watchdog](/pages/reference-health-and-watchdog/)
+- [Security response](/pages/reference-security-response/)
+
+API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions: T10-operations
+
+- [HST-696] `ilium plugin doctor [--json] [--fix]` MUST check the registry, lock files, staging folders, store hashes, bucket integrity, quarantine files, permissions (USR-206/207), disk space and orphaned data, MUST print one line per finding with a stable code, MUST change nothing without `--fix`, and with `--fix` MUST only perform the reversible actions (move aside, rebuild index, remove stale lock) and list each. Exit code 0 means no findings, 1 findings, 2 fixed.
+- **[HST-093]** `ilium plugin doctor --fix` MUST refuse to run while a session server of the same user holds `installed.lock` or a session lock, exiting with code 6 and the code `doctor.server-running`, and MUST change nothing. `ilium plugin doctor` without `--fix` MUST still run and report. (proposed, owner to confirm)
+- [HST-697] A lock holder is stale only when its recorded process is gone, or its boot id differs from the current one, or its heartbeat is older than 60 s; the host MUST NOT break a lock whose holder passes these checks, MUST log `lock.takeover` with the old holder's pid and boot id on takeover, and a command that waits for a held lock MUST fail with `registry.locked` after 30 s naming the holder.
+
+## Requirement statements
+
+- **[API-093]** The host MUST offer `ilium plugin enable <id>` and an administrator bulk form for every disabled plugin, MUST show the crash record of [API-092] before it enables, and MUST clear the restart window on an enable so that the 10-minute count starts again at zero. An enable MUST NOT clear the crash record before the plugin has run for 10 minutes without a trap.
+- **[HST-696]** `ilium plugin doctor [--json] [--fix]` MUST check the registry, lock files, staging folders, store hashes, bucket integrity, quarantine files, permissions (USR-206/207), disk space and orphaned data, MUST print one line per finding with a stable code, MUST change nothing without `--fix`, and with `--fix` MUST only perform the reversible actions (move aside, rebuild index, remove stale lock) and list each. Exit code 0 means no findings, 1 findings, 2 fixed.
+- **[HST-697]** A lock holder is stale only when its recorded process is gone, or its boot id differs from the current one, or its heartbeat is older than 60 s; the host MUST NOT break a lock whose holder passes these checks, MUST log `lock.takeover` with the old holder's pid and boot id on takeover, and a command that waits for a held lock MUST fail with `registry.locked` after 30 s naming the holder.
+- **[LIF-301]** A policy file MUST be able to list a plugin id and a version range under a `kill` key. A host that loads such a policy MUST refuse to activate any installed version inside a listed range, MUST stop a running instance of it with reason `policy`, and MUST log `policy.kill` once per plugin id.
+- **[LIF-302]** A killed version MUST stay installed and its data MUST stay untouched, so lifting the `kill` entry and reloading policy MUST let the plugin start again without a reinstall.
+- **[LIF-303]** A kill MUST take effect on a running host within 60 s of the policy file changing, MUST NOT need a server restart, and MUST apply before the crash-loop guard counts the stop as a failure.
+- **[PKG-708]** A registry operator MUST back up the signed index and the signed metadata at least daily, MUST keep the registry signing key in a separate backup under its own access control, and MUST test a restore at least once a quarter. A restore MUST bring back the last signed head or a later one, never an older version of `plugins/<id>.json`.
+- **[PKG-709]** A registry MUST be able to rebuild its index from the signed releases alone. After a restore or a rebuild the operator MUST verify every signature and package digest, compare the result with the transparency log head, and publish the verification result. The registry MUST NOT serve a rebuilt index to clients until that check passes.
+- **[USR-230]** The runbook MUST give, for each of the five symptoms in its triage table, a first command that exists in the CLI reference and a section that lists the policy keys and audit events for that symptom.
+- **[USR-231]** An administrator MUST be able to stop a plugin for all users by its id without deleting its data, using `plugins.deny_ids` and the next server start.
+- **[USR-232]** On a compromised signing key the administrator MUST run `ilium plugin trust revoke <key_id> --reason compromised` and MUST NOT rely on `trust remove --force` as the response.
+- **[USR-233]** The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them.
+- **[USR-234]** The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it.
+- **[USR-235]** The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder.
+- **[USR-960]** An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's `security_contact` or the Ilium project contact, over a channel the organisation approves.
+- **[USR-961]** An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends.
+- **[USR-962]** Before a support bundle leaves the machine or the organisation, an administrator MUST read its `log.txt` and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive.

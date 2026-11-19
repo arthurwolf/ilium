@@ -13,6 +13,7 @@ fn port_server_agent_display_names_map_to_transcript_classes() {
         host.tree()
             .set_agent_session(pane, "session-1", rows(&["user: hello"]));
         host.cli().invoke(&["recap"], b"");
+        host.settle();
         assert_eq!(
             host.jobs().list().len(),
             1,
@@ -29,6 +30,7 @@ fn port_server_agent_without_recorded_session_has_no_transcript() {
     open_gate(&mut host);
     host.tree().add(agent_pane("worker", "claude"));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let record = first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()));
     assert_eq!(record["state"], "unavailable");
     assert!(host.jobs().list().is_empty());
@@ -41,6 +43,7 @@ fn port_server_unavailable_agent_never_resolves_or_reads_a_historical_transcript
     open_gate(&mut host);
     host.tree().add(agent_pane("worker", "claude"));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(host.transcript_reads(), 0);
 }
 
@@ -60,6 +63,7 @@ fn port_server_shell_pane_without_current_frame_has_no_screen_text() {
     let pane = host.tree().add(shell_pane("build shell"));
     host.tree().set_screen_unavailable(pane);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert!(host.jobs().list().is_empty());
     assert_eq!(
         first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()))["state"],
@@ -76,6 +80,7 @@ fn port_server_transcript_query_targets_the_agent_pane() {
     host.tree()
         .set_agent_session(pane, "session-1", rows(&["user: hello"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     let queries = host.transcript_queries();
     assert_eq!(queries.len(), 1);
     assert_eq!(queries[0].pane, pane);
@@ -89,6 +94,7 @@ fn port_server_agent_without_session_never_reads_the_screen() {
     let pane = host.tree().add(agent_pane("worker", "claude"));
     host.tree().set_screen(pane, rows(&["$ visible"]));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(host.screen_reads(), 0);
 }
 
@@ -110,6 +116,7 @@ fn port_server_unavailable_frame_counts_as_unavailable_in_the_summary() {
     let pane = host.tree().add(shell_pane("build shell"));
     host.tree().set_screen_unavailable(pane);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let records = jsonl(&host.cli().refresh(&invocation).stdout());
     assert_eq!(summary(&records)["unavailable"], 1);
 }
@@ -121,5 +128,6 @@ fn port_server_unavailable_agent_issues_no_transcript_query() {
     open_gate(&mut host);
     host.tree().add(agent_pane("worker", "claude"));
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert!(host.transcript_queries().is_empty());
 }

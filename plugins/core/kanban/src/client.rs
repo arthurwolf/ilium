@@ -233,7 +233,7 @@ fn remember_binding(node: u64, storage: &Storage) {
 
 fn recall_binding(node: u64) -> Option<Storage> {
     let mut api = host();
-    let bytes = HostStorage::get(&mut *api, Bucket::Project, binding_key(node))?;
+    let bytes = HostStorage::get(&mut *api, Bucket::Project, binding_key(node)).ok()??;
     storage_from_json(&serde_json::from_slice::<Value>(&bytes).ok()?)
 }
 

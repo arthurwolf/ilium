@@ -110,7 +110,7 @@ fn search_009_has_a_server_side_with_the_job_runner_export() {
     let manifest = manifest_value();
     assert_eq!(manifest["server"]["entry"], "server.wasm");
     assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
-    assert_eq!(manifest["server"]["exports"], json!(["job-runner"]));
+    assert_eq!(manifest["server"]["exports"], json!(["job-runner", "service-provider"]));
 }
 
 /// REQ: F-009
@@ -124,15 +124,18 @@ fn search_009_has_a_client_side_with_the_views_export() {
 
 /// REQ: F-009
 #[test]
-fn search_009_server_grants_are_exactly_the_five_of_the_page_in_order() {
+fn search_009_server_grants_cover_the_plugin_interfaces() {
     assert_eq!(
         strings(&manifest_value()["capabilities"]["server"]),
         [
             "inference.embed",
             "tree.read",
+            "agent.read",
             "terminal.read-screen",
             "fs.read:project",
-            "jobs.run"
+            "jobs.run",
+            "extensions.provide:ilium.core.search/sources",
+            "extensions.provide:ilium.core.search/rank"
         ]
     );
 }
@@ -202,13 +205,13 @@ fn search_009_contributes_the_scan_files_job_with_its_limits() {
     let jobs = manifest_value()["contributes"]["jobs"].clone();
     assert_eq!(
         jobs,
-        json!([{ "kind": "scan-files", "deadline_ms": 120000, "memory_mib": 128 }])
+        json!([{ "kind": "scan-files", "deadline_ms": 60000, "memory_mib": 128 }])
     );
 }
 
 /// REQ: F-009
 #[test]
-fn search_009_contributes_only_commands_keybindings_panels_and_jobs() {
+fn search_009_contributes_its_declared_interfaces() {
     let manifest = manifest_value();
     let mut keys: Vec<&String> = manifest["contributes"]
         .as_object()
@@ -216,7 +219,7 @@ fn search_009_contributes_only_commands_keybindings_panels_and_jobs() {
         .keys()
         .collect();
     keys.sort();
-    assert_eq!(keys, ["commands", "jobs", "keybindings", "panels"]);
+    assert_eq!(keys, ["commands", "extension_points", "jobs", "keybindings", "panels"]);
 }
 
 /// REQ: F-009

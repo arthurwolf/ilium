@@ -2,7 +2,7 @@ For local background commands on aquarelle, apply the scheduling policy in `~/.c
 
 # Building from source
 
-This page shows how to compile Ilium on Linux, macOS and Windows, install the result with `make install`, and place the bundled animations so they are discovered. Building is optional when [release packages](installation.md) are available, and remains an option for platforms without published packages.
+This page shows how to compile Ilium on Linux, macOS and Windows and install the result with `make install`. Building is optional when [release packages](installation.md) are available, and remains an option for platforms without published packages.
 
 ## Contents
 
@@ -19,20 +19,18 @@ This page shows how to compile Ilium on Linux, macOS and Windows, install the re
 
 ## What you build
 
-Three executables make up a working installation:
+Two executables make up a working installation:
 
 | Executable | Package | Role |
 | --- | --- | --- |
 | `ilium` | `ilium` | The command-line entry point and the terminal UI. |
 | `ilium-server` | `ilium-server` | The per-project session server that owns panes. |
-| `ilium-animation-helper` | `ilium-animation-js` | The confined V8 helper that executes packaged JavaScript animations. |
-
-Two animation packages, `beach-1.0.0.iliumanim` and `carpet-1.0.0.iliumanim`, live in `ilium-animation-js/assets/packages/` and must sit beside the executables for the bundled animations to be found. See [How it works](how-it-works.md) for how these pieces cooperate.
+Core WebAssembly plugin components are built and embedded in the executables. See [How it works](how-it-works.md) for how these pieces cooperate.
 
 ## Prerequisites
 
 1. Git.
-2. [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` pins Rust `1.96.1` with the `clippy` and `rustfmt` components, so rustup installs the right version automatically on first use.
+2. [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` pins Rust `1.96.1`, the `clippy` and `rustfmt` components, and the `wasm32-wasip2` target used to build core plugins.
 3. Native tools for your platform (below).
 4. Clone the repository itself rather than downloading a source archive of a single crate: it includes patched dependencies (`vendor/vt100`, `vendor/crossterm-0.29.0`, `vendor/ratatui-image-11.0.6` and `ilium-client/vendor/tui-tree-widget`) that the build needs. Because of those patches Ilium cannot be installed from crates.io.
 
@@ -56,19 +54,13 @@ On Debian or Ubuntu:
    cd ilium
    ```
 
-3. Build the three executables:
+3. Build the executables:
 
    ```sh
-   cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
+   cargo build --locked --release -p ilium -p ilium-server --bin ilium --bin ilium-server
    ```
 
-4. Copy the bundled animations beside the binaries:
-
-   ```sh
-   cp ilium-animation-js/assets/packages/{beach,carpet}-1.0.0.iliumanim target/release/
-   ```
-
-5. Run Ilium:
+4. Run Ilium:
 
    ```sh
    ./target/release/ilium
@@ -83,13 +75,12 @@ To lower the impact on a busy machine you can prefix the build with `nice -n 19 
 1. Install the Xcode Command Line Tools: `xcode-select --install`.
 2. Install Git and rustup.
 3. Use a native terminal for your architecture (not one running under Rosetta, unless you want an Intel build).
-4. Clone, build and copy the animations:
+4. Clone and build:
 
    ```sh
    git clone https://github.com/arthurwolf/ilium.git
    cd ilium
-   cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
-   cp ilium-animation-js/assets/packages/{beach,carpet}-1.0.0.iliumanim target/release/
+   cargo build --locked --release -p ilium -p ilium-server --bin ilium --bin ilium-server
    ./target/release/ilium
    ```
 
@@ -99,32 +90,30 @@ To lower the impact on a busy machine you can prefix the build with `nice -n 19 
 
 1. Install Git, rustup with the MSVC toolchain, and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK.
 2. Open Developer PowerShell for Visual Studio.
-3. Clone, build and copy the animations:
+3. Clone and build:
 
    ```powershell
    git clone https://github.com/arthurwolf/ilium.git
    Set-Location ilium
-   cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
-   Copy-Item ilium-animation-js\assets\packages\beach-1.0.0.iliumanim,ilium-animation-js\assets\packages\carpet-1.0.0.iliumanim target\release\
+   cargo build --locked --release -p ilium -p ilium-server --bin ilium --bin ilium-server
    .\target\release\ilium.exe
    ```
 
-4. Run from `target\release`, or copy all three executables, both animations and required runtime DLLs into one directory on your user `PATH`.
+4. Run from `target\release`, or copy both executables and required runtime DLLs into one directory on your user `PATH`.
 
 The `make` target is aimed at Linux and macOS; on Windows copy the files manually as above.
 
 ## make install
 
-`make install RECEIPT=<job id>` installs the release binaries from a verified build and copies both animation packages into one directory. It does not build. `RECEIPT` names the build-service receipt of the `make build` run; `tools/install-from-receipt.py` checks that the receipt reports success and that each binary's SHA-256 matches the receipt, then replaces each executable atomically, keeps the previous one as `<name>.prev`, and writes `<name>.build.json` beside it. The server records that file in its lifecycle log at every start, so you can see which build ran.
+`make install RECEIPT=<job id>` installs the release binaries from a verified build. It does not build. `RECEIPT` names the build-service receipt of the `make build` run; `tools/install-from-receipt.py` checks that the receipt reports success and that each binary's SHA-256 matches the receipt, then replaces each executable atomically, keeps the previous one as `<name>.prev`, and writes `<name>.build.json` beside it. The server records that file in its lifecycle log at every start, so you can see which build ran.
 
 | Make variable | Default | Meaning |
 | --- | --- | --- |
 | `CARGO_HOME` | `$HOME/.cargo` | Cargo home; used to derive `BIN_DIR`. |
 | `BIN_DIR` | `$(CARGO_HOME)/bin` | Destination directory. |
-
 | `RECEIPT` | none (required) | Build receipt (job id or receipt directory) of the release build to install. |
 
-Targets: `build` (release build of the three binaries), `install` (verified install from `RECEIPT`), `test` (`cargo test --workspace`).
+Targets: `build` (release build of both binaries), `install` (verified install from `RECEIPT`), `test` (`cargo test --workspace`).
 
 1. Run `make build` and note the job id it reports.
 2. Run `make install RECEIPT=<job id>`. This installs into `~/.cargo/bin` (or `$CARGO_HOME/bin`).
@@ -136,11 +125,11 @@ Targets: `build` (release build of the three binaries), `install` (verified inst
 
 4. Add that directory to `PATH` if it is not already.
 
-Executables are installed with mode 755 and the animation packages with mode 644, side by side, which is what animation discovery expects.
+Executables are installed with mode 755.
 
 ## Bundled animations
 
-The helper and the two `.iliumanim` packages must share a directory with `ilium`. When run from `target/release` after the copy step, or after `make install`, discovery works. If you move only `ilium`, the bundled animations disappear from Settings. Native animations additionally need Bubblewrap and cgroup-v2 delegation on Linux; see [Installation](installation.md#native-animation-prerequisites) and [Animations](animations.md).
+The core scene plugin is embedded as a WebAssembly component during the build. Its scenes appear alongside the built-in scenes and use the shared appearance controls. See [Animations](animations.md).
 
 ## Release-quality packages
 
@@ -161,7 +150,7 @@ See [Contributing](contributing.md).
 - Linker error about `alsa` or `openssl`: install the ALSA and OpenSSL development packages and `pkg-config`.
 - `error: package ... not found` or patched-crate errors: you are not building from a full clone. Clone the repository; do not copy a single crate out.
 - Wrong Rust version: let rustup read `rust-toolchain.toml`; do not override with another toolchain.
-- `ilium` runs but the bundled animations are absent: the helper and the two `.iliumanim` files are not beside the executable.
+- A plugin scene is absent: check that the scene plugin is enabled and that the build included its WebAssembly component.
 - `ilium` shows `command not found` after `make install`: add `BIN_DIR` to `PATH`.
 - An old server keeps running after a rebuild: run `ilium --restart-server` (the snapshot is kept), see [Session recovery](session-recovery.md).
 - Windows build fails to link: open Developer PowerShell so the MSVC tools and Windows SDK are on the path.

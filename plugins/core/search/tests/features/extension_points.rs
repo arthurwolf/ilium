@@ -68,12 +68,12 @@ fn doc_f_009_the_plugin_owns_exactly_two_points() {
 #[test]
 fn doc_f_009_core_extension_points_page_agrees_on_both_points() {
     let page = points_page();
-    assert!(page.contains(
-        "| `ilium.core.search/sources` | collect | standard | Add a source of results, such as issues or notes. |"
-    ));
-    assert!(page.contains(
-        "| `ilium.core.search/rank` | hook: transform | standard | Change the order of results before they are shown. |"
-    ));
+    let sources = table_row(&page, "`ilium.core.search/sources`");
+    assert_eq!((&sources[1], &sources[2], sources.last().map(String::as_str)),
+        (&"collect".to_string(), &"standard".to_string(), Some("Add a source of results, such as issues or notes.")));
+    let rank = table_row(&page, "`ilium.core.search/rank`");
+    assert_eq!((&rank[1], &rank[2], rank.last().map(String::as_str)),
+        (&"hook: transform".to_string(), &"standard".to_string(), Some("Change the order of results before they are shown.")));
 }
 
 /// REQ: F-009

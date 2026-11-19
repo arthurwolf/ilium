@@ -346,13 +346,52 @@ fn the_component_scene_is_chosen_by_the_spec_and_draws_into_the_field() {
 }
 
 #[test]
-fn other_scene_ids_keep_the_skeleton_and_leave_the_field_blank() {
-    let spec = json!({"scene": "clock"});
-    let mut scene = <ScenesScene as SceneProgram>::new(&spec.to_string());
-    let mut field = SceneField::new(10, 5);
+fn advertised_waves_and_clock_draw_visible_frames() {
+    for id in ["waves", "clock"] {
+        let spec = json!({"scene": id});
+        let mut scene = <ScenesScene as SceneProgram>::new(&spec.to_string());
+        let mut field = SceneField::new(80, 40);
+        let frame = frame_for(&field, 3000);
+        SceneProgram::render(&mut scene, &frame, &mut field);
+        assert!(field.pixels.iter().any(|value| *value > 0), "{id}");
+    }
+}
+
+#[test]
+fn clock_scene_places_clock_numbers_on_the_glyph_plane() {
+    let mut scene = <ScenesScene as SceneProgram>::new(&json!({"scene": "clock"}).to_string());
+    let mut field = SceneField::new(80, 40);
+    let frame = frame_for(&field, 3000);
+    SceneProgram::render(&mut scene, &frame, &mut field);
+    assert!(field.glyphs.iter().any(|(_, _, character)| character.is_ascii_digit()));
+}
+
+#[test]
+fn waves_animate_and_repeat_at_the_declared_clip_boundary() {
+    let mut scene = <ScenesScene as SceneProgram>::new(&json!({"scene": "waves"}).to_string());
+    let mut field = SceneField::new(24, 10);
     let frame = frame_for(&field, 0);
     SceneProgram::render(&mut scene, &frame, &mut field);
-    assert!(field.pixels.iter().all(|value| *value == 0));
+    let first = field.pixels.clone();
+    SceneProgram::render(&mut scene, &frame_for(&field, 3_000), &mut field);
+    assert_ne!(field.pixels, first);
+    SceneProgram::render(&mut scene, &frame_for(&field, 12_000), &mut field);
+    assert_eq!(field.pixels, first);
+}
+
+#[test]
+fn clock_hands_follow_wall_clock_and_small_frames_are_safe() {
+    let mut scene = <ScenesScene as SceneProgram>::new(&json!({"scene": "clock"}).to_string());
+    let mut field = SceneField::new(24, 12);
+    SceneProgram::render(&mut scene, &frame_for(&field, 0), &mut field);
+    let first = field.pixels.clone();
+    SceneProgram::render(&mut scene, &frame_for(&field, 15_000), &mut field);
+    assert_ne!(field.pixels, first);
+    for (columns, rows) in [(0, 0), (1, 1), (2, 1)] {
+        let mut small = SceneField::new(columns, rows);
+        SceneProgram::render(&mut scene, &frame_for(&small, 0), &mut small);
+        assert!(small.glyphs.iter().all(|(x, y, _)| *x < columns && *y < rows));
+    }
 }
 
 #[test]

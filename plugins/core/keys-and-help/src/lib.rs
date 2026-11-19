@@ -5,6 +5,7 @@
 //! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
 pub mod key_reference;
+mod plugin_manager;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::{Intent, OpenViewSpec, Submission};
@@ -38,7 +39,9 @@ fn panel_of(command: &str) -> Option<&'static str> {
 /// The client side of `ilium.core.keys-and-help` (core-plugin-keys-and-help.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
-pub struct KeysAndHelpClient;
+pub struct KeysAndHelpClient {
+    manager: plugin_manager::PluginManager,
+}
 
 impl Lifecycle for KeysAndHelpClient {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
@@ -54,11 +57,21 @@ impl Handler for KeysAndHelpClient {
             match event {
                 Event::CommandInvoked(invoked) => {
                     if let Some(panel) = panel_of(&invoked.command) {
+                        if panel == PLUGINS_PANEL {
+                            self.manager.refresh();
+                        }
                         submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
                             view: ViewTarget::Panel(panel.to_owned()),
                             focus: true,
                         })));
                     }
+                }
+                Event::UiAction(action) if action.view == ViewTarget::Panel(PLUGINS_PANEL.to_owned()) => {
+                    self.manager.act(&action);
+                    HostUiHost::invalidate(&mut *host(), action.view);
+                }
+                Event::RequestCompleted(result) if self.manager.completed(&result) => {
+                    HostUiHost::invalidate(&mut *host(), ViewTarget::Panel(PLUGINS_PANEL.to_owned()));
                 }
                 // A remap, or a new prefix or preset, changes what the key reference shows.
                 Event::KeymapChanged => redraw = true,
@@ -79,6 +92,7 @@ impl Views for KeysAndHelpClient {
     fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
         match view {
             ViewTarget::Panel(panel) if panel == KEYS_PANEL => key_reference_view(area),
+            ViewTarget::Panel(panel) if panel == PLUGINS_PANEL => self.manager.render(),
             _ => empty_tree(),
         }
     }

@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Administrator failure runbook | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details open><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/" aria-current="page">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Administrator failure runbook</h1>
+
+<p>Use this page when a plugin on a managed machine causes trouble. Find the symptom in the first table, then follow its section. Each section gives the exact <code>ilium</code> commands, the policy keys that stop a plugin, the audit events to look for, and the time limits that decide what happens next. The stance and the policy file itself are explained in the <a href="/pages/guide-administration/">Plugin administration guide</a>.</p>
+<p>Contract version: <code>ilium:plugin@0.1.0</code>. Requirement ids have the form <code>[USR-nnn]</code>, collected in <a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a>.</p>
+<div class="note">
+<p>Decision status. The platform is not implemented. The commands and keys below are the ones the other pages of this manual define. Items the manual does not settle are listed in [Open decisions](#open-decisions).</p>
+</div>
+
+<h3 id="you-need">You need</h3>
+<ul>
+<li>Shell access as the administrator, and the policy file for the machine (<code>/etc/ilium/policy.toml</code> on Linux, see <a href="/pages/guide-administration/#write-the-policy">Administration guide</a>).</li>
+<li>The id of the plugin, and for a key problem the <code>key_id</code> of the signing key (<code>ilium plugin trust list --json</code>).</li>
+<li>The audit log of each affected user, at <code>$XDG_STATE_HOME/ilium/audit/audit.jsonl</code> on Linux (default <code>~/.local/state/ilium/audit/audit.jsonl</code>).</li>
+</ul>
+<h3 id="triage-by-symptom">Triage by symptom</h3>
+<p>Each symptom has one severity level from the <a href="/pages/ops-incident-response/">operational severity scale</a>. Record that level in the incident record.</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Section</th>
+<th>First command</th>
+<th>Severity level</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A plugin traps, is slow, or shows <code>degraded</code> or <code>failed</code></td>
+<td><a href="#bad-plugin">Bad plugin</a> or <a href="#watchdog-timeouts">Watchdog timeouts</a></td>
+<td><code>ilium plugin status &lt;id&gt; --json</code></td>
+<td>Level 3</td>
+</tr>
+<tr>
+<td>An update failed, or the plugin went back to an older version</td>
+<td><a href="#failed-update">Failed update</a></td>
+<td><code>ilium plugin status &lt;id&gt; --json</code></td>
+<td>Level 3</td>
+</tr>
+<tr>
+<td>Ilium stops or restarts again and again at start</td>
+<td><a href="#crash-loop">Crash loop</a></td>
+<td><code>ilium --safe-mode=third-party</code></td>
+<td>Level 2</td>
+</tr>
+<tr>
+<td>Requests from a plugin time out</td>
+<td><a href="#watchdog-timeouts">Watchdog timeouts</a></td>
+<td><code>ilium plugin status &lt;id&gt; --json</code></td>
+<td>Level 3</td>
+</tr>
+<tr>
+<td>A publisher's signing key is known or suspected to be leaked</td>
+<td><a href="#compromised-signing-key">Compromised signing key</a></td>
+<td><code>ilium plugin trust list --json</code></td>
+<td>Level 1</td>
+</tr>
+</tbody>
+</table>
+<h3 id="bad-plugin">Bad plugin</h3>
+<p>A plugin that misbehaves but involves no key follows these steps. Each step is reversible until the last.</p>
+<ol>
+<li><strong>Get a working screen.</strong> Run <code>ilium --safe-mode=third-party</code>. This loads no T2 or T3 plugin and changes nothing on disk. The flag is not stored, so the next normal start returns to the earlier state. [LIF-180]</li>
+<li><strong>Find the plugin, if it is not known.</strong> Run <code>ilium plugin bisect start</code>, then answer <code>good</code> or <code>bad</code> after each test, until the record names one plugin in <code>found</code>. Finish with <code>ilium plugin bisect reset</code>. The bisect changes only the session, never the saved set. [LIF-184]</li>
+<li><strong>Stop it for everyone.</strong> Add the id to <code>plugins.deny_ids</code> in the policy file. Ilium reads the policy at server start, so the plugin is disabled at the next start and shows <code>Blocked by policy</code>. Its data stays on disk. A running plugin is not stopped by an edit alone.</li>
+<li><strong>Remove it.</strong> Run <code>ilium plugin uninstall &lt;id&gt;</code>. Without <code>--purge</code> the data folder, storage and stored settings stay, and grants and failure counters are deleted. Run <code>ilium plugin uninstall &lt;id&gt; --purge</code> only when the data is no longer needed; it also deletes the plugin log and the compiled cache for the plugin. [PKG-294, PKG-295]</li>
+<li><strong>Check who had it.</strong> Search the audit log for the plugin id: <code>jq -r 'select(.plugin_id=="&lt;id&gt;")' "$XDG_STATE_HOME/ilium/audit/audit.jsonl"</code>.</li>
+</ol>
+<p>Policy keys that stop an installed plugin: <code>plugins.deny_ids</code> (glob on ids, refusal <code>policy.id-denied</code>), <code>packages.allowed_tiers</code>, <code>packages.allow_third_party</code> and the publisher rules. <code>plugins.allow_ids</code> refuses ids outside its globs, and <code>grants.deny</code> only removes the grant; the plugin keeps running without it. [SEC-186, SEC-198, admin policy]</p>
+<p>Audit events to look for: <code>policy-loaded</code>, <code>policy-violation</code>, <code>safe-mode</code>, <code>grant-revoked</code>.</p>
+<h3 id="failed-update">Failed update</h3>
+<p>An update that fails is handled by the host first. The rules below say when it rolls back by itself and when you do it by hand.</p>
+<ul>
+<li><strong>Automatic rollback.</strong> If the first <code>activate</code> of the new version returns an error, traps or misses its deadline, the host returns to the previous version at once, marks the new version <code>skip</code>, logs <code>update.rolled-back</code> and shows the toast <code>Update failed, rolled back</code>. This failure is not counted in the failure window. [LIF-075]</li>
+<li><strong>No automatic rollback later.</strong> A failure after a successful first <code>activate</code> follows the normal failure window (see <a href="#watchdog-timeouts">Watchdog timeouts</a>) and never rolls back by itself. Use the manual steps below.</li>
+<li><strong>Manual rollback.</strong> Run <code>ilium plugin rollback &lt;id&gt;</code>. It makes the one previous version in <code>store/</code> active again. Only one previous version is kept on disk, so a second rollback is not possible. With no previous version the command fails with <code>install.no-previous</code>. [PKG-290, LIF-076]</li>
+<li><strong>Data newer than the old version.</strong> A rollback to a version whose <code>data_version</code> is lower than the stored data is refused with <code>migration.data-newer</code>, exit 1. Choose <code>--restore-backup</code> (restore the pre-update snapshot) or <code>--discard-data</code> (drop the newer data) explicitly. The host never converts newer data downward. [PKG-288]</li>
+<li><strong>Skip mark.</strong> A rolled-back version is not offered by <code>ilium plugin update</code> until a newer version exists or someone runs <code>ilium plugin install &lt;file&gt; --unskip</code>. [PKG-292]</li>
+<li><strong>Interrupted update.</strong> A crash or power loss before the registry commit leaves <code>installed.json</code> unchanged; the old version keeps running. Run the update again. [PKG-269, PKG-271]</li>
+<li><strong>Lock held.</strong> A second transaction that waits 30 s for the install lock fails with <code>install.locked</code>, exit code 4. Wait for the first to finish; the lock releases on process exit.</li>
+<li><strong>Staged candidate that never switches.</strong> A staged update becomes active when the plugin is idle or at the next server start. <code>ilium plugin restart &lt;id&gt;</code> forces the switch. [PKG-278]</li>
+</ul>
+<p>Audit and log events: <code>update.rolled-back</code>. Policy keys: none needed; to block a bad release use <code>publishers.deny</code> (see <a href="#compromised-signing-key">Compromised signing key</a>) or <code>plugins.deny_ids</code>.</p>
+<h3 id="crash-loop">Crash loop</h3>
+<p>A crash mark is written as soon as a start begins and removed when startup completes. A mark left behind means that start did not finish. [LIF-186, LIF-294]</p>
+<ul>
+<li><strong>The guard.</strong> Three crashes during start within 5 minutes make the next start use <code>third-party</code> safe mode and open the recovery page. The guard clears after one start that stays up for 5 minutes after startup completed. A stop before that point keeps the marks.</li>
+<li><strong>What to do.</strong> Run <code>ilium --safe-mode=third-party</code> and follow <a href="#bad-plugin">Bad plugin</a> steps 2 to 4 to find and stop the plugin that the crashes point to.</li>
+<li><strong>Evidence.</strong> Before you remove anything, keep a copy of the crash records: <code>ilium plugin support-bundle &lt;id&gt; --out &lt;file&gt;</code> writes a zip with <code>summary.txt</code>, <code>log.txt</code>, <code>stats.txt</code> and <code>crashes.txt</code>. The <code>&lt;file&gt;</code> must not exist already; the command fails with <code>support-bundle.exists</code> otherwise. [USR-221, DEV-832]</li>
+<li><strong>Handling the bundle.</strong> A bundle can hold personal data: credential headers, URL parameters and home paths are redacted, but other text in a plugin's log is not, so <code>log.txt</code> may contain names, messages or other personal data. Treat every bundle as sensitive. Send it outside your organisation only to the plugin's <code>security_contact</code> or to the Ilium project contact in the escalation path, and only over a channel your organisation approves. Keep it no longer than the retention in the Open decisions table (proposed, owner to confirm), and delete every copy at the end of that period, including copies in tickets and mail. Before any transfer, read <code>log.txt</code> and remove or refuse the bundle if it holds data you may not share. [USR-960, USR-961, USR-962]</li>
+<li><strong>Helper crashes.</strong> A helper is restarted at most 5 times in 10 minutes. After the sixth crash the T2 and T3 plugins of that session stop with the reason <code>helper.unstable</code>. Clear each affected plugin with <code>ilium plugin reset-failures &lt;id&gt;</code> once the cause is fixed. [LIF-134]</li>
+</ul>
+<p>Audit and log events: <code>safe-mode</code> (written at each safe-mode start). Crash records live in the server state folder, not in the plugin data folder. [USR-229]</p>
+<h3 id="watchdog-timeouts">Watchdog timeouts</h3>
+<p>Every export call runs under a deadline. A call that runs past its deadline is interrupted by the host; a slow helper is killed. [LIF-125, LIF-132]</p>
+<ul>
+<li><strong>Failure window.</strong> Failures are counted per plugin, per side and per scope in a sliding window of 10 minutes. The first counted failure restarts the side after 1 s, the second after 5 s, and the third stops that side with <code>stopped-by-failure</code>. No restart is scheduled after the third. [LIF-027, LIF-028, LIF-029, LIF-030]</li>
+<li><strong>Notice text.</strong> The user sees <code>Plugin &lt;name&gt; stopped after 3 failures in 10 minutes: &lt;export&gt; &lt;code or trap&gt;. Turn it on again in Settings &gt; Plugins.</code> [USR-130]</li>
+<li><strong>Hung helper.</strong> The server pings the helper every 1 s. Three missed answers, or no reply 500 ms after a deadline, make the server send SIGTERM and then SIGKILL after 2 s. The event is <code>helper.hung</code>, and one failure is counted. [LIF-132, HST-171]</li>
+<li><strong>Requests with no reply.</strong> A request that gets no reply within its timeout completes as <code>timed-out</code> for the plugin. The examples given are 30 s for a command or service reply and 120 s for inference. [LIF-131]</li>
+<li><strong>Degraded, not failed.</strong> <code>degraded</code> is shown, not stopped, when a threshold in <a href="/pages/reference-health-and-watchdog/">Health and watchdog</a> is met: 5 or more near-misses in 5 minutes, 768 or more of 1,024 queued events in 1 minute, or 1 or more rate-limit or quota results in 5 minutes.</li>
+<li><strong>Recovery.</strong> Run <code>ilium plugin reset-failures &lt;id&gt;</code> to clear the window and the failure stop. Enabling the plugin, or installing an update, clears it too. [LIF-036]</li>
+<li><strong>Metrics.</strong> Counters are kept in memory for 24 hours, in hourly buckets, and reset at each server restart. Read them with <code>ilium plugin status &lt;id&gt; --json</code> before a restart if you need them. [LIF-135, LIF-136]</li>
+</ul>
+<p>Accuracy: a hard deadline of <code>D</code> traps the call between <code>D</code> and <code>D</code> + 20 ms of wall time on a host that is not overloaded. Do not expect a call to trap at exactly <code>D</code>. [LIF-125]</p>
+<h3 id="compromised-signing-key">Compromised signing key</h3>
+<p>Use this section when a publisher's private key may be exposed. The key controls who may install that publisher's plugins, so each step below stops the key's plugins at the next opportunity.</p>
+<ol>
+<li><strong>Revoke the key on each machine.</strong> Run <code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code>. The entry is written to the user's trust store. Plugins signed by the key move to <code>disabled-blocked</code> with the reason <code>trust.key-revoked</code>, and they stay off until a user runs <code>enable --accept-risk</code> or installs an update signed by another trusted key of the same publisher (lifecycle row P16). [PKG-243; lifecycle row P15]</li>
+<li><strong>Block it by policy on managed machines.</strong> Put the 64-character fingerprint in <code>publishers.deny</code>, or remove it from <code>publishers.allow</code>. A plugin signed by a denied key is refused with <code>policy.publisher-denied</code>, and an installed plugin that violates a publisher rule is disabled at the next start. [SEC-186, admin policy]</li>
+<li><strong>Find the plugins.</strong> Run <code>ilium plugin trust list --json</code> for the key status, then <code>ilium plugin status --json</code> for each installed plugin.</li>
+<li><strong>Do not remove the key instead.</strong> <code>ilium plugin trust remove &lt;key_id&gt; --force</code> also disables the plugins, but they return as soon as the key is trusted again. Use <code>revoke</code> for a compromised key. [PKG-226]</li>
+<li><strong>Leave users a way forward.</strong> A <code>disabled-blocked</code> plugin starts again only with <code>ilium plugin enable &lt;id&gt; --accept-risk</code>, or with an update signed by another trusted key of the same publisher. Tell users which of the two applies.</li>
+</ol>
+<p>Audit events to look for: <code>trust-add</code>, <code>trust-remove</code>, <code>signature-failure</code>, <code>blocklist-hit</code>, <code>policy-violation</code>. The revocation itself is logged as <code>trust.key-revoked</code>.</p>
+<p>If the publisher still controls the key, the publisher can issue a rotation statement to a new key. That is the publisher's step and the host accepts it only from a key that is currently trusted for the same publisher. [PKG-238, PKG-241]</p>
+<h3 id="data-exposure-incident">Data-exposure incident</h3>
+<p>Use this section when a plugin sent, exposed or stored user data it should not have. A leaked key is handled above; this section is for the data itself, and it applies even when no key is involved. Write down the moment you became aware of the problem first, because the notice deadline in step 4 counts from that moment.</p>
+<ol>
+<li><strong>Contain.</strong> On each affected machine run <code>ilium plugin kill &lt;id&gt; --reason "data exposure"</code>. It works without a network, stops the plugin on the server and in every attached client, cancels its pending requests as <code>cancelled</code>, and writes <code>plugin.killed</code> to the audit log. [HST-516, HST-517] Add the id to <code>plugins.deny_ids</code> as well, so the plugin stays off after the next start. Do not uninstall or purge yet: uninstall deletes the grants (see <a href="#bad-plugin">Bad plugin</a> step 4), and the purge deletes the data you need in step 3.</li>
+<li><strong>Preserve.</strong> Before anything else changes, keep three copies: the audit log, written out with <code>ilium plugin audit --export &lt;file&gt;</code> (it ends with an anchor line that <code>--verify</code> checks later, [SEC-449]); the output of <code>ilium plugin status &lt;id&gt; --json</code>; and a support bundle, <code>ilium plugin support-bundle &lt;id&gt; --out &lt;file&gt;</code> [USR-221]. The bundle holds plugin log text that may contain personal data, so handle it under <a href="#crash-loop">Crash loop</a> rules.</li>
+<li><strong>Scope.</strong> Establish which users, sessions and data were affected. Record the answers per machine and per user in the incident record.
+   - <strong>Users and sessions.</strong> Each user has one audit file [SEC-220]. Check every user's file on the machine, not only your own. Each record carries <code>session</code> and <code>actor</code>. Start from the first <code>install</code> or <code>update</code> of the affected version and stop at the kill from step 1.
+   - <strong>What it could reach.</strong> Look for <code>grant-given</code> records with the plugin id. Read grants such as <code>terminal.read-screen</code>, <code>fs.read:project</code> and <code>tree.read</code>, and data-leaving grants such as <code>http</code> and <code>inference</code>, mean the plugin could read or send that data <a href="/pages/reference-threat-model/">Threat model</a>.
+   - <strong>Where it sent data.</strong> <code>egress-host-first-use</code> records the first request from the plugin to each host, not every request. <code>process-run</code> records programs it started, and <code>write-outside-data</code> records writes outside its data and cache folders. A host that is missing from these lines does not prove that nothing was sent to it.
+   - <strong>What it stored.</strong> The audit log holds no plugin data and no setting values <a href="/pages/guide-administration/#keep-the-audit-trail">Administration guide</a>. Look in the plugin's data folders, <code>&lt;data&gt;/plugins/data/&lt;id&gt;/</code> and <code>&lt;data&gt;/plugins/storage/&lt;id&gt;/</code>, and its cache folder <code>&lt;cache&gt;/plugins/&lt;id&gt;/</code> (<a href="/pages/reference-plugin-files/">Plugin files</a>). They show what the plugin kept, not what it sent.
+   - <strong>What was sent.</strong> The content of data that left the machine can only come from the publisher, from the receiving service, or from the plugin log inside the support bundle. If none of these shows it, write "unknown" in the record. Do not write "none".</li>
+<li><strong>Notify, in this order.</strong> The manual does not set the internal order (see <a href="#open-decisions">Open decisions</a>). The order below is a recommendation.</li>
+<li>Your organisation's privacy or security owner, who decides on legal duties.</li>
+<li>The plugin's <code>security_contact</code> [SEC-325]. Report the flaw there first, as the <a href="#escalation-path">escalation path</a> step 1 requires, and send only the evidence it needs, over a channel your organisation approves [USR-960].</li>
+<li>The Ilium project contact, only if the flaw is in the host <a href="#escalation-path">escalation path</a> step 2.</li>
+<li>The affected users: which plugin, which data, the dates, and what they should do, such as reviewing the grants or changing credentials they gave the plugin.</li>
+</ol>
+<p>The manual sets no notification deadline. If your organisation is a controller under the EU General Data Protection Regulation, Article 33 requires notice to the supervisory authority without undue delay and, where feasible, within 72 hours of becoming aware of a personal data breach. Article 34 requires telling the affected people without undue delay when the risk is high. Confirm the duty and its clock with your legal owner. The 72 hours run from awareness, which is why step 1 starts with recording the time.
+5. <strong>Close.</strong> Keep the evidence for the retention period in <a href="#open-decisions">Open decisions</a> and delete every copy at its end [USR-961]. Only after the evidence is kept, decide whether to uninstall the plugin, purge its data or keep it, and tell the users which.</p>
+<p>Audit events to look for: <code>grant-given</code>, <code>install</code>, <code>update</code>, <code>egress-host-first-use</code>, <code>process-run</code>, <code>write-outside-data</code> and <code>plugin.killed</code>.</p>
+<h3 id="time-limits">Time limits</h3>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deadline trap window</td>
+<td><code>D</code> to <code>D</code> + 20 ms</td>
+<td><a href="/pages/reference-health-and-watchdog/">LIF-125</a></td>
+</tr>
+<tr>
+<td>Heartbeat to a helper</td>
+<td>every 1 s; a hung helper after 3 missed answers (3 s)</td>
+<td><a href="/pages/reference-health-and-watchdog/">LIF-132</a></td>
+</tr>
+<tr>
+<td>Helper past its deadline</td>
+<td>500 ms before the helper is killed</td>
+<td><a href="/pages/reference-health-and-watchdog/">LIF-132</a></td>
+</tr>
+<tr>
+<td>Kill sequence</td>
+<td>SIGTERM, then SIGKILL after 2 s</td>
+<td><a href="/pages/reference-host-helper/">HST-171</a></td>
+</tr>
+<tr>
+<td>Failure window</td>
+<td>10 minutes, sliding</td>
+<td><a href="/pages/lifecycle/#failure-counting-and-restart">LIF-027</a></td>
+</tr>
+<tr>
+<td>Restart after first and second failure</td>
+<td>1 s, then 5 s</td>
+<td><a href="/pages/lifecycle/#failure-counting-and-restart">LIF-028, LIF-029</a></td>
+</tr>
+<tr>
+<td>Helper restarts before the side stops</td>
+<td>at most 5 in 10 minutes</td>
+<td><a href="/pages/reference-health-and-watchdog/">LIF-134</a></td>
+</tr>
+<tr>
+<td>Crash-loop guard trigger</td>
+<td>3 crashes during start within 5 minutes</td>
+<td><a href="/pages/user-safe-mode-and-troubleshooting/">LIF-186</a></td>
+</tr>
+<tr>
+<td>Crash-loop guard reset</td>
+<td>one start that stays up 5 minutes after startup</td>
+<td><a href="/pages/user-safe-mode-and-troubleshooting/">LIF-294</a></td>
+</tr>
+<tr>
+<td>Install lock wait</td>
+<td>30 s, then <code>install.locked</code></td>
+<td><a href="/pages/reference-install-and-update/">PKG-270</a></td>
+</tr>
+<tr>
+<td>Audit queue when the file cannot be written</td>
+<td>up to 1,000 records, retry every 10 s</td>
+<td><a href="/pages/guide-administration/#keep-the-audit-trail">Administration guide</a></td>
+</tr>
+<tr>
+<td>Automatic update check (when enabled)</td>
+<td>at server start, then every 24 hours with up to 1 hour of random delay</td>
+<td><a href="/pages/reference-install-and-update/">PKG-301</a></td>
+</tr>
+<tr>
+<td>Metrics retention</td>
+<td>24 hours, hourly buckets, reset at restart</td>
+<td><a href="/pages/reference-health-and-watchdog/">LIF-135, LIF-136</a></td>
+</tr>
+<tr>
+<td>Security report acknowledgement</td>
+<td>3 working days; first assessment 10 working days</td>
+<td><a href="/pages/reference-security-response/">SEC-321</a></td>
+</tr>
+<tr>
+<td>Vulnerability embargo</td>
+<td>90 days from the report, or until a fix</td>
+<td><a href="/pages/reference-security-response/">SEC-321</a></td>
+</tr>
+<tr>
+<td>Publisher silence before a blocklist entry</td>
+<td>30 days</td>
+<td><a href="/pages/reference-security-response/">SEC-326</a></td>
+</tr>
+<tr>
+<td>Emergency kill, server side (run on the machine)</td>
+<td>1 s after the command</td>
+<td><a href="#emergency-kill-switch-for-one-plugin">HST-517</a></td>
+</tr>
+<tr>
+<td>Emergency kill, each attached client</td>
+<td>5 s after the command</td>
+<td><a href="#emergency-kill-switch-for-one-plugin">HST-517</a></td>
+</tr>
+<tr>
+<td>Policy or blocklist change, running plugin</td>
+<td>At the next server start. A live reload that stops a running plugin within 10 seconds of the file change is proposed and not yet accepted by its owner; until then, the next start applies</td>
+<td><a href="/pages/reference-admin-policy/">SEC-188</a> and <a href="/pages/reference-admin-policy/#stopping-a-blocked-plugin-now">Stopping a blocked plugin now</a></td>
+</tr>
+<tr>
+<td>Mirror sync to a machine without network</td>
+<td>No interval is defined; <code>ilium plugin mirror sync</code> runs only when an administrator starts it</td>
+<td><a href="/pages/reference-registry/">PKG-410</a></td>
+</tr>
+<tr>
+<td>Bundle metadata on an air-gapped machine</td>
+<td><code>snapshot.json</code> should expire within 7 days; an expired bundle is refused unless <code>--offline</code> is given</td>
+<td><a href="/pages/reference-registry/">PKG-367, PKG-365</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="isolated-fleet-propagation-and-acknowledgement">Isolated fleet: propagation and acknowledgement</h3>
+<p>A machine without network access receives no push from anyone. The manual defines no sync schedule that reaches it. Its policy, blocklist and mirror files change only when an administrator copies them there. So the worst-case delay is the administrator's own transfer time, plus the local times in the table above. Nothing in the manual bounds the transfer time, so the organisation must set it.</p>
+<ol>
+<li><strong>Choose the action the machine can apply by itself.</strong>
+   - For active harm, run <code>ilium plugin kill &lt;id&gt; --reason &lt;text&gt;</code> on each machine [HST-516]. It stops a running plugin within 1 s without a restart [HST-517]. A policy edit does not do this, as the next item explains.
+   - For a plugin that must stay off, write <code>plugins.deny_ids</code> or <code>packages.blocklist_file</code> into the local policy file. The change applies at the next server start [SEC-188]. Until then a running plugin keeps running, so combine it with the kill command.
+   - The <code>kill</code> key of the policy [LIF-301] is specified to apply within 60 s without a restart [LIF-303]. That behaviour is target behaviour, so use the command until it is shipped.</li>
+<li><strong>Acknowledge on each machine.</strong> Do not count a machine as blocked until it confirms. On that machine, run <code>ilium plugin status &lt;id&gt; --json</code>. After a kill it shows <code>disabled-by-admin</code>; after a policy start it shows <code>Blocked by policy</code>. Then find the matching audit line: <code>plugin.killed</code> for the kill, or <code>policy-loaded</code> and <code>policy-violation</code> for a policy change. Record the machine, the time, the state and the audit record's <code>seq</code> in the change record.</li>
+<li><strong>Collect the proof.</strong> Export each machine's audit log with <code>ilium plugin audit --export &lt;file&gt;</code> and check it centrally with <code>--verify</code>, against the anchor line [SEC-449]. A machine whose confirmation is missing, or whose export does not verify, stays on the list as "not confirmed" until it is checked again.</li>
+<li><strong>Re-check.</strong> Repeat step 2 when the machine next connects to the site network, and after each policy or mirror change, because a later change can override an earlier one.</li>
+</ol>
+<h3 id="policy-keys-used-in-this-runbook">Policy keys used in this runbook</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Effect here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugins.deny_ids</code></td>
+<td>list of globs</td>
+<td>Stops a plugin by id at the next start</td>
+</tr>
+<tr>
+<td><code>plugins.allow_ids</code></td>
+<td>list of globs</td>
+<td>Only these ids may run</td>
+</tr>
+<tr>
+<td><code>packages.allowed_tiers</code></td>
+<td>list</td>
+<td>Limits the tiers that install</td>
+</tr>
+<tr>
+<td><code>packages.allow_third_party</code></td>
+<td>boolean</td>
+<td>Refuses all third-party plugins when false</td>
+</tr>
+<tr>
+<td><code>publishers.allow</code></td>
+<td>list of fingerprints</td>
+<td>Only these signing keys are accepted</td>
+</tr>
+<tr>
+<td><code>publishers.deny</code></td>
+<td>list of fingerprints</td>
+<td>Refuses these signing keys</td>
+</tr>
+<tr>
+<td><code>packages.blocklist_file</code></td>
+<td>path</td>
+<td>Extra local blocklist</td>
+</tr>
+<tr>
+<td><code>grants.deny</code></td>
+<td>list</td>
+<td>Removes grants; does not disable the plugin</td>
+</tr>
+<tr>
+<td><code>audit.sink</code>, <code>audit.max_mib</code>, <code>audit.keep_days</code></td>
+<td></td>
+<td>Where the audit log goes, and its rotation</td>
+</tr>
+</tbody>
+</table>
+<p>A policy file that is malformed, or that a normal user can write, is ignored or refused as described in <a href="/pages/reference-admin-policy/">Plugin policy</a>. <code>ilium plugin doctor</code> warns when the policy disables a tier that the platform allows.</p>
+<h3 id="audit-events">Audit events</h3>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Meaning</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>policy-loaded</code></td>
+<td>The policy was read at start</td>
+<td><a href="#bad-plugin">Bad plugin</a></td>
+</tr>
+<tr>
+<td><code>policy-violation</code></td>
+<td>A plugin or file breaks the policy</td>
+<td><a href="#bad-plugin">Bad plugin</a></td>
+</tr>
+<tr>
+<td><code>safe-mode</code></td>
+<td>The server started in safe mode</td>
+<td><a href="#crash-loop">Crash loop</a></td>
+</tr>
+<tr>
+<td><code>grant-revoked</code></td>
+<td>A grant was removed</td>
+<td><a href="#bad-plugin">Bad plugin</a></td>
+</tr>
+<tr>
+<td><code>signature-failure</code>, <code>integrity-failure</code>, <code>blocklist-hit</code></td>
+<td>A package or load check failed</td>
+<td><a href="#compromised-signing-key">Compromised signing key</a></td>
+</tr>
+<tr>
+<td><code>trust-add</code>, <code>trust-remove</code></td>
+<td>The trust store changed</td>
+<td><a href="#compromised-signing-key">Compromised signing key</a></td>
+</tr>
+<tr>
+<td><code>update.rolled-back</code></td>
+<td>A candidate failed its first activation and the host returned</td>
+<td><a href="#failed-update">Failed update</a></td>
+</tr>
+<tr>
+<td><code>helper.hung</code>, <code>helper.unstable</code></td>
+<td>The helper was killed, or stopped after too many crashes</td>
+<td><a href="#watchdog-timeouts">Watchdog timeouts</a></td>
+</tr>
+</tbody>
+</table>
+<p>The names are those used by the pages that define them. The audit log lists the first group; see <a href="/pages/reference-audit-log/">Audit log</a> for the full list and each record's fields.</p>
+<h3 id="audit-chain-verification">Audit chain verification</h3>
+<p>The audit log is a chain: each record carries the hash of the record before it, so an edit in the middle of the file breaks the chain. <code>ilium plugin audit --verify</code> re-computes the chain and reports what it finds. Run it on a schedule, because a broken chain is only visible when someone checks it. See <a href="/pages/reference-audit-log/">Audit log</a> for the record format and each finding.</p>
+<table>
+<thead>
+<tr>
+<th>Result</th>
+<th>Exit code</th>
+<th>Meaning</th>
+<th>What the administrator does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ok</code></td>
+<td>0</td>
+<td>The chain is intact</td>
+<td>Record the date and the result. No further step</td>
+</tr>
+<tr>
+<td><code>torn-tail</code> only</td>
+<td>0</td>
+<td>The last line is incomplete, usually after a power loss or a crash during a write</td>
+<td>Record the byte offset. Check that the file <code>audit-torn-&lt;seq&gt;</code> exists after the next server start. No security step</td>
+</tr>
+<tr>
+<td><code>broken</code> at a <code>seq</code></td>
+<td>3</td>
+<td>A record was changed, or the chain was started again</td>
+<td>Treat it as an incident. Follow the steps below</td>
+</tr>
+<tr>
+<td><code>missing-file</code></td>
+<td>3</td>
+<td>A file between two <code>seq</code> values is not in the folder</td>
+<td>Treat it as an incident. Follow the steps below</td>
+</tr>
+<tr>
+<td><code>reset-at</code></td>
+<td>Not <code>ok</code>. The source page does not give an exit code yet</td>
+<td>A record starts a new chain with a zero hash, which is not the first record</td>
+<td>Treat it as an incident. Follow the steps below. Do not read the result as <code>ok</code></td>
+</tr>
+<tr>
+<td><code>unknown-schema</code></td>
+<td>3</td>
+<td>A record uses a schema value that this verifier does not know</td>
+<td>Upgrade the verifying host to the same version as the server, then run it again. Do not treat it as tampering</td>
+</tr>
+</tbody>
+</table>
+<p>For an incident finding, do these steps in order:</p>
+<ol>
+<li>Stop changing the audit folder, and do not start a server on it until step 2 is done, because a server start moves a torn tail out of the file (<a href="/pages/reference-audit-log/">SEC-956</a>).</li>
+<li>Copy the whole audit folder to a separate location, and keep the copy read-only. Keep the original where it is.</li>
+<li>Write down the first finding with its <code>seq</code> and the exit code.</li>
+<li>Follow <a href="#data-exposure-incident">Data-exposure incident</a> or <a href="#compromised-signing-key">Compromised signing key</a>, depending on what the records show, and use the escalation path below.</li>
+</ol>
+<ul>
+<li><strong>[OPS-221]</strong> The administrator MUST run <code>ilium plugin audit --verify</code> at least once a week (proposed, owner to confirm) from a scheduled job, and MUST also run it after each incident and before an audit export is sent outside the organisation. Test: schedule the job, let it run, and assert that its result is stored with the date of the run.</li>
+<li><strong>[OPS-222]</strong> The administrator MUST record each verification result with the date, the exit code and the first finding, and MUST NOT close an incident while its last verification result is not <code>ok</code>, unless the only finding is <code>torn-tail</code> that the rule of OPS-223 explains. Test: run the verification on a clean log and on a log with one changed record, and assert that the records show exit 0 with <code>ok</code> and exit 3 with the first broken <code>seq</code>.</li>
+<li><strong>[OPS-223]</strong> When the only finding is <code>torn-tail</code> (exit 0, as <a href="/pages/reference-audit-log/">SEC-957</a> states), the administrator MUST record the byte offset, MUST check after the next server start that the partial bytes were moved to <code>audit-torn-&lt;seq&gt;</code> as <a href="/pages/reference-audit-log/">SEC-956</a> requires, and MUST NOT treat the finding as a broken chain. Test: append half a JSON line to a copy of the log, run the verification, and assert exit 0 with the <code>torn-tail</code> line and its byte offset.</li>
+<li><strong>[OPS-224]</strong> When the verification reports <code>broken</code>, <code>missing-file</code> or <code>reset-at</code>, the administrator MUST follow the four incident steps above before any other action, MUST keep the copy of the folder unchanged, and MUST name the first finding in the incident record. Test: change one record in a copy of the audit folder, run the verification, and assert exit 3 with the first broken <code>seq</code>, and that the incident steps keep the copy unchanged.</li>
+<li><strong>[OPS-225]</strong> When the verification reports <code>unknown-schema</code> with exit code 3, the administrator MUST upgrade the verifying host and run the check again before drawing any conclusion, because <a href="/pages/reference-audit-log/">SEC-134</a> requires a newer schema to be read only by a verifier that knows it. Test: write a record with a schema value one higher than the verifier knows, run the verification, and assert exit 3 with <code>unknown-schema</code> and the <code>seq</code> of that record, and no finding of tampering.</li>
+</ul>
+<h3 id="escalation-path">Escalation path</h3>
+<ol>
+<li><strong>The publisher.</strong> The plugin's manifest may name a <code>security_contact</code> (SEC-325). <code>ilium plugin inspect &lt;file&gt;</code> shows it. Report a flaw in a plugin to that contact, not to the Ilium project, unless the flaw is in the host.</li>
+<li><strong>The Ilium project, for a host flaw.</strong> Report to the security contact in <code>SECURITY.md</code> or in <code>ilium --version --verbose</code>. Until that address is published the contact is the placeholder <code>security@ilium.example</code> (SEC-320). Include the version, platform, steps, expected and actual result, and whether a plugin was involved.</li>
+<li><strong>The release blocklist.</strong> If a publisher does not answer a serious report within 30 days, the Ilium project may add the package or key to the release blocklist (SEC-326). On your own machines, use <code>packages.blocklist_file</code> or <code>publishers.deny</code> now; do not wait for the project.</li>
+</ol>
+<p>Who inside your organisation is told, and in what order, is not defined in the manual. See <a href="#open-decisions">Open decisions</a>.</p>
+<h3 id="incident-record-and-post-incident-review">Incident record and post-incident review</h3>
+<p>Every section above tells you to "write it in the incident record". This section defines that record, so that incidents on different machines can be compared and handed to a publisher with the evidence the publishing guide asks for.</p>
+<p><strong>Where it lives.</strong> The record is an entry in your site's change record, the same place where HST-992 requires you to document a copy of plugin logs on another machine. The manual does not prescribe a tool. The entry must be readable by the administrators who respond, and it must not hold the evidence itself: it holds the hashes and storage locations of the evidence. A support bundle can hold personal data ([USR-960], [USR-962]), so the bundle stays in storage with owner-only modes (0600 for files, 0700 for folders) and the record only points to it.</p>
+<p><strong>Fields.</strong> Write one record per incident. Open it at the moment you first notice the problem, because the notification clocks in <a href="#data-exposure-incident">Data-exposure incident</a> count from that moment.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What to write</th>
+<th>Where the value comes from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Incident id</td>
+<td>One id from your change-record system, never reused.</td>
+<td>Your change record.</td>
+</tr>
+<tr>
+<td>First noticed</td>
+<td>Time <code>YYYY-MM-DD HH:mm:ss</code> with time zone, and how: user report, alert rule, the recovery page after the crash-loop guard, or an audit review.</td>
+<td>Your own clock and the alert or ticket.</td>
+</tr>
+<tr>
+<td>Severity level</td>
+<td>One level of the <a href="/pages/ops-incident-response/">operational severity scale</a>, taken from the triage table of this page, or a higher level if the impact is wider.</td>
+<td>The triage table above.</td>
+</tr>
+<tr>
+<td>Acknowledged</td>
+<td>Time <code>YYYY-MM-DD HH:mm:ss</code> with time zone when the named owner of the level accepted the incident, and the owner's name or role.</td>
+<td>Your change record and the owner's reply.</td>
+</tr>
+<tr>
+<td>Machines</td>
+<td>Each affected machine, with the host version from <code>ilium --version --verbose</code>.</td>
+<td>The command on each machine.</td>
+</tr>
+<tr>
+<td>Plugins</td>
+<td>Each plugin id with the installed version and the version before it.</td>
+<td><code>ilium plugin status &lt;id&gt; --json</code>.</td>
+</tr>
+<tr>
+<td>Audit sequence range</td>
+<td>Per machine and user: first and last audit record of the incident, and the file it was exported to. Start at the first <code>install</code> or <code>update</code> of the affected version and stop at <code>plugin.killed</code>.</td>
+<td><code>ilium plugin audit --export &lt;file&gt;</code>, later checked with <code>--verify</code> against its anchor line ([SEC-449]).</td>
+</tr>
+<tr>
+<td>Actions taken</td>
+<td>One line per action with its time and the administrator: kill, <code>plugins.deny_ids</code>, <code>packages.blocklist_file</code> or <code>publishers.deny</code> entries, trust revocation, rollback, safe mode.</td>
+<td>The shell history and the <code>plugin.killed</code>, <code>trust-remove</code> and <code>safe-mode</code> events.</td>
+</tr>
+<tr>
+<td>Kill-switch and quarantine entries pushed</td>
+<td>Each entry, its text, the time it was pushed and the machines that acknowledged it. A machine without acknowledgement is "not confirmed".</td>
+<td><a href="#isolated-fleet-propagation-and-acknowledgement">Isolated fleet</a>.</td>
+</tr>
+<tr>
+<td>Evidence</td>
+<td>For each audit export, status output and support bundle: file name, SHA-256 hash, storage location, and the date by which every copy must be deleted.</td>
+<td><code>sha256sum &lt;file&gt;</code>; the deletion date follows [USR-961].</td>
+</tr>
+<tr>
+<td>User impact</td>
+<td>Users and sessions affected, what they saw, and the data reached, with "unknown" where it cannot be shown. Never write "none" for what you could not establish.</td>
+<td>Scope step of the data-exposure section.</td>
+</tr>
+<tr>
+<td>Closed</td>
+<td>Time of closure and the name of the person who closed it.</td>
+<td>Your change record.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Failure modes of the record.</strong></p>
+<ul>
+<li>A field you cannot fill is written as "unknown" with the reason. An empty field is not accepted at closure.</li>
+<li>An evidence entry without a hash is not evidence: the publisher cannot tell whether the file was changed after the incident.</li>
+<li>A record is closed only when its evidence is stored and the review below is started. The 90-day retention period of [USR-961] (proposed, owner to confirm) runs from the closure time.</li>
+<li>When the incident is an active exploit, the project writes its own public post-mortem [SEC-729]. Your record is the input of your report to the project and does not replace it.</li>
+</ul>
+<p><strong>Post-incident review, within 7 days of closure.</strong> The 7 days are a recommendation of this manual (proposed, owner to confirm). Tick each item in the record.</p>
+<ol>
+<li><strong>Crash-loop guard.</strong> If the incident involved start crashes, confirm that the guard cleared: one start has stayed up for 5 minutes after startup completed (<a href="#crash-loop">Crash loop</a>). If a machine is still in <code>third-party</code> safe mode, write why.</li>
+<li><strong>Alerts.</strong> List the alert rules that should have fired and did not, from the audit events in the table above, and fix or add each rule. Write the time between the first audit record of the problem and the time you noticed it.</li>
+<li><strong>Permanence.</strong> For each temporary entry in the actions list, decide whether it becomes permanent: a <code>plugins.deny_ids</code> or <code>packages.blocklist_file</code> entry, a <code>publishers.deny</code> entry, or a revoked key. Record the decision and the owner. An entry that is left temporary needs a date to remove it.</li>
+<li><strong>Report.</strong> Send the publisher report to the plugin's <code>security_contact</code> (or the host report to the Ilium project contact) as the <a href="#escalation-path">escalation path</a> requires, with the version, steps, expected and actual result, and the SHA-256 hash of the support bundle. Send the bundle itself only after you have read its <code>log.txt</code> and only to those recipients ([USR-960], [USR-962]). Record the date of the report. If there is no answer within 30 days, the release blocklist step in the escalation path applies.</li>
+<li><strong>Reproduction.</strong> Where the fault can be shown without user data, record how it was turned into a test fixture, so the report can be reproduced and the fault does not return ([AUT-316]).</li>
+<li><strong>Follow-ups.</strong> Record each follow-up with an owner and a date: policy changes, documentation gaps, changes to the Open decisions table below.</li>
+</ol>
+<h2 id="registry-backup-and-disaster-recovery">Registry backup and disaster recovery</h2>
+<p>This section is target behaviour for the public plugin system. This section is for the operator of a registry. It sets the backup and restore procedure for the registry index and how to rebuild it.</p>
+<ul>
+<li>[PKG-708] A registry operator MUST back up the signed index and the signed metadata at least daily, MUST keep the registry signing key in a separate backup under its own access control, and MUST test a restore at least once a quarter. A restore MUST bring back the last signed head or a later one, never an older version of <code>plugins/&lt;id&gt;.json</code>.</li>
+<li>[PKG-709] A registry MUST be able to rebuild its index from the signed releases alone. After a restore or a rebuild the operator MUST verify every signature and package digest, compare the result with the transparency log head, and publish the verification result. The registry MUST NOT serve a rebuilt index to clients until that check passes.</li>
+</ul>
+<h3 id="open-decisions">Open decisions</h3>
+<table>
+<thead>
+<tr>
+<th>Subject</th>
+<th>Choice in this manual</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Command for a compromised key</td>
+<td><code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code> (PKG-243). The <a href="/pages/guide-administration/#respond-to-a-bad-plugin">Administration guide</a> step 5 uses <code>ilium plugin trust remove &lt;key_id&gt; --force</code> instead.</td>
+<td>With <code>revoke</code>, plugins stay off until a user accepts the risk. With <code>remove --force</code>, they return as soon as the key is trusted again. The two pages must agree before release.</td>
+</tr>
+<tr>
+<td>Revoking a key in the system store</td>
+<td>PKG-243 says the administrator revokes keys in the system store, but no command or file format for it is given.</td>
+<td>Until the platform owner defines it, the runbook uses <code>publishers.deny</code> for machine-wide blocking.</td>
+</tr>
+<tr>
+<td>Security contact address</td>
+<td><code>security@ilium.example</code>, a placeholder (SEC-320).</td>
+<td>Host flaws have no real destination until the project publishes one.</td>
+</tr>
+<tr>
+<td>Clearing crash marks by hand</td>
+<td>None documented. The guard clears itself after 5 minutes of stable running (LIF-294).</td>
+<td>An administrator who wants to clear marks at once has no supported command.</td>
+</tr>
+<tr>
+<td>Text of the notice for a policy-disabled plugin</td>
+<td>SEC-186 gives <code>Disabled by your administrator</code>. The lifecycle table and the Administration guide give <code>Blocked by policy</code>.</td>
+<td>An administrator searching for the notice text may find the other one.</td>
+</tr>
+<tr>
+<td>Internal escalation inside an organisation</td>
+<td>Not defined.</td>
+<td>Each administrator must set their own contact order.</td>
+</tr>
+<tr>
+<td>Retention of a support bundle kept as evidence</td>
+<td>90 days after the incident is closed (proposed, owner to confirm).</td>
+<td>LIF-314 has the host delete bundles older than 14 days at the next start. A copy kept longer must be stored outside that location.</td>
+</tr>
+<tr>
+<td>Recipients of a bundle outside the organisation</td>
+<td>Only the plugin's security contact or the Ilium project contact.</td>
+<td>Other recipients (vendors, consultants, customers) are not covered by the manual and need the organisation's own approval.</td>
+</tr>
+<tr>
+<td>Notification deadline and internal order for a data-exposure incident</td>
+<td>Not set by the manual. The order in <a href="#data-exposure-incident">Data-exposure incident</a> is a recommendation.</td>
+<td>The organisation's privacy owner must confirm the order and any legal deadline. The 72-hour rule of EU GDPR Article 33 applies only to organisations it covers.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="requirements">Requirements</h3>
+<ul>
+<li>[USR-230] The runbook MUST give, for each of the five symptoms in its triage table, a first command that exists in the CLI reference and a section that lists the policy keys and audit events for that symptom. Test: check each row against the CLI reference and each named key against the policy reference.</li>
+<li>[USR-231] An administrator MUST be able to stop a plugin for all users by its id without deleting its data, using <code>plugins.deny_ids</code> and the next server start. Test: add the id to <code>plugins.deny_ids</code>, restart the server, and assert the state <code>Blocked by policy</code> and that the data folder still exists.</li>
+<li>[USR-232] On a compromised signing key the administrator MUST run <code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code> and MUST NOT rely on <code>trust remove --force</code> as the response. Test: revoke a key used by an installed plugin and assert the plugin state <code>disabled-blocked</code> with the reason <code>trust.key-revoked</code>.</li>
+<li>[USR-233] The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them. Test: compare each value in the time-limits table with its source page.</li>
+<li>[USR-234] The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it. Test: run the <code>jq</code> command of the Bad plugin section on a fixture audit log and search each event name in the source pages.</li>
+<li>[USR-235] The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder. Test: check the page for the three steps and the open decision row.</li>
+<li>[USR-960] An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's <code>security_contact</code> or the Ilium project contact, over a channel the organisation approves. Test: check the procedure against the recipient rule in the escalation path, and confirm the Open decisions row names the same recipients.</li>
+<li>[USR-961] An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends. Test: keep a bundle copy past the period in a test ticket and assert that the retention row and the 14-day host cleanup of LIF-314 are both stated on the page.</li>
+<li>[USR-962] Before a support bundle leaves the machine or the organisation, an administrator MUST read its <code>log.txt</code> and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive. Test: give a fixture bundle with a personal name in <code>log.txt</code> to a reviewer and assert that the reviewer finds the procedure stops the transfer.</li>
+<li><strong>[USR-966]</strong> The incident record MUST store one severity level from the scale of <a href="/pages/ops-incident-response/">Operational incident response</a>, taken from the triage table of this page, and the time at which the owner of that level acknowledged the incident.</li>
+</ul>
+<h3 id="emergency-kill-switch">Emergency kill switch</h3>
+<p>An operator who learns that one plugin version is harmful needs to stop it on every machine at once, without waiting for each user to disable it. This section is the target behaviour. It is different from disabling one plugin on one machine and from a registry yank, which only blocks new installs.</p>
+<ul>
+<li>[LIF-301] A policy file MUST be able to list a plugin id and a version range under a <code>kill</code> key. A host that loads such a policy MUST refuse to activate any installed version inside a listed range, MUST stop a running instance of it with reason <code>policy</code>, and MUST log <code>policy.kill</code> once per plugin id.</li>
+<li>[LIF-302] A killed version MUST stay installed and its data MUST stay untouched, so lifting the <code>kill</code> entry and reloading policy MUST let the plugin start again without a reinstall.</li>
+<li>[LIF-303] A kill MUST take effect on a running host within 60 s of the policy file changing, MUST NOT need a server restart, and MUST apply before the crash-loop guard counts the stop as a failure.</li>
+</ul>
+<h2 id="emergency-kill-switch-for-one-plugin">Emergency kill switch for one plugin</h2>
+<p>The registry blocklist acts on a release schedule and on publisher decisions. When a plugin is causing harm now, an administrator needs a switch that acts at once on every attached client and on the server.</p>
+<ul>
+<li><strong>[HST-516]</strong> The host MUST provide <code>ilium plugin kill &lt;plugin-id&gt; --reason &lt;text&gt;</code>, which MUST stop the server side and every attached client side of the plugin, set it to <code>disabled-by-admin</code>, and prevent reactivation until <code>ilium plugin unkill &lt;plugin-id&gt;</code>. It MUST work in safe mode and without a network.</li>
+<li><strong>[HST-517]</strong> The kill switch MUST take effect on the server within 1 s and on every attached client within 5 s of the command, MUST cancel the pending requests of the plugin as <code>cancelled</code>, and MUST write an audit event <code>plugin.killed</code> with the administrator, the reason and the time. A client that reconnects later MUST learn the killed state before it activates the plugin.</li>
+</ul>
+<h3 id="recover-a-disabled-side">Recover a disabled side</h3>
+<p>Target behaviour. After the third failure inside 10 minutes the host disables a side and waits for a manual enable ([API-041]). This section is the recovery procedure.</p>
+<ul>
+<li>[API-093] The host MUST offer <code>ilium plugin enable &lt;id&gt;</code> and an administrator bulk form for every disabled plugin, MUST show the crash record of [API-092] before it enables, and MUST clear the restart window on an enable so that the 10-minute count starts again at zero. An enable MUST NOT clear the crash record before the plugin has run for 10 minutes without a trap.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/reference-admin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Health and watchdog</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<h2 id="production-additions-t10-operations">Production additions: T10-operations</h2>
+<ul>
+<li>[HST-696] <code>ilium plugin doctor [--json] [--fix]</code> MUST check the registry, lock files, staging folders, store hashes, bucket integrity, quarantine files, permissions (USR-206/207), disk space and orphaned data, MUST print one line per finding with a stable code, MUST change nothing without <code>--fix</code>, and with <code>--fix</code> MUST only perform the reversible actions (move aside, rebuild index, remove stale lock) and list each. Exit code 0 means no findings, 1 findings, 2 fixed.</li>
+<li><strong>[HST-093]</strong> <code>ilium plugin doctor --fix</code> MUST refuse to run while a session server of the same user holds <code>installed.lock</code> or a session lock, exiting with code 6 and the code <code>doctor.server-running</code>, and MUST change nothing. <code>ilium plugin doctor</code> without <code>--fix</code> MUST still run and report. (proposed, owner to confirm)</li>
+<li>[HST-697] A lock holder is stale only when its recorded process is gone, or its boot id differs from the current one, or its heartbeat is older than 60 s; the host MUST NOT break a lock whose holder passes these checks, MUST log <code>lock.takeover</code> with the old holder's pid and boot id on takeover, and a command that waits for a held lock MUST fail with <code>registry.locked</code> after 30 s naming the holder.</li>
+</ul>
+<h2 id="requirement-statements">Requirement statements</h2>
+<ul>
+<li><strong>[API-093]</strong> The host MUST offer <code>ilium plugin enable &lt;id&gt;</code> and an administrator bulk form for every disabled plugin, MUST show the crash record of [API-092] before it enables, and MUST clear the restart window on an enable so that the 10-minute count starts again at zero. An enable MUST NOT clear the crash record before the plugin has run for 10 minutes without a trap.</li>
+<li><strong>[HST-696]</strong> <code>ilium plugin doctor [--json] [--fix]</code> MUST check the registry, lock files, staging folders, store hashes, bucket integrity, quarantine files, permissions (USR-206/207), disk space and orphaned data, MUST print one line per finding with a stable code, MUST change nothing without <code>--fix</code>, and with <code>--fix</code> MUST only perform the reversible actions (move aside, rebuild index, remove stale lock) and list each. Exit code 0 means no findings, 1 findings, 2 fixed.</li>
+<li><strong>[HST-697]</strong> A lock holder is stale only when its recorded process is gone, or its boot id differs from the current one, or its heartbeat is older than 60 s; the host MUST NOT break a lock whose holder passes these checks, MUST log <code>lock.takeover</code> with the old holder's pid and boot id on takeover, and a command that waits for a held lock MUST fail with <code>registry.locked</code> after 30 s naming the holder.</li>
+<li><strong>[LIF-301]</strong> A policy file MUST be able to list a plugin id and a version range under a <code>kill</code> key. A host that loads such a policy MUST refuse to activate any installed version inside a listed range, MUST stop a running instance of it with reason <code>policy</code>, and MUST log <code>policy.kill</code> once per plugin id.</li>
+<li><strong>[LIF-302]</strong> A killed version MUST stay installed and its data MUST stay untouched, so lifting the <code>kill</code> entry and reloading policy MUST let the plugin start again without a reinstall.</li>
+<li><strong>[LIF-303]</strong> A kill MUST take effect on a running host within 60 s of the policy file changing, MUST NOT need a server restart, and MUST apply before the crash-loop guard counts the stop as a failure.</li>
+<li><strong>[PKG-708]</strong> A registry operator MUST back up the signed index and the signed metadata at least daily, MUST keep the registry signing key in a separate backup under its own access control, and MUST test a restore at least once a quarter. A restore MUST bring back the last signed head or a later one, never an older version of <code>plugins/&lt;id&gt;.json</code>.</li>
+<li><strong>[PKG-709]</strong> A registry MUST be able to rebuild its index from the signed releases alone. After a restore or a rebuild the operator MUST verify every signature and package digest, compare the result with the transparency log head, and publish the verification result. The registry MUST NOT serve a rebuilt index to clients until that check passes.</li>
+<li><strong>[USR-230]</strong> The runbook MUST give, for each of the five symptoms in its triage table, a first command that exists in the CLI reference and a section that lists the policy keys and audit events for that symptom.</li>
+<li><strong>[USR-231]</strong> An administrator MUST be able to stop a plugin for all users by its id without deleting its data, using <code>plugins.deny_ids</code> and the next server start.</li>
+<li><strong>[USR-232]</strong> On a compromised signing key the administrator MUST run <code>ilium plugin trust revoke &lt;key_id&gt; --reason compromised</code> and MUST NOT rely on <code>trust remove --force</code> as the response.</li>
+<li><strong>[USR-233]</strong> The runbook MUST state the time limits of the failure window, the helper kill sequence, the crash-loop guard and the install lock as the source pages define them.</li>
+<li><strong>[USR-234]</strong> The runbook MUST name the audit file path for Linux and each event it tells the administrator to search for, and every event name MUST appear in the source page that defines it.</li>
+<li><strong>[USR-235]</strong> The runbook MUST name the escalation path in this order: the plugin's security contact, then the Ilium project's security contact, then the release blocklist, and MUST list the security contact address as an open decision while it is a placeholder.</li>
+<li><strong>[USR-960]</strong> An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's <code>security_contact</code> or the Ilium project contact, over a channel the organisation approves.</li>
+<li><strong>[USR-961]</strong> An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends.</li>
+<li><strong>[USR-962]</strong> Before a support bundle leaves the machine or the organisation, an administrator MUST read its <code>log.txt</code> and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/guide-troubleshooting/"><small>Previous</small>Troubleshooting for authors</a><a class="next" href="/pages/guide-backwards-compatibility-test-matrix/"><small>Next</small>Backwards-compatibility test matrix</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-need">You need</a></li><li class="l2"><a href="#triage-by-symptom">Triage by symptom</a></li><li class="l2"><a href="#bad-plugin">Bad plugin</a></li><li class="l2"><a href="#failed-update">Failed update</a></li><li class="l2"><a href="#crash-loop">Crash loop</a></li><li class="l2"><a href="#watchdog-timeouts">Watchdog timeouts</a></li><li class="l2"><a href="#compromised-signing-key">Compromised signing key</a></li><li class="l2"><a href="#data-exposure-incident">Data-exposure incident</a></li><li class="l2"><a href="#time-limits">Time limits</a></li><li class="l2"><a href="#isolated-fleet-propagation-and-acknowledgement">Isolated fleet: propagation and acknowledgement</a></li><li class="l2"><a href="#policy-keys-used-in-this-runbook">Policy keys used in this runbook</a></li><li class="l2"><a href="#audit-events">Audit events</a></li><li class="l2"><a href="#audit-chain-verification">Audit chain verification</a></li><li class="l2"><a href="#escalation-path">Escalation path</a></li><li class="l2"><a href="#incident-record-and-post-incident-review">Incident record and post-incident review</a></li><li class="l2"><a href="#registry-backup-and-disaster-recovery">Registry backup and disaster recovery</a></li><li class="l3"><a href="#open-decisions">Open decisions</a></li><li class="l3"><a href="#requirements">Requirements</a></li><li class="l3"><a href="#emergency-kill-switch">Emergency kill switch</a></li><li class="l2"><a href="#emergency-kill-switch-for-one-plugin">Emergency kill switch for one plugin</a></li><li class="l3"><a href="#recover-a-disabled-side">Recover a disabled side</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l2"><a href="#production-additions-t10-operations">Production additions: T10-operations</a></li><li class="l2"><a href="#requirement-statements">Requirement statements</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

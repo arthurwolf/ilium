@@ -295,6 +295,9 @@ impl JobsImport {
 
 impl HostJobs for JobsImport {
     fn start(&mut self, kind: String, input: Vec<u8>) -> Result<RequestId, PluginError> {
+        if self.current.is_some() {
+            return Err(error(ErrorCode::Unsupported, "jobs cannot start other jobs"));
+        }
         if kind.is_empty() {
             return Err(error(ErrorCode::InvalidArgument, "job kind is empty"));
         }
@@ -399,7 +402,7 @@ impl HostJobs for JobsImport {
         if let Some(record) = self.book.state().jobs.get_mut(&job.0) {
             record.progress = clamped;
         }
-        self.env.emit(Event::JobProgress(JobProgressEvent {
+        self.env.emit_to_parent(Event::JobProgress(JobProgressEvent {
             job,
             percent: clamped,
         }));
@@ -417,35 +420,16 @@ impl HostJobs for JobsImport {
     }
 
     fn wait_request(&mut self, request: RequestId, timeout_millis: u32) -> Result<(), PluginError> {
+        if self.current.is_none() {
+            return Err(error(ErrorCode::Unsupported, "only a job may wait for a request"));
+        }
         if self.cancelled.contains(&request.0) {
             return Err(error(ErrorCode::Cancelled, "request was cancelled"));
         }
-        let plugin = self.env.plugin().to_owned();
-        let (lock, ready) = &*self.book.shared;
-        let state = lock.lock().unwrap_or_else(|poison| poison.into_inner());
-        if !state
-            .jobs
-            .get(&request.0)
-            .is_some_and(|record| record.plugin == plugin)
-        {
-            return Err(error(ErrorCode::TimedOut, "request did not finish in time"));
-        }
-        let (state, _) = ready
-            .wait_timeout_while(
-                state,
-                Duration::from_millis(u64::from(timeout_millis)),
-                |held| {
-                    held.jobs
-                        .get(&request.0)
-                        .is_some_and(|record| !matches!(record.status, JobStatus::Finished(_)))
-                },
-            )
-            .unwrap_or_else(|poison| poison.into_inner());
-        match state.jobs.get(&request.0).map(|record| &record.status) {
-            Some(JobStatus::Finished(Ok(()))) => Ok(()),
-            Some(JobStatus::Finished(Err(failure))) => Err(failure.clone()),
-            _ => Err(error(ErrorCode::TimedOut, "request did not finish in time")),
-        }
+        let Some(requests) = self.env.job_requests() else {
+            return Err(error(ErrorCode::Unsupported, "job request tracking is unavailable"));
+        };
+        requests.wait(self.env.plugin(), self.env.instance(), request, Duration::from_millis(u64::from(timeout_millis)))
     }
 }
 
@@ -560,8 +544,10 @@ mod tests {
     /// REQ: HST-499
     #[test]
     fn wait_request_with_zero_timeout_on_unfinished_request_times_out() {
-        let mut jobs = JobsImport::default();
-        match jobs.wait_request(RequestId(42), 0) {
+        let env = super::ImportEnv::unrestricted().with_job_scope();
+        let request = env.next_request();
+        let mut jobs = JobsImport::for_job(env, super::JobBook::new(), RequestId(42));
+        match jobs.wait_request(request, 0) {
             Ok(()) => panic!("an unfinished request must not complete within a zero timeout"),
             Err(error) => assert_eq!(
                 error.code,

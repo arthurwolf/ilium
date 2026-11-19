@@ -55,14 +55,14 @@ There is no `HookCall` variant. A hook never crosses a process (see [Scheduling]
 
 ```rust
 pub struct PluginHello {
-    pub plugin_protocol: u16,         // PLUGIN_PROTOCOL_VERSION = 1
-    pub contract: String,             // "0.1.0"
+    pub plugin_protocol: u16,         // PLUGIN_PROTOCOL_VERSION = 3
+    pub contract: String,             // "ilium:plugin@0.1.0"
     pub installed: Vec<InstalledPlugin>,
 }
 pub struct InstalledPlugin { pub id: PluginId, pub version: String, pub content_hash: [u8; 32] }
 ```
 
-`ilium-ipc` gains the constant `PLUGIN_PROTOCOL_VERSION: u16 = 1`. No such constant exists before the plugin system.
+`ilium-ipc` defines `PLUGIN_PROTOCOL_VERSION: u16 = 3`.
 
 | Case | Server answer | Client behavior |
 |---|---|---|

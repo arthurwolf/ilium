@@ -11,6 +11,7 @@ const HOOK_COMMAND: &str = "ilium progress guard || true";
 
 fn install(host: &mut FakeHost) -> bool {
     let invocation = host.cli().invoke(&["progress", "guard", "--install"], b"");
+    host.settle();
     invocation.exit_code() == Some(0)
 }
 

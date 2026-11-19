@@ -96,6 +96,8 @@ pub(crate) struct ServerFacade {
     pane_kinds: std::sync::OnceLock<Arc<super::pane_kinds::PaneKinds>>,
     /// The pane a client last reported as focused (`SetPaneFocus`), `None` after it lost focus.
     focused: Mutex<Option<NodeId>>,
+    /// Live client connections, removed when their connection guard is dropped.
+    clients: Mutex<BTreeMap<u64, DirectEventSender>>,
     /// The prompt epoch of each pane and the plugin submissions still waiting to be recorded.
     prompt_epochs: super::prompt_epochs::PromptEpochs,
 }
@@ -440,7 +442,24 @@ impl ServerFacade {
             notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
             pane_kinds: std::sync::OnceLock::new(),
             focused: Mutex::new(None),
+            clients: Mutex::new(BTreeMap::new()),
             prompt_epochs: super::prompt_epochs::PromptEpochs::default(),
+        }
+    }
+
+    pub(super) fn register_client(&self, client: u64, sender: DirectEventSender) -> bool {
+        match self.clients.lock() {
+            Ok(mut clients) => {
+                clients.insert(client, sender);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub(super) fn unregister_client(&self, client: u64) {
+        if let Ok(mut clients) = self.clients.lock() {
+            clients.remove(&client);
         }
     }
 
@@ -780,7 +799,7 @@ impl ServerFacade {
                 let Some(state) = self.state.upgrade() else {
                     return failed(ErrorCode::Internal, "the server is shutting down");
                 };
-                state.broadcast(ServerEvent::Plugin(ilium_ipc::plugin::PluginEnvelope {
+                let event = ServerEvent::Plugin(ilium_ipc::plugin::PluginEnvelope {
                     plugin: spec.to.plugin.0.clone(),
                     seq: self.next_envelope.fetch_add(1, Ordering::Relaxed),
                     body: ilium_ipc::plugin::EnvelopeBody::Message(
@@ -789,8 +808,26 @@ impl ServerFacade {
                             payload: spec.payload,
                         },
                     ),
-                }));
-                Outcome::Ok
+                });
+                match spec.to.client {
+                    Some(client) => {
+                        let Ok(clients) = self.clients.lock() else {
+                            return failed(ErrorCode::Internal, "client message routes are unavailable");
+                        };
+                        let Some(sender) = clients.get(&client.0) else {
+                            return refused(ErrorCode::NotFound, "the target client is not connected");
+                        };
+                        if sender.try_send(event) {
+                            Outcome::Ok
+                        } else {
+                            failed(ErrorCode::Busy, "the target client cannot accept a message")
+                        }
+                    }
+                    None => {
+                        state.broadcast(event);
+                        Outcome::Ok
+                    }
+                }
             }
             PluginSide::Server => {
                 let target = spec.to.plugin.0.clone();
@@ -1531,5 +1568,70 @@ mod tests {
         assert_eq!(shell_word("two words"), "'two words'");
         assert_eq!(shell_word(""), "''");
         assert_eq!(shell_word("it's"), "'it'\\''s'");
+    }
+
+    #[tokio::test]
+    async fn targeted_plugin_message_to_a_disconnected_client_is_not_broadcast() {
+        use std::sync::{atomic::AtomicU64, Arc, Mutex};
+        use ilium_plugin_api::generated::types::{ClientId, ErrorCode, MessageSpec, MessageTarget, Outcome, PluginId, PluginSide};
+        use ilium_plugin_api::kernel::Origin;
+        use ilium_plugin_api::side::Side;
+
+        let directory = tempfile::tempdir().unwrap();
+        let state = Arc::new(crate::state::test_server_state(&directory));
+        let mut broadcasts = state.events.subscribe_shared();
+        let facade = super::ServerFacade::new(
+            &state, tokio::runtime::Handle::current(), Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)),
+        );
+        let plugin = PluginId("ilium.core.smart-copy".into());
+        let result = facade.message(
+            &Origin::Plugin { plugin: plugin.clone(), side: Side::Server, instance: 1 },
+            MessageSpec {
+                to: MessageTarget { plugin, side: PluginSide::Client, client: Some(ClientId(42)) },
+                channel: "candidates".into(), payload: b"private reply".to_vec(),
+            },
+        );
+        assert!(matches!(result, Outcome::Refused(error) if error.code == ErrorCode::NotFound));
+        assert!(broadcasts.try_recv().is_err(), "a disconnected client's reply must not reach other clients");
+    }
+
+    #[tokio::test]
+    async fn targeted_plugin_message_reaches_only_its_registered_client() {
+        use std::sync::{atomic::AtomicU64, Arc, Mutex};
+        use ilium_plugin_api::generated::types::{ClientId, ErrorCode, MessageSpec, MessageTarget, Outcome, PluginId, PluginSide};
+        use ilium_plugin_api::kernel::Origin;
+        use ilium_plugin_api::side::Side;
+
+        let directory = tempfile::tempdir().unwrap();
+        let state = Arc::new(crate::state::test_server_state(&directory));
+        let mut broadcasts = state.events.subscribe_shared();
+        let facade = super::ServerFacade::new(
+            &state, tokio::runtime::Handle::current(), Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)),
+        );
+        let (first, mut first_rx) = crate::ipc::DirectEventSender::channel(4);
+        let (second, mut second_rx) = crate::ipc::DirectEventSender::channel(4);
+        assert!(facade.register_client(41, first));
+        assert!(facade.register_client(42, second));
+        let plugin = PluginId("ilium.core.smart-copy".into());
+        let origin = Origin::Plugin { plugin: plugin.clone(), side: Side::Server, instance: 1 };
+        let message = MessageSpec {
+            to: MessageTarget { plugin, side: PluginSide::Client, client: Some(ClientId(41)) },
+            channel: "candidates".into(), payload: b"private reply".to_vec(),
+        };
+        let result = facade.message(&origin, message.clone());
+        assert!(matches!(result, Outcome::Ok));
+        assert!(matches!(first_rx.try_recv(), Ok(ilium_ipc::ServerEvent::Plugin(_))));
+        assert!(second_rx.try_recv().is_err());
+        assert!(broadcasts.try_recv().is_err());
+        for _ in 0..4 {
+            assert!(matches!(facade.message(&origin, message.clone()), Outcome::Ok));
+        }
+        assert!(matches!(facade.message(&origin, message.clone()), Outcome::Failed(error) if error.code == ErrorCode::Busy));
+        facade.unregister_client(41);
+        assert!(matches!(facade.message(&origin, message), Outcome::Refused(error) if error.code == ErrorCode::NotFound));
+        assert!(second_rx.try_recv().is_err());
+        assert!(broadcasts.try_recv().is_err());
     }
 }

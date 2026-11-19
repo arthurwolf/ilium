@@ -1,0 +1,1408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Requirements for production completeness | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/" aria-current="page">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Requirements for production completeness</h1>
+
+<p>This page lists every requirement of the production pages added to close the gaps found by the production-completeness audit (grant expiry, refusals and changes, audit of grant events, unattended grants, helper and server death, out-of-band kill, resource limits, registry shutdown, user reports, air-gapped transfer, configuration export, compliance and audit collection, bad-release response, text direction and input, colour and no-colour, non-text panes, language coverage, API change proposals, CI report formats, conformance claims, test strategy and SDK pinning). The statement is the owner bullet word for word. Change the bullet first, then copy it here.</p>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Statement</th>
+<th>Page</th>
+<th>Testable how</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PDX-001</td>
+<td>A plugin project MUST commit its lockfile (<code>Cargo.lock</code> for Rust, <code>bun.lock</code> for TypeScript), and a release build or <code>ilium plugin check --release</code> without one MUST fail with <code>build.unpinned-inputs</code> as defined by [DEV-893].</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Delete Cargo.lock from a Rust template project and run <code>ilium plugin check --release</code>: the exit code is non-zero and the output contains <code>build.unpinned-inputs</code>.</td>
+</tr>
+<tr>
+<td>PDX-002</td>
+<td>The templates MUST pin the SDK to a tilde-style minor range (Rust <code>ilium-plugin-sdk = "~0.4.2"</code>, TypeScript <code>"~0.4.2"</code>), and <code>ilium plugin check</code> MUST warn with <code>lint.sdk-range-open</code> for any requirement that admits a higher minor, such as <code>*</code>, <code>^0.4</code> or a bare major.</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Change the SDK requirement in package.json to <code>^0.4.2</code> and run <code>ilium plugin check</code>: the output contains one <code>lint.sdk-range-open</code> warning naming package.json.</td>
+</tr>
+<tr>
+<td>PDX-003</td>
+<td><code>dist/build.json</code> MUST record the resolved SDK version together with the lowest and highest host API minors that SDK declares, and <code>ilium plugin build</code> MUST fail with <code>build.sdk-host-mismatch</code> when the manifest <code>api</code> is outside that range.</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Set manifest <code>api</code> to a minor one above the resolved SDK's highest declared host minor and run <code>ilium plugin build</code>: the exit code is non-zero, the output contains <code>build.sdk-host-mismatch</code>, and no dist/ package is written.</td>
+</tr>
+<tr>
+<td>PDX-004</td>
+<td>When one plugin uses both the Rust and the TypeScript SDK, they MUST resolve to the same SDK line (same major.minor), otherwise <code>ilium plugin build</code> MUST fail with <code>build.sdk-line-mixed</code>.</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Pin the Rust SDK to <code>~0.4.2</code> and the TypeScript SDK to <code>~0.5.0</code> in one project and run <code>ilium plugin build</code>: the output contains <code>build.sdk-line-mixed</code> and the exit code is non-zero.</td>
+</tr>
+<tr>
+<td>PDX-005</td>
+<td>A patch bump within a pinned SDK line MUST NOT change any exported signature (per [API-083] and [API-086]), so an author MAY accept patch updates automatically, while a minor bump MUST be made in its own commit with <code>ilium plugin check</code> re-run.</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Resolve the SDK from 0.4.2 to 0.4.3 in the lockfile and rebuild without source changes: the build succeeds and the exported WIT interface hash in dist/build.json is unchanged.</td>
+</tr>
+<tr>
+<td>PDX-006</td>
+<td><code>ilium plugin check</code> MUST fail with <code>lint.sdk-deprecated</code> as an error when the resolved SDK minor equals or exceeds the removal minor of an item the plugin still uses ([DEV-997]), so the pin is moved only after the item is replaced.</td>
+<td><a href="/pages/guide-pinning-the-sdk/">guide-pinning-the-sdk</a></td>
+<td>Use an item whose removal minor is 0.5 and pin the SDK to <code>~0.5.0</code>: <code>ilium plugin check</code> exits non-zero and prints <code>lint.sdk-deprecated</code> with the item name and the removal minor.</td>
+</tr>
+<tr>
+<td>PDY-001</td>
+<td><code>ilium plugin grant --until &lt;timestamp&gt;</code> MUST accept only RFC 3339 UTC timestamps and MUST refuse a time in the past or more than 365 days ahead with exit code 2 and the code <code>grant.expiry-invalid</code>.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>Run <code>ilium plugin grant example.sync fs.read --until 2020-01-01T00:00:00Z</code>: the exit code is 2, the output contains <code>grant.expiry-invalid</code>, and the grant store is unchanged.</td>
+</tr>
+<tr>
+<td>PDY-002</td>
+<td>The host MUST compare the expiry against a monotonic-corrected wall clock at the start of every capability call, not only on a timer.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>Set an expiry 2 seconds ahead, stop the host timers in the harness, and make a call 3 seconds later: the call returns <code>not-permitted</code> with reason <code>revoked</code>.</td>
+</tr>
+<tr>
+<td>PDY-003</td>
+<td>A call that started before the expiry and is still running when it passes MUST return <code>not-permitted</code> with reason <code>revoked</code>, and the grant epoch MUST bump once.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>Start a long <code>fs.read</code> stream 1 second before expiry: the stream ends with <code>not-permitted</code> reason <code>revoked</code> and <code>ilium plugin grants example.sync --json</code> shows the epoch incremented by exactly 1.</td>
+</tr>
+<tr>
+<td>PDY-004</td>
+<td>If the system clock moves backwards, a grant that has already expired MUST stay expired.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>Let a grant expire, move the system clock back one day in the harness, and call the capability: the call returns <code>not-permitted</code> with reason <code>revoked</code>.</td>
+</tr>
+<tr>
+<td>PDY-005</td>
+<td>An expired grant MUST be shown as <code>expired</code> in the Plugins screen and in <code>ilium plugin grants</code> for 30 days and then removed from the store; re-granting MUST require the review dialog again.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>After expiry, <code>ilium plugin grants example.sync --json</code> lists the grant with <code>state: "expired"</code>; after 31 days of simulated time the entry is absent, and <code>ilium plugin grant example.sync fs.read</code> opens the review dialog.</td>
+</tr>
+<tr>
+<td>PDY-006</td>
+<td>On expiry the host MUST re-activate the plugin with the reduced grant set exactly as it does for a revoke.</td>
+<td><a href="/pages/reference-grant-expiry/">reference-grant-expiry</a></td>
+<td>Let one of two grants expire: the plugin's activate export runs once more and its reported grant list contains only the remaining grant.</td>
+</tr>
+<tr>
+<td>PDY-007</td>
+<td>A refused call MUST return the <code>not-permitted</code> result with the fields <code>grant</code> and <code>reason</code>, and <code>reason</code> MUST be exactly one of <code>declined</code>, <code>revoked</code>, <code>not-granted</code> or <code>policy</code>.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Call <code>fs.read</code> from a plugin whose <code>fs.read</code> grant was revoked: the result is <code>not-permitted</code> with <code>grant: "fs.read"</code> and <code>reason: "revoked"</code> and no other fields.</td>
+</tr>
+<tr>
+<td>PDY-008</td>
+<td>A refusal with reason <code>policy</code> MUST NOT reveal which policy file, key or rule matched.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Deny <code>net.fetch</code> for the plugin in the system policy file and call it: the result carries <code>reason: "policy"</code> and the serialized result contains no file path, key name or rule id.</td>
+</tr>
+<tr>
+<td>PDY-009</td>
+<td>A refused call MUST return within 50 ms and MUST NOT open a prompt unless the grant is defined with first-use consent.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Call an un-granted capability without first-use consent 100 times in the harness: every call returns <code>not-permitted</code> in under 50 ms and the harness records zero prompts.</td>
+</tr>
+<tr>
+<td>PDY-010</td>
+<td>The host MUST deliver the plugin event <code>grant-set-changed</code> within 1 s of each epoch bump, carrying only the <code>added</code> and <code>removed</code> grant names and the new <code>epoch</code>; it is distinct from the server-to-client <code>grants-changed</code> control record.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Revoke <code>fs.read</code> with the CLI while the plugin runs: within 1 s the plugin's event handler receives <code>grant-set-changed</code> with <code>removed: ["fs.read"]</code>, <code>added: []</code> and the new epoch, and no other keys.</td>
+</tr>
+<tr>
+<td>PDY-011</td>
+<td>A plugin MUST be able to read its current grant set through <code>grants.current</code>, and the result MUST list only grants its manifest requests, never grants it was not offered.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Call <code>grants.current</code> from a plugin whose manifest requests <code>fs.read</code> and <code>clipboard.read</code> while the user holds other plugins' grants: the result contains at most those two names with their states.</td>
+</tr>
+<tr>
+<td>PDY-012</td>
+<td>A plugin MUST NOT retry a call refused with reason <code>declined</code>, <code>revoked</code> or <code>policy</code> until it receives a <code>grant-set-changed</code> event that adds the grant, and the host MUST return <code>not-permitted</code> without a prompt on such retries.</td>
+<td><a href="/pages/api-grant-refusal-and-changes/">api-grant-refusal-and-changes</a></td>
+<td>Retry a call refused as <code>declined</code> ten times without an intervening grant event: every retry returns <code>not-permitted</code> with reason <code>declined</code> and the harness records zero prompts.</td>
+</tr>
+<tr>
+<td>PDY-013</td>
+<td><code>grant-given</code> and <code>grant-revoked</code> records MUST carry <code>actor.kind</code> (one of <code>user-tui</code>, <code>cli</code>, <code>policy</code>, <code>expiry</code>), <code>grant</code>, <code>previous_state</code> and <code>epoch</code>.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Revoke <code>fs.read</code> with <code>ilium plugin grants example.sync --revoke fs.read</code> and read the last audit line: event is <code>grant-revoked</code>, <code>actor.kind</code> is <code>cli</code>, <code>grant</code> is <code>fs.read</code>, <code>previous_state</code> is <code>held</code> and <code>epoch</code> equals the new epoch.</td>
+</tr>
+<tr>
+<td>PDY-014</td>
+<td>Revoke all MUST write one <code>grant-revoked</code> record per grant plus exactly one <code>revoke-all</code> summary record carrying the count.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Run <code>ilium plugin grants example.sync --revoke-all</code> on a plugin holding three grants: the audit log gains three <code>grant-revoked</code> lines and one <code>revoke-all</code> line with <code>count: 3</code>.</td>
+</tr>
+<tr>
+<td>PDY-015</td>
+<td>The audit catalogue MUST include <code>grant-expired</code> with <code>plugin_id</code>, <code>grant</code>, <code>expired_at</code> and <code>detected_at</code>, written once per expiry.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Let a grant expire and make five calls afterwards: exactly one <code>grant-expired</code> line exists for it, with <code>expired_at</code> equal to the stored expiry and <code>detected_at</code> at or after it.</td>
+</tr>
+<tr>
+<td>PDY-016</td>
+<td>A grant refused by policy at install time MUST write one <code>grant-policy-denied</code> record per install attempt, naming the grant.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Install a plugin requesting a policy-denied grant twice: the audit log contains exactly two <code>grant-policy-denied</code> lines, each with the grant name.</td>
+</tr>
+<tr>
+<td>PDY-017</td>
+<td>Declining a row in the review dialog MUST write one <code>grant-declined</code> record with the grant name.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Decline the <code>net.fetch</code> row during install: the audit log contains one <code>grant-declined</code> line with <code>grant: "net.fetch"</code>.</td>
+</tr>
+<tr>
+<td>PDY-018</td>
+<td>Refused runtime calls for grants that are not HIGH MUST be summarised into at most one <code>grant-refused</code> record per plugin and grant per minute, carrying <code>count</code>; HIGH grants keep their per-call records.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Make 500 refused <code>clipboard.read</code> calls within 10 seconds: the audit log contains exactly one <code>grant-refused</code> line for that plugin and grant with <code>count: 500</code>.</td>
+</tr>
+<tr>
+<td>PDY-019</td>
+<td>A grant change made by the CLI in a non-interactive session MUST record the invoking uid in <code>actor.uid</code>.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Run <code>ilium plugin grants example.sync --revoke fs.read</code> from a shell without a controlling terminal: the <code>grant-revoked</code> line has <code>actor.kind: "cli"</code> and <code>actor.uid</code> equal to the shell's uid.</td>
+</tr>
+<tr>
+<td>PDY-020</td>
+<td>Every grant audit record MUST be reachable with <code>ilium plugin audit --event &lt;name&gt; --plugin &lt;id&gt; --json</code>, printing one JSONL line per record.</td>
+<td><a href="/pages/reference-audit-grant-events/">reference-audit-grant-events</a></td>
+<td>Run <code>ilium plugin audit --event grant-revoked --plugin example.sync --json</code> after one revoke: the output is exactly one JSON line whose <code>event</code> is <code>grant-revoked</code>.</td>
+</tr>
+<tr>
+<td>PDY-021</td>
+<td><code>ilium plugin grant &lt;id&gt; &lt;grant&gt;</code> for a HIGH grant without an attached client MUST fail with exit code 3 and the code <code>grant.needs-interactive</code>, unless a policy allow-list names that plugin and grant.</td>
+<td><a href="/pages/reference-grant-cli-unattended/">reference-grant-cli-unattended</a></td>
+<td>With no client attached and no allow-list, run <code>ilium plugin grant example.sync shell.exec</code>: the exit code is 3, the output contains <code>grant.needs-interactive</code>, and <code>ilium plugin grants example.sync --json</code> does not list <code>shell.exec</code>.</td>
+</tr>
+<tr>
+<td>PDY-022</td>
+<td><code>ilium plugin grants &lt;id&gt; --revoke &lt;grant&gt;</code> MUST work without an attached client and MUST exit 0 only after the epoch bump has been written to the grant store.</td>
+<td><a href="/pages/reference-grant-cli-unattended/">reference-grant-cli-unattended</a></td>
+<td>With no client attached, run the revoke and immediately read the grant store file: the epoch is incremented and the command exited 0.</td>
+</tr>
+<tr>
+<td>PDY-023</td>
+<td>Every grant command MUST print exactly one JSONL result line with the fields <code>type</code>, <code>plugin_id</code>, <code>grant</code> and <code>epoch</code>.</td>
+<td><a href="/pages/reference-grant-cli-unattended/">reference-grant-cli-unattended</a></td>
+<td>Run <code>ilium plugin grants example.sync --revoke fs.read --json</code>: stdout is one JSON line with keys <code>type</code>, <code>plugin_id</code>, <code>grant</code> and <code>epoch</code> and nothing else.</td>
+</tr>
+<tr>
+<td>PDY-024</td>
+<td>A first-use consent that would prompt in a headless session MUST resolve as <code>declined</code>, return <code>not-permitted</code> with reason <code>declined</code>, and write a <code>grant-declined</code> audit record with <code>actor.kind: "policy"</code>.</td>
+<td><a href="/pages/reference-grant-cli-unattended/">reference-grant-cli-unattended</a></td>
+<td>Trigger a first-use consent capability in a server with no client attached: the call returns <code>not-permitted</code> reason <code>declined</code> and the audit log gains one <code>grant-declined</code> line with <code>actor.kind: "policy"</code>.</td>
+</tr>
+<tr>
+<td>PDY-025</td>
+<td>Revoking a grant the plugin does not hold MUST exit 4 with the code <code>grant.not-held</code> and MUST change nothing, including the epoch.</td>
+<td><a href="/pages/reference-grant-cli-unattended/">reference-grant-cli-unattended</a></td>
+<td>Run <code>ilium plugin grants example.sync --revoke net.fetch</code> when <code>net.fetch</code> is not held: the exit code is 4, the output contains <code>grant.not-held</code>, and the epoch in the grant store is unchanged.</td>
+</tr>
+<tr>
+<td>PDZ-001</td>
+<td>Each helper MUST set <code>PR_SET_PDEATHSIG</code> to SIGKILL before it reads any plugin bytes, so that SIGKILL of the server ends every helper within 1 s.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>Start a server with two active plugins, send SIGKILL to the server pid, and list processes 1 s later: no process whose command line names a helper for that server pid remains.</td>
+</tr>
+<tr>
+<td>PDZ-002</td>
+<td>A helper MUST also exit within 2 s when its dispatcher channel reaches end-of-file, as a fallback for hosts without parent-death signals.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>Close the dispatcher socket of a running helper from the server side without killing the server: the helper pid is gone within 2 s and its exit status is 0.</td>
+</tr>
+<tr>
+<td>PDZ-003</td>
+<td>At start the server MUST scan for helper cgroup leaves left by a previous boot id or server pid, kill their processes and remove the leaves before activating any plugin.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>Create a stale leaf containing a sleeping process under the helper cgroup path pattern and start the server: the process is gone and the leaf directory is removed before the first <code>plugin.activated</code> log line.</td>
+</tr>
+<tr>
+<td>PDZ-004</td>
+<td>Each stale helper found at start MUST be logged with the code <code>host.helper-orphan-reaped</code> and written to the audit log as one <code>helper-orphan-reaped</code> record with the plugin id and the previous server pid.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>After the stale-leaf start, the log contains one <code>host.helper-orphan-reaped</code> line and <code>ilium plugin audit --event helper-orphan-reaped --json</code> prints one line with <code>plugin_id</code> and <code>previous_server_pid</code>.</td>
+</tr>
+<tr>
+<td>PDZ-005</td>
+<td>A helper MUST NOT survive more than 5 s after the server pid is gone, whatever the cause of the server's exit.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>Kill the server with SIGKILL while a plugin runs a busy loop, wait 5 s, and check: no helper pid remains and the helper cgroup leaf is empty.</td>
+</tr>
+<tr>
+<td>PDZ-006</td>
+<td>The next start MUST NOT count reaped orphans as plugin failures in the three-failure window.</td>
+<td><a href="/pages/reference-helper-orphan-and-server-death/">reference-helper-orphan-and-server-death</a></td>
+<td>Reap one orphan at start, then run <code>ilium plugin health example.sync --json</code>: the <code>failures_in_window</code> field is 0.</td>
+</tr>
+<tr>
+<td>PDZ-007</td>
+<td><code>ilium plugin kill &lt;id&gt; --reason &lt;text&gt;</code> MUST fall back, after 2 s without a server reply, to writing the kill state file and sending <code>cgroup.kill</code> to the plugin's helper cgroup leaf, and MUST print which path (<code>server</code> or <code>offline</code>) it used.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Stop the server loop with SIGSTOP and run the kill command: within 3 s it exits 0, prints <code>path: offline</code>, and the helper pid is gone.</td>
+</tr>
+<tr>
+<td>PDZ-008</td>
+<td>A kill state file written while the server is stopped MUST be honoured at the next start before any activation of that plugin, leaving it in state <code>disabled-by-admin</code>.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>With the server stopped, run <code>ilium plugin kill example.sync --reason test</code>, start the server, and run <code>ilium plugin list --json</code>: the plugin's state is <code>disabled-by-admin</code> and no <code>plugin.activated</code> log line exists for it.</td>
+</tr>
+<tr>
+<td>PDZ-009</td>
+<td>Helper cgroup leaves MUST follow the documented path pattern <code>&lt;ilium cgroup&gt;/helpers/&lt;plugin-id&gt;/</code> so an operator can find them by plugin id, and <code>cgroup.kill</code> written to that leaf MUST be treated by the server as one counted helper failure.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Write <code>1</code> to <code>cgroup.kill</code> of <code>.../helpers/example.sync/</code> while the plugin runs: the helper exits, <code>ilium plugin health example.sync --json</code> shows <code>failures_in_window: 1</code>, and the leaf path matches the pattern.</td>
+</tr>
+<tr>
+<td>PDZ-010</td>
+<td>When run under a supervisor (<code>--supervised</code>), the server MUST write a heartbeat file every 1 s and MUST exit with status 70 if its main loop has not ticked for 30 s, beyond the <code>host.loop-stalled</code> detection of [HST-618].</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Run the server with <code>--supervised</code> and block its loop in the harness for 31 s: the heartbeat file stops updating and the server process exits with status 70.</td>
+</tr>
+<tr>
+<td>PDZ-011</td>
+<td>An offline kill MUST write one <code>plugin.killed</code> audit record with the field <code>path</code> set to <code>offline</code>, written at the next start if the server was not running.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>After an offline kill and a restart, <code>ilium plugin audit --event plugin.killed --plugin example.sync --json</code> prints one line with <code>path: "offline"</code>.</td>
+</tr>
+<tr>
+<td>PDZ-012</td>
+<td>A kill by any path MUST NOT call any export of the plugin, including its deactivate export.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Kill a plugin whose deactivate export writes a marker file: after the kill the marker file does not exist.</td>
+</tr>
+<tr>
+<td>PDZ-013</td>
+<td><code>ilium plugin disable --all-third-party --reason &lt;text&gt;</code> ([SEC-457]) MUST stop every non-core plugin within 1 s on the server and within 5 s on each attached client without restarting the server, and MUST print the ids of the core plugins it skipped.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Run the command with three third-party and two core plugins active: within 1 s the server reports all three as <code>disabled-by-admin</code>, the command output lists the two core ids under <code>skipped</code>, and the server pid is unchanged.</td>
+</tr>
+<tr>
+<td>PDZ-014</td>
+<td><code>ilium plugin enable --all-third-party</code> ([SEC-458]) MUST re-enable plugins one at a time in install order and MUST stop at the first plugin that fails its grant review, printing that plugin id and leaving later plugins disabled.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Disable all, then decline the grant review of the second plugin in install order during re-enable: the first is <code>enabled</code>, the second and third remain <code>disabled-by-admin</code>, and the output names the second plugin.</td>
+</tr>
+<tr>
+<td>PDZ-015</td>
+<td>Both commands MUST work in safe mode and with no network available.</td>
+<td><a href="/pages/ops-out-of-band-kill-and-stuck-server/">ops-out-of-band-kill-and-stuck-server</a></td>
+<td>Start the server in safe mode with networking disabled in the harness and run <code>ilium plugin disable --all-third-party --reason test</code>: the exit code is 0 and the state file lists every third-party plugin as <code>disabled-by-admin</code>.</td>
+</tr>
+<tr>
+<td>PDZ-016</td>
+<td>Every limit MUST have exactly one row giving its default, manifest key, hard host cap, enforcement mechanism and the exact error code (<code>trap.memory</code>, <code>trap.deadline</code>, <code>host.stack-overflow</code>, <code>quota-exceeded</code>, <code>helper.unstable</code> or another named code).</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>Parse the matrix table on the published page: each of memory, cpu, time, stack, processes, fds and disk appears once, and every row has a non-empty value in all six columns.</td>
+</tr>
+<tr>
+<td>PDZ-017</td>
+<td>Exhausting the Wasm stack MUST trap with the code <code>host.stack-overflow</code> and MUST count as one failure in the three-failure window.</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>Call an export that recurses without bound: the result is a trap with code <code>host.stack-overflow</code> and <code>ilium plugin health &lt;id&gt; --json</code> shows <code>failures_in_window: 1</code>.</td>
+</tr>
+<tr>
+<td>PDZ-018</td>
+<td>Reaching <code>pids.max</code> MUST return <code>busy</code> with the reason <code>process-limit</code> to the plugin on the spawning call, as defined by [SEC-039], and MUST NOT kill the helper.</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>Spawn child processes until the limit is reached: the failing spawn returns <code>busy</code> with the reason <code>process-limit</code>, the helper pid is unchanged and the plugin keeps answering calls.</td>
+</tr>
+<tr>
+<td>PDZ-019</td>
+<td>A limit breach that kills the helper MUST be logged with the limit name and the observed value at the time of the breach.</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>Allocate past the memory limit: the log line for the kill contains <code>limit: memory</code> and an <code>observed</code> byte count at or above the configured limit.</td>
+</tr>
+<tr>
+<td>PDZ-020</td>
+<td>Each row MUST state whether a breach counts toward the three-failure window, and the host behaviour MUST match that column.</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>For the <code>fds</code> row, which states that the breach does not count: open file descriptors past the limit and check that <code>failures_in_window</code> stays 0.</td>
+</tr>
+<tr>
+<td>PDZ-021</td>
+<td>The matrix MUST be generated from the same source as the host constants, and a test MUST fail when the published table and the constants differ.</td>
+<td><a href="/pages/reference-resource-limits-matrix/">reference-resource-limits-matrix</a></td>
+<td>Change the default memory limit constant in the host source without regenerating the page and run the manual tests: the drift test fails naming the <code>memory</code> row.</td>
+</tr>
+<tr>
+<td>PDW-001</td>
+<td>An operator ending service MUST publish a signed <code>sunset</code> notice in <code>snapshot.json</code> at least 180 days before the last signed <code>timestamp.json</code> expires.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Verify a snapshot carrying <code>sunset.ends_at</code> less than 180 days before the final timestamp expiry with <code>ilium plugin registry doctor</code>: it reports <code>registry.sunset-too-short</code>.</td>
+</tr>
+<tr>
+<td>PDW-002</td>
+<td>During the freeze the registry MUST serve existing metadata and packages read-only and MUST refuse publish, yank and owner changes with <code>registry.read-only</code>.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Run <code>ilium plugin publish</code> against a registry in freeze: the exit code is non-zero and the output contains <code>registry.read-only</code>, while <code>ilium plugin install</code> of an existing package still succeeds.</td>
+</tr>
+<tr>
+<td>PDW-003</td>
+<td>Once a sunset notice is verified, a client MUST show <code>registry ending on &lt;date&gt;</code> in <code>ilium plugin list</code> and <code>ilium plugin registry doctor</code>, and MUST NOT block install, update or removal.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Point a client at a registry with a verified sunset notice and run <code>ilium plugin list</code>: the output contains <code>registry ending on</code> followed by the date, and <code>ilium plugin install</code> of a listed package exits 0.</td>
+</tr>
+<tr>
+<td>PDW-004</td>
+<td>A handover to a new operator MUST be published as a <code>root.json</code> version signed by the threshold of the previous root keys, and a client MUST refuse a new root not so signed with <code>registry.root-invalid</code>.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Serve a root.json version 3 signed only by new keys: <code>ilium plugin registry doctor</code> reports <code>registry.root-invalid</code> and the pinned root stays at version 2.</td>
+</tr>
+<tr>
+<td>PDW-005</td>
+<td>After the last timestamp expires, a client MUST report <code>registry.metadata-expired</code>, refuse new installs and updates from that registry, and keep installed plugins running without deleting them.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Advance the clock past the final timestamp expiry: <code>ilium plugin update</code> exits non-zero with <code>registry.metadata-expired</code> and <code>ilium plugin list</code> still shows the installed plugin as <code>enabled</code>.</td>
+</tr>
+<tr>
+<td>PDW-006</td>
+<td>A URL move MUST be a <code>url</code> field in a <code>root.json</code> version signed by the current root, and the client MUST re-pin the new URL only after the user confirms in a prompt, never from an HTTP redirect.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Serve an HTTP 301 from the old registry URL to a new host: the client keeps the old pinned URL and <code>registry doctor</code> reports <code>registry.redirect-ignored</code>; with a signed <code>url</code> change the client prompts and re-pins only after <code>y</code>.</td>
+</tr>
+<tr>
+<td>PDW-007</td>
+<td>A mirror MUST keep serving the last verified snapshot after the upstream shutdown and MUST label it <code>frozen</code> in its sync report.</td>
+<td><a href="/pages/publish-registry-shutdown-and-migration/">publish-registry-shutdown-and-migration</a></td>
+<td>Run <code>ilium plugin mirror sync --json</code> against an upstream that has shut down: the output line has <code>status: "frozen"</code> and the mirror still serves the last snapshot's packages.</td>
+</tr>
+<tr>
+<td>PDW-008</td>
+<td><code>ilium plugin report &lt;id&gt; --submit</code> MUST print the exact JSON payload and require explicit confirmation before any request is sent; without <code>--submit</code> the command MUST print the contacts and send nothing.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Run <code>ilium plugin report example.sync</code> with network capture on: no request is made; run it with <code>--submit</code> and answer <code>n</code>: the payload was printed and still no request is made.</td>
+</tr>
+<tr>
+<td>PDW-009</td>
+<td>The payload MUST contain only the plugin id, version, package <code>sha256</code>, one <code>policy.json</code> rule id, a category and a free text of at most 4000 characters, and MUST NOT contain the host name, user name, file paths or the list of other installed plugins.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Submit a report and inspect the captured request body: its keys are exactly <code>plugin_id</code>, <code>version</code>, <code>sha256</code>, <code>rule_id</code>, <code>category</code> and <code>text</code>, and <code>text</code> longer than 4000 characters is refused before sending with <code>report.text-too-long</code>.</td>
+</tr>
+<tr>
+<td>PDW-010</td>
+<td>The client MUST refuse a rule id not present in the cached <code>policy.json</code> with <code>report.rule-unknown</code> and exit code 2.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Run <code>ilium plugin report example.sync --submit --rule no-such-rule</code>: the exit code is 2, the output contains <code>report.rule-unknown</code> and no request is sent.</td>
+</tr>
+<tr>
+<td>PDW-011</td>
+<td>The intake MUST answer with a report id, the client MUST store it locally, and <code>ilium plugin report --status &lt;report-id&gt;</code> MUST fetch and print the recorded decision or <code>pending</code>.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Submit a report, then run <code>ilium plugin report --status &lt;id&gt;</code>: the output is one JSON line with <code>report_id</code> and <code>decision</code> set to <code>pending</code> or the recorded value.</td>
+</tr>
+<tr>
+<td>PDW-012</td>
+<td>The registry MUST accept at most 10 reports per client token per day and MUST answer excess reports with HTTP 429 and a <code>Retry-After</code> header, which the client MUST print as <code>report.rate-limited</code> with the wait time.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Submit 11 reports with one token in a day: the 11th receives HTTP 429 with <code>Retry-After</code>, and the client prints <code>report.rate-limited</code> with the number of seconds.</td>
+</tr>
+<tr>
+<td>PDW-013</td>
+<td>A report with category <code>vulnerability</code> MUST be redirected to the plugin's <code>security_contact</code> and the registry security contact, and MUST NOT be filed as an abuse report.</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Run <code>ilium plugin report example.sync --category vulnerability --submit</code>: the output prints both security contacts and no abuse report request is sent.</td>
+</tr>
+<tr>
+<td>PDW-014</td>
+<td>The reporter identity MUST NOT appear in any public document, including the transparency log entry for the decision ([PUB-045]).</td>
+<td><a href="/pages/user-reporting-a-plugin/">user-reporting-a-plugin</a></td>
+<td>Fetch the transparency log entry for a decided report: it contains the report id and decision but no token, email or client identifier.</td>
+</tr>
+<tr>
+<td>PDV-001</td>
+<td><code>ilium plugin bundle create --out &lt;file&gt;</code> MUST write a single archive holding the package files, their signatures and the signed registry metadata, plus a <code>bundle.json</code> listing the SHA-256 of every member.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Create a bundle for two installed plugins and list the archive: it contains two package files, their signature files, the metadata files and a <code>bundle.json</code> whose <code>members</code> has one SHA-256 per other member.</td>
+</tr>
+<tr>
+<td>PDV-002</td>
+<td><code>ilium plugin bundle import &lt;file&gt;</code> MUST verify every member hash and every signature before copying anything into the package source named in <code>packages.allowed_sources</code>, and on any mismatch MUST copy nothing and exit with code 3.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Flip one byte in a package inside a bundle and import it: the exit code is 3, the output names the member, and the allowed package source directory is unchanged.</td>
+</tr>
+<tr>
+<td>PDV-003</td>
+<td>A bundle MUST NOT carry registry root keys, and import MUST refuse with <code>bundle.root-not-pinned</code> a bundle whose metadata is signed by a root key not pinned under [PKG-985].</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Import a bundle signed by an unpinned root on a client with a different pinned root: the exit code is 3 and the output contains <code>bundle.root-not-pinned</code>.</td>
+</tr>
+<tr>
+<td>PDV-004</td>
+<td>When the signed metadata <code>expires</code> time has passed, installs from the bundle MUST be refused with reason <code>metadata-expired</code>, and already installed plugins MUST keep running.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Advance the clock past the bundle metadata <code>expires</code> and run <code>ilium plugin install --from-bundle</code>: the exit code is non-zero with <code>metadata-expired</code>, and <code>ilium plugin list</code> still shows existing plugins as <code>enabled</code>.</td>
+</tr>
+<tr>
+<td>PDV-005</td>
+<td>A bundle carrying a revocation list newer than the stored one MUST apply it at import and write one <code>trust.key-revoked</code> audit record per newly revoked key.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Import a bundle whose revocation list adds two keys: the audit log gains exactly two <code>trust.key-revoked</code> lines, each with a key id.</td>
+</tr>
+<tr>
+<td>PDV-006</td>
+<td>Import MUST write one <code>bundle-import</code> audit record with the bundle SHA-256, the member count and the result.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>After a successful import, <code>ilium plugin audit --event bundle-import --json</code> prints one line with <code>sha256</code>, <code>member_count</code> and <code>result: "ok"</code>.</td>
+</tr>
+<tr>
+<td>PDV-007</td>
+<td>Importing a bundle whose metadata version is older than the stored metadata version MUST be refused with reason <code>rollback</code> and exit code 3.</td>
+<td><a href="/pages/guide-air-gapped-transfer/">guide-air-gapped-transfer</a></td>
+<td>Import a bundle with snapshot version 4 after version 5 is stored: the exit code is 3 and the output contains <code>rollback</code>.</td>
+</tr>
+<tr>
+<td>PDV-008</td>
+<td><code>ilium plugin config export --out &lt;file&gt;</code> MUST write a TOML file with <code>version = 1</code>, mode 0600, listing plugin ids, exact versions and each plugin's non-secret settings.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Export on a machine with two plugins and inspect the file: it starts with <code>version = 1</code>, <code>stat</code> shows mode 0600, and it contains both plugin ids with their exact versions.</td>
+</tr>
+<tr>
+<td>PDV-009</td>
+<td>The export MUST NOT contain secrets, keyring entries, grants, consent records or the per-plugin random identifier.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Store a secret and hold grants for a plugin, then export: the file contains no key named <code>secret</code>, <code>grants</code>, <code>consent</code> or <code>instance_id</code> and none of the secret's bytes.</td>
+</tr>
+<tr>
+<td>PDV-010</td>
+<td><code>ilium plugin config import &lt;file&gt;</code> MUST validate the whole file against every plugin's settings schema before applying anything, and on any error MUST apply nothing and exit with code 2.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Import a file with one valid plugin section and one setting of the wrong type: the exit code is 2, the output names the invalid key, and neither plugin's settings changed.</td>
+</tr>
+<tr>
+<td>PDV-011</td>
+<td>Import MUST skip any key the admin policy locks, list it as <code>locked</code> in its output, and MUST NOT modify the policy file.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Lock <code>example.sync.interval</code> in the system policy and import a file setting it: the output lists the key with <code>locked</code>, the setting keeps the policy value, and the policy file hash is unchanged.</td>
+</tr>
+<tr>
+<td>PDV-012</td>
+<td><code>ilium plugin config import --dry-run &lt;file&gt;</code> MUST print each change as one JSONL line and MUST write nothing.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Run the dry run against a file that changes three settings: stdout has three JSON lines with <code>plugin_id</code>, <code>key</code>, <code>old</code> and <code>new</code>, and the settings store hash is unchanged.</td>
+</tr>
+<tr>
+<td>PDV-013</td>
+<td>Import of a file whose <code>version</code> is higher than the supported version MUST fail with reason <code>config-version-unsupported</code> and exit code 2.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Import a file with <code>version = 2</code> on a client supporting version 1: the exit code is 2 and the output contains <code>config-version-unsupported</code>.</td>
+</tr>
+<tr>
+<td>PDV-014</td>
+<td>Each export and import MUST write one audit record of event <code>config-export</code> or <code>config-import</code> with the byte count and file count in <code>detail</code> and no setting values.</td>
+<td><a href="/pages/reference-config-export-import/">reference-config-export-import</a></td>
+<td>Export then import, and read the audit log: one <code>config-export</code> and one <code>config-import</code> line exist, each with <code>detail.bytes</code> and <code>detail.files</code>, and neither contains any exported setting value.</td>
+</tr>
+<tr>
+<td>PDV-015</td>
+<td><code>ilium plugin policy status --json</code> MUST print <code>policy_sha256</code> of the system file, <code>loaded_at</code>, <code>schema_version</code>, the origin (<code>system</code> or <code>user</code>) of each effective key, and the count of ignored files.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Run the command on a machine with a system policy and a stricter user file: the JSON has <code>policy_sha256</code>, <code>loaded_at</code>, <code>schema_version</code>, an <code>origins</code> map with <code>system</code> or <code>user</code> per key, and <code>ignored_files</code> as an integer.</td>
+</tr>
+<tr>
+<td>PDV-016</td>
+<td><code>policy_sha256</code> MUST be the SHA-256 of the system policy file bytes as read at start, and MUST equal the <code>after</code> hash of the latest <code>policy-reloaded</code> audit record.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Compute <code>sha256sum</code> of the system policy file right after start: it equals <code>policy_sha256</code> from the status command and the <code>after</code> field of the last <code>policy-reloaded</code> audit line.</td>
+</tr>
+<tr>
+<td>PDV-017</td>
+<td>When the file on disk differs from the loaded hash, the command MUST report <code>pending_restart: true</code> and exit with code 4.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Append a comment line to the system policy file while the server runs and run the status command: the JSON has <code>pending_restart: true</code> and the exit code is 4.</td>
+</tr>
+<tr>
+<td>PDV-018</td>
+<td>If the system file was ignored under [SEC-182], the command MUST report <code>policy: "ignored"</code> with the reason and exit with code 3.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Make the system policy file world-writable and start the server: the status command prints <code>policy: "ignored"</code> with <code>reason</code> naming the permission problem and exits 3.</td>
+</tr>
+<tr>
+<td>PDV-019</td>
+<td>The status command MUST read only local files and MUST NOT open any network connection.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Run the command under a network namespace with no interfaces: it exits with the same output and code as with networking available.</td>
+</tr>
+<tr>
+<td>PDV-020</td>
+<td>The output MUST NOT include notice text or user-file values that are not stricter than the system file.</td>
+<td><a href="/pages/guide-policy-compliance-reporting/">guide-policy-compliance-reporting</a></td>
+<td>Set a looser value for a key in the user file and run the status command: the JSON contains the system value only and no <code>notice</code> field.</td>
+</tr>
+<tr>
+<td>PDV-021</td>
+<td>A collector MUST key records by machine id plus <code>seq</code> and MUST treat a repeated pair arriving with a different record hash as tampering.</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Replay a record with the same machine id and <code>seq</code> but a changed <code>detail</code>: the reference collector raises a <code>tamper</code> alert naming the machine id and <code>seq</code>.</td>
+</tr>
+<tr>
+<td>PDV-022</td>
+<td>A collector MUST raise a gap alert when <code>seq</code> skips a value or when <code>prev_hash</code> does not equal the hash of the previous accepted record.</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Drop one record from a forwarded stream: the reference collector raises a <code>gap</code> alert with the expected and received <code>seq</code>.</td>
+</tr>
+<tr>
+<td>PDV-023</td>
+<td>Central retention MUST be at least the host <code>audit.keep_days</code> value (default 365).</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Configure the reference collector with retention 30 days against a host with <code>audit.keep_days = 365</code>: its configuration check fails with <code>retention-below-host</code>.</td>
+</tr>
+<tr>
+<td>PDV-024</td>
+<td>Each syslog message MUST be one JSON object of at most 8192 bytes, and a record exceeding that MUST be truncated in <code>detail</code> only, with <code>truncated: true</code> added.</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Write an audit record with a 20 KiB <code>detail</code> and capture the syslog message: it is one JSON object of at most 8192 bytes, <code>detail</code> is shortened, <code>truncated</code> is <code>true</code>, and every other field is intact.</td>
+</tr>
+<tr>
+<td>PDV-025</td>
+<td>The documented minimum alert set MUST include records with event <code>policy-violation</code>, <code>signature-failure</code>, <code>blocklist-hit</code> and <code>integrity-failure</code>.</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Load the published alert rule file into the reference collector and forward one record of each of the four events: four alerts fire, one per event.</td>
+</tr>
+<tr>
+<td>PDV-026</td>
+<td>Collectors MUST order records by <code>seq</code>, never by <code>ts</code>, because the host clock may move backwards.</td>
+<td><a href="/pages/guide-audit-collection/">guide-audit-collection</a></td>
+<td>Forward records whose <code>ts</code> decreases while <code>seq</code> increases: the reference collector stores them in <code>seq</code> order and raises no reorder alert.</td>
+</tr>
+<tr>
+<td>PDU-001</td>
+<td>The publisher MUST run <code>ilium plugin yank &lt;id&gt;@&lt;version&gt; --reason &lt;text&gt;</code> within 1 hour of confirming a Level 1 or Level 2 defect.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Read the incident record of a Level 1 defect: the yank timestamp is at most 60 minutes after the recorded confirmation timestamp.</td>
+</tr>
+<tr>
+<td>PDU-002</td>
+<td>A yank reason MUST begin with <code>security:</code> for a security defect and with <code>defect:</code> otherwise, and the registry MUST refuse any other prefix with <code>yank.reason-prefix</code>.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Run <code>ilium plugin yank example.sync@1.2.0 --reason "bad build"</code>: the exit code is non-zero and the output contains <code>yank.reason-prefix</code>; with <code>--reason "defect: bad build"</code> it exits 0.</td>
+</tr>
+<tr>
+<td>PDU-003</td>
+<td>The hotfix MUST carry a higher version number than the yanked release, because a lower one is refused with <code>package.downgrade</code>.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Publish 1.1.9 after yanking 1.2.0: the publish exits non-zero with <code>package.downgrade</code>; publishing 1.2.1 exits 0.</td>
+</tr>
+<tr>
+<td>PDU-004</td>
+<td>A hotfix MUST NOT raise <code>data_version</code> unless it ships a migration from the yanked version's data, because rollback is otherwise refused with <code>migration.data-newer</code>.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Run <code>ilium plugin check</code> on a hotfix that raises <code>data_version</code> without a migration from the previous value: the output contains <code>lint.hotfix-data-version</code> as an error.</td>
+</tr>
+<tr>
+<td>PDU-005</td>
+<td>The publisher MUST keep the previous good version downloadable so that <code>ilium plugin rollback &lt;id&gt;</code> has a target.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>After the yank, run <code>ilium plugin rollback example.sync</code> on a machine with the bad version: the exit code is 0 and <code>ilium plugin list</code> shows the previous good version.</td>
+</tr>
+<tr>
+<td>PDU-006</td>
+<td>The incident record MUST list every offline mirror and bundle the publisher knows of, because a yank does not reach a bundle already copied, and each MUST be marked refreshed or outstanding.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Read the incident record template section <code>Mirrors and bundles</code>: every listed entry has a <code>refreshed</code> or <code>outstanding</code> mark and a date.</td>
+</tr>
+<tr>
+<td>PDU-007</td>
+<td>The post-incident record MUST be written within 5 working days and MUST name the detection time, yank time, hotfix time and the number of installs affected.</td>
+<td><a href="/pages/guide-bad-release-recall-playbook/">guide-bad-release-recall-playbook</a></td>
+<td>Validate a post-incident record with <code>ilium plugin incident check &lt;file&gt;</code>: it exits non-zero naming any missing one of <code>detected_at</code>, <code>yanked_at</code>, <code>hotfix_at</code> or <code>installs_affected</code>.</td>
+</tr>
+<tr>
+<td>PDU-008</td>
+<td>The operator MUST contain first, by adding the plugin id to <code>plugins.deny_ids</code> or the version to the file named by <code>packages.blocklist_file</code>, before any investigation.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Read the incident record: the <code>Actions taken</code> line for the deny or blocklist entry carries a time earlier than the first investigation entry.</td>
+</tr>
+<tr>
+<td>PDU-009</td>
+<td>Containment MUST be recorded as an <code>Actions taken</code> line with time and administrator, as the incident runbook requires.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Validate the incident record with <code>ilium plugin incident check &lt;file&gt;</code>: it fails with <code>incident.action-unrecorded</code> when the blocklist change has no <code>Actions taken</code> line with a time and an administrator.</td>
+</tr>
+<tr>
+<td>PDU-010</td>
+<td>The operator MUST identify affected machines from the <code>install</code>, <code>update</code> and <code>update.rolled-back</code> audit records collected centrally, not by asking users.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Query the collector for <code>install</code> and <code>update</code> records naming the bad version: the result lists every machine id that installed it, and the incident record's machine list equals that result.</td>
+</tr>
+<tr>
+<td>PDU-011</td>
+<td>Recovery by lockfile MUST use <code>ilium plugin sync --locked</code>, which downgrades to the locked version without <code>--allow-downgrade</code> ([USR-048]).</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Pin the good version in the fleet lockfile and run <code>ilium plugin sync --locked</code> on a machine with the bad version: the exit code is 0 and <code>ilium plugin list</code> shows the good version.</td>
+</tr>
+<tr>
+<td>PDU-012</td>
+<td>A machine whose plugin data is newer than the old version MUST recover with <code>ilium plugin rollback &lt;id&gt; --restore-backup</code>, and the operator MUST first verify the archive with <code>ilium plugin restore &lt;file&gt; --dry-run</code>.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>On a machine whose data_version was raised by the bad release, run the dry run and then the rollback with <code>--restore-backup</code>: the dry run exits 0 listing the archive members and the rollback exits 0 with the old version running.</td>
+</tr>
+<tr>
+<td>PDU-013</td>
+<td>The incident MUST NOT be closed until every machine in scope reports the fixed version in <code>ilium plugin list</code> or reports the plugin as denied.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Run <code>ilium plugin incident check &lt;file&gt;</code> with one in-scope machine still reporting the bad version: it exits non-zero with <code>incident.machine-outstanding</code> and the machine id.</td>
+</tr>
+<tr>
+<td>PDU-014</td>
+<td>Level 1 incidents MUST be acknowledged within the severity table's time, and the operator MUST attach a support bundle built with <code>ilium plugin support-bundle &lt;id&gt;</code> only after the [OPS-006] attach check passes.</td>
+<td><a href="/pages/ops-bad-release-fleet-response/">ops-bad-release-fleet-response</a></td>
+<td>Attach a support bundle without the OPS-006 check recorded: <code>ilium plugin incident check &lt;file&gt;</code> exits non-zero with <code>incident.bundle-unchecked</code>.</td>
+</tr>
+<tr>
+<td>PDT-001</td>
+<td>The host MUST draw RTL runs in logical order, left to right in cells, and MUST NOT reorder or mirror characters.</td>
+<td><a href="/pages/guide-bidirectional-text-and-control-characters/">guide-bidirectional-text-and-control-characters</a></td>
+<td>Render the fixture string <code>abc שלום</code> in a plugin view with the harness: the cells left to right contain <code>a</code>,<code>b</code>,<code>c</code>,<code></code>,<code>ש</code>,<code>ל</code>,<code>ו</code>,<code>ם</code>.</td>
+</tr>
+<tr>
+<td>PDT-002</td>
+<td>The host MUST replace each of U+202A to U+202E and U+2066 to U+2069 in every plugin-supplied string drawn on an approval, permission or install prompt with one U+FFFD cell, consistent with [SEC-104] for names.</td>
+<td><a href="/pages/guide-bidirectional-text-and-control-characters/">guide-bidirectional-text-and-control-characters</a></td>
+<td>Pass a path containing U+202E to an approval prompt: the rendered prompt shows U+FFFD in that position and the prompt text contains no code point in U+202A..U+202E or U+2066..U+2069.</td>
+</tr>
+<tr>
+<td>PDT-003</td>
+<td>Truncation MUST NOT split a grapheme cluster or a combining sequence and MUST place the ellipsis <code>…</code> in the last cell.</td>
+<td><a href="/pages/guide-bidirectional-text-and-control-characters/">guide-bidirectional-text-and-control-characters</a></td>
+<td>Render a 10-cell label whose 10th cell would fall inside the cluster <code>é</code>: the output ends with <code>…</code> at cell 10 and the preceding cells contain only whole clusters.</td>
+</tr>
+<tr>
+<td>PDT-004</td>
+<td><code>ilium plugin lint</code> MUST report <code>ui.bidi-control</code> for any literal bidi control character in a manifest string or catalogue message.</td>
+<td><a href="/pages/guide-bidirectional-text-and-control-characters/">guide-bidirectional-text-and-control-characters</a></td>
+<td>Put U+202E in a manifest <code>title</code> and run <code>ilium plugin lint</code>: the output contains <code>ui.bidi-control</code> naming the <code>title</code> key.</td>
+</tr>
+<tr>
+<td>PDT-005</td>
+<td>Names shown in the permission dialog MUST be rendered with bidi controls stripped, and <code>ilium plugin inspect &lt;id&gt; --json</code> MUST expose the raw unstripped value.</td>
+<td><a href="/pages/guide-bidirectional-text-and-control-characters/">guide-bidirectional-text-and-control-characters</a></td>
+<td>Install a plugin whose <code>title</code> contains U+202E: the dialog shows the stripped title and <code>ilium plugin inspect &lt;id&gt; --json</code> returns the <code>title</code> with the U+202E code point present.</td>
+</tr>
+<tr>
+<td>PDT-006</td>
+<td>While a composition is active the host MUST NOT run plugin commands bound to printable keys.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Bind a command to <code>j</code>, start a composition in the harness and send <code>j</code> as preedit: the command's invocation count stays 0 until the composition is committed or cancelled.</td>
+</tr>
+<tr>
+<td>PDT-007</td>
+<td>A text-input change event MUST carry only the committed string, never preedit text.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Compose <code>に</code> through preedit <code>n</code>,<code>i</code> and commit: the plugin receives exactly one change event whose <code>value</code> ends with <code>に</code> and no event containing <code>n</code> or <code>ni</code>.</td>
+</tr>
+<tr>
+<td>PDT-008</td>
+<td>A bracketed paste MUST arrive as one change event of up to 1 MiB, and a larger paste MUST be truncated to 1 MiB with the notice code <code>input.paste-truncated</code>.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Paste 2 MiB with bracketed paste in the harness: the plugin receives one change event with a 1 MiB value and the harness records one notice <code>input.paste-truncated</code>.</td>
+</tr>
+<tr>
+<td>PDT-009</td>
+<td>A wide character MUST advance the cursor by two cells, and the harness MUST ship a fixture that checks this.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Type <code>漢</code> into an empty input: the cursor cell index reported by the harness is 2, and the fixture <code>fixtures/input-wide-cursor</code> passes.</td>
+</tr>
+<tr>
+<td>PDT-010</td>
+<td>An input <code>maxlength</code> MUST be counted in grapheme clusters, not bytes or code points.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Set <code>maxlength: 3</code> and type <code>é</code>, <code>漢</code>, <code>a</code>, <code>b</code>: the value after the fourth keystroke contains exactly three clusters and <code>b</code> is refused.</td>
+</tr>
+<tr>
+<td>PDT-011</td>
+<td>Cursor movement in a plugin text input MUST move exactly one grapheme cluster per Left or Right key press.</td>
+<td><a href="/pages/guide-text-input-and-composition/">guide-text-input-and-composition</a></td>
+<td>Put the cursor after <code>éx</code> and press Left twice: the cursor is at index 0 and the first press moved it before <code>x</code>.</td>
+</tr>
+<tr>
+<td>PDT-012</td>
+<td>With <code>NO_COLOR</code> set to any non-empty value the host MUST emit no colour escape sequences for plugin text and MUST keep bold, underline and reverse attributes.</td>
+<td><a href="/pages/guide-colour-depth-and-no-color/">guide-colour-depth-and-no-color</a></td>
+<td>Run a plugin view in the harness with <code>NO_COLOR=1</code> and capture the output: it contains no SGR colour parameters (30-37, 38, 40-47, 48, 90-97, 100-107) and still contains the bold sequence for a bold span.</td>
+</tr>
+<tr>
+<td>PDT-013</td>
+<td>An rgb colour on a 256-colour terminal MUST map to the nearest xterm-256 index by CIE76 distance in CIELAB.</td>
+<td><a href="/pages/guide-colour-depth-and-no-color/">guide-colour-depth-and-no-color</a></td>
+<td>Render <code>rgb(250, 128, 114)</code> with <code>--colour-depth 256</code>: the emitted index is 209, the nearest xterm-256 entry by CIE76.</td>
+</tr>
+<tr>
+<td>PDT-014</td>
+<td>At monochrome depth the host MUST show the <code>danger</code> role as bold plus the literal prefix text the plugin supplied, never by colour alone.</td>
+<td><a href="/pages/guide-colour-depth-and-no-color/">guide-colour-depth-and-no-color</a></td>
+<td>Render a <code>danger</code> span with prefix <code>!</code> at <code>--colour-depth 8</code> mono: the output contains the bold sequence and the literal <code>!</code> before the text, and no colour sequence.</td>
+</tr>
+<tr>
+<td>PDT-015</td>
+<td>The harness MUST accept <code>--colour-depth 8|16|256|truecolor</code> for render checks and MUST refuse any other value with exit 2 and <code>usage.invalid-value</code>.</td>
+<td><a href="/pages/guide-colour-depth-and-no-color/">guide-colour-depth-and-no-color</a></td>
+<td>Run <code>ilium plugin test --colour-depth 64</code>: the exit code is 2 and the output contains <code>usage.invalid-value</code>; <code>--colour-depth 16</code> runs and reports depth 16 in the report file.</td>
+</tr>
+<tr>
+<td>PDT-016</td>
+<td><code>ilium plugin lint</code> MUST report <code>ui.colour-only-state</code> when two declared states of one widget differ only by a role colour.</td>
+<td><a href="/pages/guide-colour-depth-and-no-color/">guide-colour-depth-and-no-color</a></td>
+<td>Declare two badge states with identical text and glyph and different role colours: <code>ilium plugin lint</code> prints <code>ui.colour-only-state</code> naming the widget.</td>
+</tr>
+<tr>
+<td>PDT-017</td>
+<td>A scene or glyph-plane pane MUST declare a <code>description</code> of 1 to 200 characters in its manifest, and install MUST refuse a manifest without one with <code>manifest.description-missing</code>.</td>
+<td><a href="/pages/a11y-non-text-panes/">a11y-non-text-panes</a></td>
+<td>Install a scene plugin whose manifest lacks <code>description</code>: the exit code is non-zero and the output contains <code>manifest.description-missing</code>.</td>
+</tr>
+<tr>
+<td>PDT-018</td>
+<td>In screen-reader mode the host MUST print the description and the current scene state line instead of cells.</td>
+<td><a href="/pages/a11y-non-text-panes/">a11y-non-text-panes</a></td>
+<td>Enable screen-reader mode and open a scene pane in the harness: the linear output contains the manifest description followed by the plugin's state line and no cell grid.</td>
+</tr>
+<tr>
+<td>PDT-019</td>
+<td>With reduced motion on, a scene MUST be limited to at most 1 frame per second or one static frame.</td>
+<td><a href="/pages/a11y-non-text-panes/">a11y-non-text-panes</a></td>
+<td>Enable reduced motion and run a scene for 10 s in the harness: the frame counter is at most 10.</td>
+</tr>
+<tr>
+<td>PDT-020</td>
+<td>Every scene control MUST be reachable with the keyboard only, and <code>ilium plugin lint</code> MUST reject a mouse-only control with <code>ui.mouse-only-control</code>.</td>
+<td><a href="/pages/a11y-non-text-panes/">a11y-non-text-panes</a></td>
+<td>Declare a scene control with a pointer binding and no key binding: <code>ilium plugin lint</code> prints <code>ui.mouse-only-control</code> naming the control.</td>
+</tr>
+<tr>
+<td>PDT-021</td>
+<td>A scene MUST NOT convey required information in cells alone; every required state MUST appear in the state line.</td>
+<td><a href="/pages/a11y-non-text-panes/">a11y-non-text-panes</a></td>
+<td>Change the scene to an alert state in the harness: the state line returned by <code>scene.state</code> changes in the same frame as the cells.</td>
+</tr>
+<tr>
+<td>PDT-022</td>
+<td>Language sources MUST be applied in the order <code>--language</code>, <code>ILIUM_LANG</code>, <code>[ui] language</code>, <code>LC_ALL</code>, <code>LC_MESSAGES</code>, <code>LANG</code>, then <code>en</code>.</td>
+<td><a href="/pages/reference-language-resolution-and-coverage/">reference-language-resolution-and-coverage</a></td>
+<td>Start with <code>LANG=fr_FR.UTF-8</code>, <code>ILIUM_LANG=de</code> and <code>--language ja</code>: <code>ilium plugin i18n-coverage --json</code> reports <code>language: "ja"</code>; without the flag it reports <code>de</code>.</td>
+</tr>
+<tr>
+<td>PDT-023</td>
+<td><code>ilium plugin i18n-coverage</code> MUST print one JSONL line per installed plugin with <code>plugin_id</code>, <code>language</code>, <code>message_count</code> and <code>missing_count</code>, and MUST exit 0.</td>
+<td><a href="/pages/reference-language-resolution-and-coverage/">reference-language-resolution-and-coverage</a></td>
+<td>Run the command with two plugins installed: stdout has two JSON lines, each with those four keys, and the exit code is 0.</td>
+</tr>
+<tr>
+<td>PDT-024</td>
+<td>A catalogue larger than 256 KiB MUST be refused with <code>i18n.catalogue-too-large</code>, and the plugin MUST still load with English messages.</td>
+<td><a href="/pages/reference-language-resolution-and-coverage/">reference-language-resolution-and-coverage</a></td>
+<td>Install a plugin with a 300 KiB <code>de</code> catalogue and start with <code>ILIUM_LANG=de</code>: the log contains <code>i18n.catalogue-too-large</code> and the plugin's messages render in English.</td>
+</tr>
+<tr>
+<td>PDT-025</td>
+<td>A language change MUST re-render every open plugin view within 500 ms.</td>
+<td><a href="/pages/reference-language-resolution-and-coverage/">reference-language-resolution-and-coverage</a></td>
+<td>Open two plugin views and change <code>[ui] language</code> from <code>en</code> to <code>fr</code>: the harness observes both views redrawn with French messages within 500 ms.</td>
+</tr>
+<tr>
+<td>PDT-026</td>
+<td>The administrator policy key <code>[ui] language_locked</code> MUST pin the language for all plugins, overriding every other source.</td>
+<td><a href="/pages/reference-language-resolution-and-coverage/">reference-language-resolution-and-coverage</a></td>
+<td>Set <code>language_locked = "en"</code> in the system policy and start with <code>--language fr</code>: <code>ilium plugin i18n-coverage --json</code> reports <code>language: "en"</code> for every plugin.</td>
+</tr>
+<tr>
+<td>PDT-027</td>
+<td>A change to a WIT interface, a capability, a limit listed in Errors and limits, or a manifest key MUST be filed as a proposal numbered <code>P&lt;n&gt;</code> before any merge.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Open a pull request changing a WIT file without a <code>Proposal: P&lt;n&gt;</code> line in its description: the repository check fails with <code>governance.proposal-missing</code>.</td>
+</tr>
+<tr>
+<td>PDT-028</td>
+<td>A proposal MUST state the problem, the alternatives considered, the effect on existing packages, and, if it deprecates anything, the marking minor and the removal minor.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Validate a proposal file lacking the <code>Alternatives</code> section with the proposal template check: it fails naming <code>Alternatives</code>.</td>
+</tr>
+<tr>
+<td>PDT-029</td>
+<td>A proposal containing a breaking change MUST stay open for comment at least 30 days before the owner of the affected requirement prefix decides.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Attempt to mark a breaking proposal <code>accepted</code> 20 days after it was opened: the template check fails with <code>governance.comment-period-open</code> and the days remaining.</td>
+</tr>
+<tr>
+<td>PDT-030</td>
+<td>The outcome MUST be exactly one of <code>accepted</code>, <code>rejected</code>, <code>withdrawn</code> or <code>superseded</code>, and an accepted proposal MUST create a <code>D&lt;n&gt;</code> entry on Design decisions within 7 days.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Set the outcome field to <code>approved</code>: the template check fails listing the four allowed values; an <code>accepted</code> proposal older than 7 days without a <code>D&lt;n&gt;</code> reference fails with <code>governance.decision-missing</code>.</td>
+</tr>
+<tr>
+<td>PDT-031</td>
+<td>A proposal MUST NOT change a contract in a patch release.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Tag a patch release whose changelog references an accepted proposal that changes a WIT interface: the release check fails with <code>governance.contract-change-in-patch</code>.</td>
+</tr>
+<tr>
+<td>PDT-032</td>
+<td>A rejected proposal MUST record its reason and MUST NOT be reopened without new evidence cited in a <code>Reopened because</code> section.</td>
+<td><a href="/pages/governance-api-change-proposals/">governance-api-change-proposals</a></td>
+<td>Change a proposal from <code>rejected</code> to open without a <code>Reopened because</code> section: the template check fails with <code>governance.reopen-unjustified</code>.</td>
+</tr>
+<tr>
+<td>PDT-033</td>
+<td><code>ilium plugin test-report &lt;report.json&gt; --format junit --out &lt;path&gt;</code> MUST write a JUnit XML file with one <code>testcase</code> element per case in the native report.</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Convert a native report with 12 cases: the XML parses, and <code>count(//testcase)</code> is 12.</td>
+</tr>
+<tr>
+<td>PDT-034</td>
+<td>A <code>fail</code> or <code>trap</code> status MUST map to a <code>failure</code> element, <code>skipped</code> to a <code>skipped</code> element, and a case with <code>flaky: true</code> MUST map to a passing testcase carrying a property <code>flaky</code> with value <code>true</code>.</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Convert a report containing one fail, one skipped and one flaky case: the XML has one <code>failure</code>, one <code>skipped</code>, and one <code>testcase</code> with <code>&lt;property name="flaky" value="true"/&gt;</code> and no <code>failure</code> child.</td>
+</tr>
+<tr>
+<td>PDT-035</td>
+<td>The JUnit file MUST NOT contain absolute paths, user names or wall-clock timestamps, so output from different machines compares equal ([DEV-890]).</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Convert the same native report on two machines with different users and home directories: the two XML files are byte-identical.</td>
+</tr>
+<tr>
+<td>PDT-036</td>
+<td>An unknown <code>--format</code> value MUST fail with exit code 2 and <code>usage.invalid-value</code>.</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Run <code>ilium plugin test-report report.json --format tap</code>: the exit code is 2 and the output contains <code>usage.invalid-value</code>.</td>
+</tr>
+<tr>
+<td>PDT-037</td>
+<td>A native report from an interrupted run (exit 130) MUST still convert to a well-formed JUnit file carrying the testsuite property <code>complete</code> with value <code>false</code>.</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Interrupt a run with SIGINT and convert its report: the XML parses and contains <code>&lt;property name="complete" value="false"/&gt;</code>.</td>
+</tr>
+<tr>
+<td>PDT-038</td>
+<td>The conformance suite report MUST convert with the same command and formats, using the case id as the <code>testcase</code> name.</td>
+<td><a href="/pages/guide-ci-test-report-formats/">guide-ci-test-report-formats</a></td>
+<td>Convert a <code>test --conformance</code> report: every <code>testcase</code> <code>name</code> attribute equals a conformance case id of the form <code>C-&lt;n&gt;</code>.</td>
+</tr>
+<tr>
+<td>PDT-039</td>
+<td>A conformance claim MUST name the contract <code>ilium:plugin@0.1.0</code>, the suite version, the subject, and the pass, skip and fail counts by case id.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Validate a claim file missing <code>suite_version</code> with <code>ilium plugin verify-conformance</code>: the exit code is 2 and the output names <code>suite_version</code>.</td>
+</tr>
+<tr>
+<td>PDT-040</td>
+<td>A claim MUST be invalid if any counted case has a retired id or if any case failed.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Verify a report that counts a retired case id: the exit code is non-zero with <code>conformance.retired-case</code>; verify a report with one <code>fail</code>: the exit code is non-zero with <code>conformance.case-failed</code>.</td>
+</tr>
+<tr>
+<td>PDT-041</td>
+<td>A claim MUST be re-run and re-published within 90 days of a new suite minor, otherwise verification MUST mark it <code>stale</code>.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Verify a claim made against suite 1.2 when suite 1.3 was released 91 days ago: the output has <code>status: "stale"</code>.</td>
+</tr>
+<tr>
+<td>PDT-042</td>
+<td>A report MUST include the SHA-256 of the component or host build under test, and the signed report MUST cover that hash.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Remove the <code>subject_sha256</code> field from a report: <code>ilium plugin verify-conformance</code> exits 2 naming the field.</td>
+</tr>
+<tr>
+<td>PDT-043</td>
+<td><code>ilium plugin verify-conformance &lt;report&gt;</code> MUST exit 3 when the subject hash does not match the provided artefact and exit 2 on malformed input.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Run the command with <code>--subject</code> pointing at a different build: the exit code is 3 with <code>conformance.hash-mismatch</code>; run it on a non-JSON file: the exit code is 2.</td>
+</tr>
+<tr>
+<td>PDT-044</td>
+<td>A claim MUST NOT use the Ilium name or logo beyond the wording the governance page permits, and the published claim template MUST contain only that wording.</td>
+<td><a href="/pages/reference-conformance-claims/">reference-conformance-claims</a></td>
+<td>Validate a claim whose <code>statement</code> differs from the permitted wording: the template check fails with <code>conformance.wording-invalid</code>.</td>
+</tr>
+<tr>
+<td>PDT-045</td>
+<td>A release MUST have at least one fixture per declared command, view and hook, otherwise <code>ilium plugin check --release</code> warns with <code>lint.untested-contribution</code> naming each uncovered contribution.</td>
+<td><a href="/pages/guide-plugin-test-strategy/">guide-plugin-test-strategy</a></td>
+<td>Declare two commands and write a fixture for one: <code>ilium plugin check --release</code> prints one <code>lint.untested-contribution</code> warning naming the other command.</td>
+</tr>
+<tr>
+<td>PDT-046</td>
+<td>Every requested grant MUST have one fixture that runs with the grant held and one that expects <code>capability.denied</code> with the grant absent.</td>
+<td><a href="/pages/guide-plugin-test-strategy/">guide-plugin-test-strategy</a></td>
+<td>Request <code>fs.read</code> with only a granted fixture: <code>ilium plugin check --release</code> prints <code>lint.grant-denial-untested</code> naming <code>fs.read</code>.</td>
+</tr>
+<tr>
+<td>PDT-047</td>
+<td>A quarantined case ([DEV-960]) MUST carry an <code>expires</code> date at most 14 days ahead, and a run after that date MUST fail with <code>test.quarantine-expired</code>.</td>
+<td><a href="/pages/guide-plugin-test-strategy/">guide-plugin-test-strategy</a></td>
+<td>Quarantine a case with <code>expires</code> 31 days ahead: <code>ilium plugin test</code> exits 2 with <code>test.quarantine-too-long</code>; run with a quarantine whose date has passed: the run exits non-zero with <code>test.quarantine-expired</code>.</td>
+</tr>
+<tr>
+<td>PDT-048</td>
+<td>The release gate MUST run <code>ilium plugin test --conformance</code> against the packed component in dist/, not a debug build.</td>
+<td><a href="/pages/guide-plugin-test-strategy/">guide-plugin-test-strategy</a></td>
+<td>Run <code>ilium plugin check --release</code> after building only a debug component: it fails with <code>release.conformance-not-packed</code>.</td>
+</tr>
+<tr>
+<td>PDT-049</td>
+<td>A case flagged flaky ([DEV-963]) in three consecutive runs MUST fail the release gate with <code>test.flaky-persistent</code>.</td>
+<td><a href="/pages/guide-plugin-test-strategy/">guide-plugin-test-strategy</a></td>
+<td>Record three consecutive reports in which case <code>sync-retry</code> is <code>flaky: true</code> and run <code>ilium plugin check --release</code>: it exits non-zero with <code>test.flaky-persistent</code> naming <code>sync-retry</code>.</td>
+</tr>
+</tbody>
+</table>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-conformance-claims/"><small>Previous</small>Conformance claims</a><a class="next" href="/pages/accessibility-and-theming/"><small>Next</small>Theming and readable output</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

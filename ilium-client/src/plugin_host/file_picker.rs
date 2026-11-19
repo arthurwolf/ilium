@@ -105,6 +105,10 @@ impl FilePicker for ClientFilePicker {
             Asked::Answered(path) => Ok(path),
             // Dropped: the picker closed without an answer (another flow closed every modal).
             Asked::Dropped | Asked::Stopped => Ok(None),
+            Asked::Busy => Err(PluginError::new(
+                ErrorCode::Busy,
+                "the client request queue is full",
+            )),
             Asked::TimedOut => Err(PluginError::new(
                 ErrorCode::TimedOut,
                 "the file picker did not answer",

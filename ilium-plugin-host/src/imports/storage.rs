@@ -61,6 +61,7 @@ pub enum StorageOperation {
     Remove,
     Keys,
     WriteBatch,
+    CompareExchange,
     Lease,
 }
 
@@ -142,8 +143,8 @@ impl StorageImport {
         &self.context
     }
 
-    /// Checked forms preserve errors hidden by the generated Option/void/list
-    /// ABI. Host callers may use these directly and own their error reporting.
+    /// Checked forms expose failures to host callers directly; the generated
+    /// read and listing interfaces also return those failures to plugins.
     pub fn try_get(&self, bucket: Bucket, key: &str) -> Result<Option<Vec<u8>>, PluginError> {
         let _permit = authorize(&self.authorization, &self.context)?;
         self.engine.get(bucket.as_str(), key)
@@ -180,6 +181,10 @@ impl StorageImport {
     pub fn try_lease(&self, key: &str, ttl_millis: u32) -> Result<bool, PluginError> {
         self.lease_at(key, ttl_millis, std::time::SystemTime::now())
     }
+    pub fn try_compare_exchange(&mut self, bucket: Bucket, key: &str, expected: Option<Vec<u8>>, value: Option<Vec<u8>>) -> Result<bool, PluginError> {
+        let _permit = authorize(&self.authorization, &self.context)?;
+        self.engine.compare_exchange(bucket.as_str(), key, expected, value)
+    }
     /// Explicit host clock sample for deterministic replay/testing. The same
     /// instance authorization remains held through the durable lease mutation.
     pub fn lease_at(
@@ -205,10 +210,8 @@ impl StorageImport {
 }
 
 impl HostStorage for StorageImport {
-    fn get(&mut self, bucket: Bucket, key: String) -> Option<Vec<u8>> {
+    fn get(&mut self, bucket: Bucket, key: String) -> Result<Option<Vec<u8>>, PluginError> {
         self.report(StorageOperation::Get, self.try_get(bucket, &key))
-            .ok()
-            .flatten()
     }
     fn put(&mut self, bucket: Bucket, key: String, value: Vec<u8>) -> Result<(), PluginError> {
         let result = self.try_put(bucket, &key, value);
@@ -218,13 +221,16 @@ impl HostStorage for StorageImport {
         let result = self.try_remove(bucket, &key);
         self.report(StorageOperation::Remove, result)
     }
-    fn keys(&mut self, bucket: Bucket, prefix: String) -> Vec<String> {
+    fn keys(&mut self, bucket: Bucket, prefix: String) -> Result<Vec<String>, PluginError> {
         self.report(StorageOperation::Keys, self.try_keys(bucket, &prefix))
-            .unwrap_or_default()
     }
     fn write_batch(&mut self, bucket: Bucket, entries: Vec<Entry>) -> Result<(), PluginError> {
         let result = self.try_write_batch(bucket, entries);
         self.report(StorageOperation::WriteBatch, result)
+    }
+    fn compare_exchange(&mut self, bucket: Bucket, key: String, expected: Option<Vec<u8>>, value: Option<Vec<u8>>) -> Result<bool, PluginError> {
+        let result = self.try_compare_exchange(bucket, &key, expected, value);
+        self.report(StorageOperation::CompareExchange, result)
     }
     fn lease(&mut self, key: String, ttl_millis: u32) -> bool {
         self.report(StorageOperation::Lease, self.try_lease(&key, ttl_millis))
@@ -332,7 +338,7 @@ mod tests {
     fn get_of_missing_key_returns_none_without_error() {
         let (_root, mut storage) = open_storage();
         let key = unique_key("get_missing", "absent");
-        assert_eq!(storage.get(Bucket::Global, key), None);
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), None);
     }
 
     /// REQ: CAP-011
@@ -352,7 +358,7 @@ mod tests {
             storage.put(Bucket::Global, key.clone(), vec![1, 2, 3]),
             Ok(())
         );
-        assert_eq!(storage.get(Bucket::Global, key), Some(vec![1, 2, 3]));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(vec![1, 2, 3]));
     }
 
     /// REQ: LIF-118
@@ -365,7 +371,7 @@ mod tests {
             Ok(())
         );
         assert_eq!(
-            storage.get(Bucket::Session, key),
+            storage.get(Bucket::Session, key).expect("storage read succeeds"),
             Some(7u32.to_le_bytes().to_vec())
         );
     }
@@ -380,7 +386,7 @@ mod tests {
             Ok(())
         );
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![4]), Ok(()));
-        assert_eq!(storage.get(Bucket::Global, key), Some(vec![4]));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(vec![4]));
     }
 
     /// REQ: LIF-118
@@ -389,7 +395,7 @@ mod tests {
         let (_root, mut storage) = open_storage();
         let key = unique_key("empty_value", "flag");
         assert_eq!(storage.put(Bucket::Global, key.clone(), Vec::new()), Ok(()));
-        assert_eq!(storage.get(Bucket::Global, key), Some(Vec::new()));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(Vec::new()));
     }
 
     /// REQ: CAP-011
@@ -399,8 +405,8 @@ mod tests {
         let key = unique_key("buckets", "shared-name");
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![1]), Ok(()));
         assert_eq!(storage.put(Bucket::Project, key.clone(), vec![2]), Ok(()));
-        assert_eq!(storage.get(Bucket::Global, key.clone()), Some(vec![1]));
-        assert_eq!(storage.get(Bucket::Project, key), Some(vec![2]));
+        assert_eq!(storage.get(Bucket::Global, key.clone()).expect("storage read succeeds"), Some(vec![1]));
+        assert_eq!(storage.get(Bucket::Project, key).expect("storage read succeeds"), Some(vec![2]));
     }
 
     /// REQ: CAP-011
@@ -410,7 +416,7 @@ mod tests {
         let key = unique_key("remove", "gone");
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![5]), Ok(()));
         assert_eq!(storage.remove(Bucket::Global, key.clone()), Ok(()));
-        assert_eq!(storage.get(Bucket::Global, key), None);
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), None);
     }
 
     /// REQ: LIF-117
@@ -427,7 +433,7 @@ mod tests {
         let (_root, mut storage) = open_storage();
         let key = "k".repeat(MAX_KEY_BYTES);
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![1]), Ok(()));
-        assert_eq!(storage.get(Bucket::Global, key), Some(vec![1]));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(vec![1]));
     }
 
     /// REQ: LIF-117
@@ -442,8 +448,8 @@ mod tests {
         );
         let result = storage.put(Bucket::Global, long_key.clone(), vec![1]);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
-        assert_eq!(storage.get(Bucket::Global, long_key), None);
-        assert_eq!(storage.get(Bucket::Global, short_key), Some(vec![8]));
+        assert_eq!(storage.get(Bucket::Global, long_key).unwrap_err().code, ErrorCode::InvalidArgument);
+        assert_eq!(storage.get(Bucket::Global, short_key).expect("storage read succeeds"), Some(vec![8]));
     }
 
     /// REQ: LIF-117
@@ -456,7 +462,7 @@ mod tests {
             storage.put(Bucket::Global, key.clone(), value.clone()),
             Ok(())
         );
-        assert_eq!(storage.get(Bucket::Global, key), Some(value));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(value));
     }
 
     /// REQ: LIF-117
@@ -467,7 +473,7 @@ mod tests {
         assert_eq!(storage.put(Bucket::Global, key.clone(), vec![3]), Ok(()));
         let result = storage.put(Bucket::Global, key.clone(), vec![0; MAX_VALUE_BYTES + 1]);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
-        assert_eq!(storage.get(Bucket::Global, key), Some(vec![3]));
+        assert_eq!(storage.get(Bucket::Global, key).expect("storage read succeeds"), Some(vec![3]));
     }
 
     ///
@@ -497,13 +503,13 @@ mod tests {
             Ok(())
         );
         assert_eq!(
-            storage.get(Bucket::Session, quota_keys[0].clone()),
+            storage.get(Bucket::Session, quota_keys[0].clone()).expect("storage read succeeds"),
             Some(replacement)
         );
 
         let refused = storage.put(Bucket::Session, quota_keys[16].clone(), vec![1]);
         assert_eq!(error_code_of(refused), ErrorCode::QuotaExceeded);
-        assert_eq!(storage.get(Bucket::Session, quota_keys[16].clone()), None);
+        assert_eq!(storage.get(Bucket::Session, quota_keys[16].clone()).expect("storage read succeeds"), None);
     }
 
     /// REQ: CAP-011
@@ -526,7 +532,7 @@ mod tests {
             format!("{prefix}a"),
             format!("{prefix}b"),
         ];
-        assert_eq!(storage.keys(Bucket::Global, prefix), expected);
+        assert_eq!(storage.keys(Bucket::Global, prefix).expect("storage read succeeds"), expected);
     }
 
     /// REQ: CAP-011
@@ -534,7 +540,7 @@ mod tests {
     fn keys_with_no_matching_prefix_returns_an_empty_list() {
         let (_root, mut storage) = open_storage();
         let prefix = format!("test/{}/nothing-here/", run_nonce());
-        assert_eq!(storage.keys(Bucket::Global, prefix), Vec::<String>::new());
+        assert_eq!(storage.keys(Bucket::Global, prefix).expect("storage read succeeds"), Vec::<String>::new());
     }
 
     /// REQ: CAP-011
@@ -545,7 +551,7 @@ mod tests {
         let second = unique_key("keys_all", "two");
         assert_eq!(storage.put(Bucket::Global, first.clone(), vec![1]), Ok(()));
         assert_eq!(storage.put(Bucket::Global, second.clone(), vec![2]), Ok(()));
-        let listed = storage.keys(Bucket::Global, String::new());
+        let listed = storage.keys(Bucket::Global, String::new()).expect("storage read succeeds");
         let mut sorted = listed.clone();
         sorted.sort();
         assert_eq!(listed, sorted);
@@ -570,9 +576,9 @@ mod tests {
             entry(&added_key, Some(vec![3])),
         ];
         assert_eq!(storage.write_batch(Bucket::Project, entries), Ok(()));
-        assert_eq!(storage.get(Bucket::Project, project_key), Some(vec![1]));
-        assert_eq!(storage.get(Bucket::Project, removed_key), None);
-        assert_eq!(storage.get(Bucket::Project, added_key), Some(vec![3]));
+        assert_eq!(storage.get(Bucket::Project, project_key).expect("storage read succeeds"), Some(vec![1]));
+        assert_eq!(storage.get(Bucket::Project, removed_key).expect("storage read succeeds"), None);
+        assert_eq!(storage.get(Bucket::Project, added_key).expect("storage read succeeds"), Some(vec![3]));
     }
 
     /// REQ: LIF-117
@@ -594,7 +600,7 @@ mod tests {
         let entries = vec![entry(&first_key, Some(vec![6])), entry("", Some(vec![7]))];
         let result = storage.write_batch(Bucket::Project, entries);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
-        assert_eq!(storage.get(Bucket::Project, first_key), Some(vec![5]));
+        assert_eq!(storage.get(Bucket::Project, first_key).expect("storage read succeeds"), Some(vec![5]));
     }
 
     /// REQ: LIF-117
@@ -607,7 +613,7 @@ mod tests {
             .collect();
         let last_key = format!("test/{nonce}/batch256/{:03}", MAX_BATCH_ENTRIES - 1);
         assert_eq!(storage.write_batch(Bucket::Project, entries), Ok(()));
-        assert_eq!(storage.get(Bucket::Project, last_key), Some(vec![1]));
+        assert_eq!(storage.get(Bucket::Project, last_key).expect("storage read succeeds"), Some(vec![1]));
     }
 
     /// REQ: LIF-117
@@ -621,7 +627,7 @@ mod tests {
         let first_key = format!("test/{nonce}/batch257/000");
         let result = storage.write_batch(Bucket::Project, entries);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
-        assert_eq!(storage.get(Bucket::Project, first_key), None);
+        assert_eq!(storage.get(Bucket::Project, first_key).expect("storage read succeeds"), None);
     }
 
     /// REQ: LIF-117
@@ -638,7 +644,7 @@ mod tests {
         assert_eq!(entries.len() * (keys[0].len() + value_len), MAX_BATCH_BYTES);
         assert_eq!(storage.write_batch(Bucket::Project, entries), Ok(()));
         assert_eq!(
-            storage.get(Bucket::Project, keys[3].clone()),
+            storage.get(Bucket::Project, keys[3].clone()).expect("storage read succeeds"),
             Some(vec![2; value_len])
         );
     }
@@ -654,7 +660,7 @@ mod tests {
             .collect();
         let result = storage.write_batch(Bucket::Project, entries);
         assert_eq!(error_code_of(result), ErrorCode::InvalidArgument);
-        assert_eq!(storage.get(Bucket::Project, keys[0].clone()), None);
+        assert_eq!(storage.get(Bucket::Project, keys[0].clone()).expect("storage read succeeds"), None);
     }
 
     /// REQ: LIF-120
@@ -665,9 +671,9 @@ mod tests {
         let mut second = open_storage_at(root.path());
         let key = unique_key("two_writers", "shared-key");
         assert_eq!(first.put(Bucket::Global, key.clone(), vec![1]), Ok(()));
-        assert_eq!(second.get(Bucket::Global, key.clone()), Some(vec![1]));
+        assert_eq!(second.get(Bucket::Global, key.clone()).expect("storage read succeeds"), Some(vec![1]));
         assert_eq!(second.put(Bucket::Global, key.clone(), vec![2]), Ok(()));
-        assert_eq!(first.get(Bucket::Global, key), Some(vec![2]));
+        assert_eq!(first.get(Bucket::Global, key).expect("storage read succeeds"), Some(vec![2]));
     }
 
     /// REQ: AUT-010

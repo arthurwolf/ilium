@@ -18,6 +18,7 @@ use ilium_plugin_api::grants::Grant;
 
 use crate::runtime::pending_events::{EventSink, PendingEvents, WorkerGuard};
 use crate::runtime::InstanceContext;
+use super::job_requests::JobRequests;
 
 /// The request and service call id allocator of one runtime. Every import of every instance draws
 /// from it, so two requests of one plugin never share an id and a `request-completed` event names
@@ -126,6 +127,7 @@ pub struct ImportEnv {
     ids: RequestIds,
     session: SessionCounters,
     clock_origin: Instant,
+    job_requests: Option<JobRequests>,
 }
 
 impl Default for ImportEnv {
@@ -145,6 +147,7 @@ impl ImportEnv {
             ids: RequestIds::new(),
             session: SessionCounters::new(),
             clock_origin: Instant::now(),
+            job_requests: None,
         }
     }
 
@@ -158,6 +161,7 @@ impl ImportEnv {
             ids: context.ids.clone(),
             session: context.session.clone(),
             clock_origin: context.clock_origin,
+            job_requests: context.job_requests.clone(),
         }
     }
 
@@ -234,9 +238,21 @@ impl ImportEnv {
         &self.ids
     }
 
+    /// Checks the job's retained-result limit before a call starts side effects.
+    pub fn ensure_job_request_capacity(&self) -> Result<(), ilium_plugin_api::PluginError> {
+        match &self.job_requests {
+            Some(book) => book.ensure_capacity(),
+            None => Ok(()),
+        }
+    }
+
     /// The next request id.
     pub fn next_request(&self) -> RequestId {
-        self.ids.next_request()
+        let request = self.ids.next_request();
+        if let Some(book) = &self.job_requests {
+            book.register(&self.plugin, self.instance, request);
+        }
+        request
     }
 
     /// The counters of what the session runs at once.
@@ -258,11 +274,26 @@ impl ImportEnv {
 
     /// A handle for a worker thread that queues events for this instance.
     pub fn sink(&self) -> EventSink {
-        self.events.sink(&self.plugin, self.instance)
+        self.events.sink(&self.plugin, self.instance).with_job_requests(self.job_requests.clone())
     }
 
     /// Queues one event for this instance.
     pub fn emit(&self, event: Event) {
+        self.sink().send(event);
+    }
+
+    /// A fresh job execution with a private completion scope.
+    #[must_use]
+    pub fn with_job_scope(mut self) -> Self {
+        self.job_requests = Some(JobRequests::new(Arc::new(std::sync::atomic::AtomicBool::new(false))));
+        self
+    }
+
+    pub(crate) fn job_requests(&self) -> Option<&JobRequests> {
+        self.job_requests.as_ref()
+    }
+
+    pub(crate) fn emit_to_parent(&self, event: Event) {
         self.events.push(&self.plugin, self.instance, event);
     }
 

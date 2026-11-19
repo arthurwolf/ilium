@@ -796,6 +796,24 @@ mod book_tests {
         }
     }
 
+    #[test]
+    fn output_burst_is_bounded_and_recovers_when_drained() {
+        let (book, _results) = book();
+        let invocation = book.open(session("a.b", OutputForm::Text, StdinMode::None));
+        let mut import = CliImport::with_book("a.b", Arc::clone(&book));
+        let chunk = "x".repeat(64 * 1024);
+        let mut refusal = None;
+        for _ in 0..=256 {
+            if let Err(error) = import.write_text(invocation, chunk.clone()) {
+                refusal = Some(error.code);
+                break;
+            }
+        }
+        assert_eq!(refusal, Some(ErrorCode::Busy), "a burst must apply backpressure");
+        assert!(!book.take_output().is_empty());
+        assert!(import.write_text(invocation, "ready".to_owned()).is_ok());
+    }
+
     /// REQ: API-005
     #[test]
     fn output_reaches_the_book_in_order_with_the_exit_code_last() {

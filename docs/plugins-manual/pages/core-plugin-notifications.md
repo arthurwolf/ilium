@@ -59,7 +59,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "api": "ilium:plugin@0.1.0",
   "id": "ilium.core.notifications",
   "capabilities": {
-    "server": ["sound.play", "notify.desktop", "agent.read", "tree.read", "tree.attention"],
+    "server": ["sound.play", "notify.desktop", "notify.toast", "agent.read", "tree.read", "tree.attention"],
     "client": ["notify.toast"]
   }
 }
@@ -84,12 +84,14 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": ["views"]
   },
   "capabilities": {
     "server": [
       "sound.play",
       "notify.desktop",
+      "notify.toast",
       "agent.read",
       "tree.read",
       "tree.attention",

@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use ilium_plugin_sdk::host::{Bucket, HostClock, HostStorage, HostTimers};
 use ilium_plugin_sdk::types::{
     AgentActivity, ClientId, DecorationKey, DecorationVisibility, Delivery as InputDelivery,
-    EpochMs, Event, Intent, MessageEvent, MessageSpec, MessageTarget, NodeId, Outcome, PluginId,
+    EpochMs, Event, Intent, MessageEvent, MessageSpec, MessageTarget, NodeId, Outcome, PluginError, PluginId,
     PluginSide, RequestRef, SendInputSpec, SetDecorationSpec, Span, Style, Submission, TimerId,
     ToastSpec, Tone,
 };
@@ -22,7 +22,7 @@ use ilium_plugin_sdk::HostApi;
 use crate::queue::{next_send, Activity, CompletionEpoch, QueueError, QueuedPrompt, Turn};
 use crate::schedule::{deadline_from_delay, remaining_seconds, ScheduledInput};
 use crate::wire::{
-    decode_stored, encode_stored, pane_from_payload, state_payload, EnqueueRequest,
+    decode_stored_checked, encode_stored, pane_from_payload, state_payload, EnqueueRequest,
     ScheduleRequest, Stored, CANCEL_SCHEDULE_CHANNEL, CLEAR_QUEUE_CHANNEL, ENQUEUE_CHANNEL,
     SCHEDULE_CHANNEL, STATE_CHANNEL, STATE_REQUEST_CHANNEL,
 };
@@ -40,6 +40,7 @@ const QUEUE_SLOT: &str = "queued";
 const TICK_MILLIS: u32 = 1000;
 /// The first refresh after activation, in milliseconds.
 const KICK_MILLIS: u32 = 200;
+const RETRY_MILLIS: u64 = 1000;
 
 /// What a submission in flight carries until the host reports its outcome.
 #[derive(Debug, Clone)]
@@ -51,6 +52,7 @@ enum Inflight {
 #[derive(Default)]
 struct ServerState {
     stored: Stored,
+    corrupt: bool,
     epochs: BTreeMap<u64, CompletionEpoch>,
     inflight: HashMap<u64, Inflight>,
     /// Decorations currently shown, so a vanished one is cleared.
@@ -95,24 +97,36 @@ fn notice(text: &str, _client: Option<ClientId>) -> Submission {
     }))
 }
 
-fn persist(api: &mut dyn HostApi, stored: &Stored) {
-    let _ = HostStorage::put(
+fn persist(api: &mut dyn HostApi, stored: &Stored) -> Result<(), PluginError> {
+    HostStorage::put(
         api,
         Bucket::Project,
         STORAGE_KEY.to_string(),
         encode_stored(stored),
-    );
+    )
+}
+
+fn commit(api: &mut dyn HostApi, stored: Stored) -> Result<(), PluginError> {
+    persist(api, &stored)?;
+    with_state(|state| state.stored = stored);
+    Ok(())
 }
 
 /// Loads the stored state, re-arms every countdown and asks for the first refresh.
 pub fn start(api: &mut dyn HostApi) {
-    let stored = HostStorage::get(api, Bucket::Project, STORAGE_KEY.to_string())
-        .map(|bytes| decode_stored(&bytes))
-        .unwrap_or_default();
+    let (stored, corrupt) = match HostStorage::get(api, Bucket::Project, STORAGE_KEY.to_string()) {
+        Ok(Some(bytes)) => match decode_stored_checked(&bytes) {
+            Some(stored) => (stored, false),
+            None => (Stored::default(), true),
+        },
+        Ok(None) => (Stored::default(), false),
+        Err(_) => (Stored::default(), true),
+    };
+    let now = HostClock::now_unix_millis(api);
     for (pane, input) in &stored.schedules {
         let _ = HostTimers::at(
             api,
-            EpochMs(input.execute_at_unix_millis),
+            EpochMs(input.execute_at_unix_millis.max(now.saturating_add(1))),
             timer_name(*pane),
         );
     }
@@ -120,6 +134,7 @@ pub fn start(api: &mut dyn HostApi) {
     with_state(|state| {
         *state = ServerState {
             stored,
+            corrupt,
             kick,
             ..ServerState::default()
         };
@@ -220,7 +235,6 @@ fn state_message(client: Option<ClientId>) -> Submission {
 
 /// Everything that follows a change of the stored state.
 fn after_change(api: &mut dyn HostApi) -> Vec<Submission> {
-    with_state(|state| persist(api, &state.stored.clone()));
     sync_ticker(api);
     let mut out = decorations(api);
     out.push(state_message(None));
@@ -230,6 +244,9 @@ fn after_change(api: &mut dyn HostApi) -> Vec<Submission> {
 /// Answers one message of the client side.
 pub fn on_message(api: &mut dyn HostApi, message: &MessageEvent) -> Vec<Submission> {
     let client = message.from_client;
+    if with_state(|state| state.corrupt) {
+        return vec![notice("Scheduler state is unavailable or damaged; changes disabled", client)];
+    }
     match message.channel.as_str() {
         SCHEDULE_CHANNEL => {
             let Some(request) = ScheduleRequest::from_payload(&message.payload) else {
@@ -247,17 +264,23 @@ pub fn on_message(api: &mut dyn HostApi, message: &MessageEvent) -> Vec<Submissi
             let Some(pane) = pane_from_payload(&message.payload) else {
                 return Vec::new();
             };
-            with_state(|state| {
-                state.stored.queues.remove(&pane);
-                state.epochs.remove(&pane);
-            });
+            let mut stored = with_state(|state| state.stored.clone());
+            stored.queues.remove(&pane);
+            if commit(api, stored).is_err() {
+                return vec![notice("Could not save the queue change", client)];
+            }
+            with_state(|state| { state.epochs.remove(&pane); });
             after_change(api)
         }
         CANCEL_SCHEDULE_CHANNEL => {
             let Some(pane) = pane_from_payload(&message.payload) else {
                 return Vec::new();
             };
-            with_state(|state| state.stored.schedules.remove(&pane));
+            let mut stored = with_state(|state| state.stored.clone());
+            stored.schedules.remove(&pane);
+            if commit(api, stored).is_err() {
+                return vec![notice("Could not save the countdown change", client)];
+            }
             HostTimers::cancel_durable(api, timer_name(pane));
             after_change(api)
         }
@@ -291,15 +314,24 @@ fn schedule(
     if HostTimers::at(api, EpochMs(deadline), timer_name(request.pane)).is_err() {
         return vec![notice("The countdown could not be armed", client)];
     }
-    with_state(|state| {
-        state.stored.schedules.insert(
+    let previous = with_state(|state| state.stored.clone());
+    let mut stored = previous.clone();
+    stored.schedules.insert(
             request.pane,
             ScheduledInput {
                 execute_at_unix_millis: deadline,
                 ..input
             },
         );
-    });
+    if commit(api, stored).is_err() {
+        if let Some(previous) = previous.schedules.get(&request.pane) {
+            let retry = previous.execute_at_unix_millis.max(now.saturating_add(1));
+            let _ = HostTimers::at(api, EpochMs(retry), timer_name(request.pane));
+        } else {
+            HostTimers::cancel_durable(api, timer_name(request.pane));
+        }
+        return vec![notice("Could not save the countdown", client)];
+    }
     after_change(api)
 }
 
@@ -313,15 +345,13 @@ fn enqueue(
         delivery: request.delivery,
         attempted_delivery: false,
     };
-    let refused = with_state(|state| {
-        state
-            .stored
+    let mut stored = with_state(|state| state.stored.clone());
+    let refused = stored
             .queues
             .entry(request.pane)
             .or_default()
             .enqueue(prompt)
-            .err()
-    });
+            .err();
     match refused {
         Some(QueueError::EmptyPrompt) => {
             vec![notice("Write a prompt before enqueueing it", client)]
@@ -332,7 +362,13 @@ fn enqueue(
                 client,
             )]
         }
-        None => after_change(api),
+        None => {
+            if commit(api, stored).is_err() {
+                vec![notice("Could not save the prompt queue", client)]
+            } else {
+                after_change(api)
+            }
+        },
     }
 }
 
@@ -381,7 +417,16 @@ pub fn on_durable_timer(api: &mut dyn HostApi, name: &str) -> Vec<Submission> {
         return Vec::new();
     }
     // The schedule is gone and stored before the write, so a crash cannot send it twice.
-    with_state(|state| state.stored.schedules.remove(&pane));
+    let mut stored = with_state(|state| state.stored.clone());
+    stored.schedules.remove(&pane);
+    if commit(api, stored).is_err() {
+        let retry = now.saturating_add(RETRY_MILLIS);
+        let mut out = vec![notice("Could not save countdown delivery; retrying", None)];
+        if HostTimers::at(api, EpochMs(retry), timer_name(pane)).is_err() {
+            out.push(notice("Countdown retry could not be armed", None));
+        }
+        return out;
+    }
     let submission = Submission::new(Intent::SendInput(input_for(&input, pane)));
     with_state(|state| {
         state
@@ -443,23 +488,24 @@ pub fn on_activity(
                 )
             })
             .cloned()?;
-        if !state.epochs.entry(pane).or_default().claim(expected) {
-            return None;
-        }
-        let queue = state.stored.queues.get_mut(&pane)?;
+        let mut stored = state.stored.clone();
+        let queue = stored.queues.get_mut(&pane)?;
         if !queue.mark_attempted(&head) {
             return None;
         }
-        Some(QueuedPrompt {
+        Some((stored, expected, QueuedPrompt {
             attempted_delivery: true,
             ..head
-        })
+        }))
     });
-    let Some(marked) = claimed else {
+    let Some((stored, expected, marked)) = claimed else {
         return Vec::new();
     };
     // The fence: the attempt is stored before the first byte is written.
-    with_state(|state| persist(api, &state.stored.clone()));
+    if commit(api, stored).is_err() {
+        return vec![notice("Could not save queued delivery; retry next turn", None)];
+    }
+    with_state(|state| { state.epochs.entry(pane).or_default().claim(expected); });
     let submission = Submission::new(Intent::SendInput(SendInputSpec {
         pane: node,
         text: marked.text.clone(),
@@ -513,21 +559,25 @@ pub fn on_request_completed(
         }
         Inflight::Queue { pane, prompt } => {
             if delivered {
-                with_state(|state| {
-                    if let Some(queue) = state.stored.queues.get_mut(&pane) {
-                        queue.acknowledge(&prompt);
-                    }
-                    state.epochs.entry(pane).or_default().retire_submission();
-                });
+                let mut stored = with_state(|state| state.stored.clone());
+                if let Some(queue) = stored.queues.get_mut(&pane) {
+                    queue.acknowledge(&prompt);
+                }
+                with_state(|state| state.epochs.entry(pane).or_default().retire_submission());
+                if commit(api, stored).is_err() {
+                    return vec![notice("Delivered prompt could not be saved; queue held", None)];
+                }
                 return after_change(api);
             }
             let never_written = matches!(outcome, Outcome::Refused(_) | Outcome::Cancelled);
             if never_written {
-                with_state(|state| {
-                    if let Some(queue) = state.stored.queues.get_mut(&pane) {
-                        queue.unmark_attempted(&prompt);
-                    }
-                });
+                let mut stored = with_state(|state| state.stored.clone());
+                if let Some(queue) = stored.queues.get_mut(&pane) {
+                    queue.unmark_attempted(&prompt);
+                }
+                if commit(api, stored).is_err() {
+                    return vec![notice("Could not save queue retry; queue held", None)];
+                }
             }
             let mut out = after_change(api);
             out.push(notice(
@@ -548,15 +598,17 @@ pub fn on_request_completed(
 
 /// A pane left the tree: its countdown and queue go with it.
 pub fn on_node_removed(api: &mut dyn HostApi, node: NodeId) -> Vec<Submission> {
-    let had = with_state(|state| {
-        state.epochs.remove(&node.0);
-        let schedule = state.stored.schedules.remove(&node.0).is_some();
-        let queue = state.stored.queues.remove(&node.0).is_some();
-        schedule || queue
-    });
+    let mut stored = with_state(|state| state.stored.clone());
+    let had_schedule = stored.schedules.remove(&node.0).is_some();
+    let had_queue = stored.queues.remove(&node.0).is_some();
+    let had = had_schedule || had_queue;
     if !had {
         return Vec::new();
     }
+    if commit(api, stored).is_err() {
+        return vec![notice("Could not save removed pane scheduler state", None)];
+    }
+    with_state(|state| { state.epochs.remove(&node.0); });
     HostTimers::cancel_durable(api, timer_name(node.0));
     after_change(api)
 }

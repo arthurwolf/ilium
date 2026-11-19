@@ -1,7 +1,7 @@
 package ilium:host@0.1.0;
 
 interface plugins {
-  use ilium:types/ids@0.1.0.{plugin-id};
+  use ilium:types/ids@0.1.0.{plugin-id, request-id};
   use ilium:types/errors@0.1.0.{plugin-error};
   enum package-state {
     not-installed, installed-enabled, installed-disabled-by-user, disabled-untrusted,
@@ -36,6 +36,7 @@ interface plugins {
     held-until: option<string>,
   }
   %list: func() -> list<plugin-info>;
-  /// scope is "global", "project" or "session".
-  set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -> result<_, plugin-error>;
+  /// scope is "global", "project" or "session". The request-completed event reports
+  /// whether the change was applied; admission alone does not mean success.
+  set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -> result<request-id, plugin-error>;
 }

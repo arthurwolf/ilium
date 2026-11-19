@@ -131,6 +131,8 @@ pub struct InstanceContext {
     pub session: SessionCounters,
     /// The instant the monotonic clock of this runtime counts from.
     pub clock_origin: Instant,
+    /// Private completion scope when equipping a job execution.
+    pub job_requests: Option<crate::imports::job_requests::JobRequests>,
 }
 
 /// Adds the imports the embedding process backs itself (storage, basic panes, timers, ...)
@@ -389,6 +391,18 @@ impl HostRuntime {
                 "the id differs from the catalogue id".to_owned(),
             ));
         }
+        if plugin.component.is_none()
+            && manifest
+                .get(self.side.as_str())
+                .and_then(|side| side.get("entry"))
+                .and_then(Value::as_str)
+                .is_some()
+        {
+            return Err(manifest_error(format!(
+                "the declared {} component is missing",
+                self.side.as_str()
+            )));
+        }
         let tier = match manifest.get("limits_tier").and_then(Value::as_str) {
             Some("first-party") => Tier::T1,
             _ => Tier::T2,
@@ -512,6 +526,7 @@ impl HostRuntime {
             ids: self.ids.clone(),
             session: self.session.clone(),
             clock_origin: self.clock_origin,
+            job_requests: None,
         }
     }
 
@@ -1531,11 +1546,19 @@ impl HostRuntime {
             }
             return Ok(());
         }
-        self.disabled.remove(plugin);
         let record = self
             .plugins
             .get_mut(plugin)
             .ok_or_else(|| RuntimeError::UnknownPlugin(plugin.to_owned()))?;
+        if matches!(record.state, PluginState::Failed(_) | PluginState::Stopped) {
+            if record.compiled.is_none() {
+                return Err(RuntimeError::Host {
+                    plugin: plugin.to_owned(),
+                    message: "the plugin component is unavailable for recovery".to_owned(),
+                });
+            }
+            return self.activate(plugin);
+        }
         if record.state != PluginState::Disabled {
             return Ok(());
         }
@@ -1545,6 +1568,7 @@ impl HostRuntime {
                 plugin: plugin.to_owned(),
                 message: error.to_string(),
             })?;
+        self.disabled.remove(plugin);
         let starts_now = record.triggers.iter().any(|trigger| trigger == "startup");
         record.state = if record.compiled.is_some() {
             PluginState::Loaded
@@ -1552,7 +1576,12 @@ impl HostRuntime {
             PluginState::ManifestOnly
         };
         if starts_now {
-            self.activate(plugin)?;
+            if let Err(error) = self.activate(plugin) {
+                // An unsuccessful activation must leave the plugin disabled, without its
+                // contributions or background work, so a later retry starts cleanly.
+                let _ = self.set_enabled(plugin, false);
+                return Err(error);
+            }
         }
         Ok(())
     }

@@ -80,12 +80,43 @@ fn generated_storage_trait_uses_real_persistent_values_and_atomic_batches() {
         .unwrap();
     drop(storage);
     let (mut reopened, _, _) = adapter(root.path(), ctx);
-    assert_eq!(reopened.get(Bucket::Global, "a".into()), None);
-    assert_eq!(reopened.get(Bucket::Global, "b".into()), Some(vec![255, 0]));
-    assert_eq!(reopened.keys(Bucket::Global, "".into()), vec!["b"]);
+    assert_eq!(reopened.get(Bucket::Global, "a".into()).expect("storage read succeeds"), None);
+    assert_eq!(reopened.get(Bucket::Global, "b".into()).expect("storage read succeeds"), Some(vec![255, 0]));
+    assert_eq!(reopened.keys(Bucket::Global, "".into()).expect("storage read succeeds"), vec!["b"]);
     let _ = reopened.remove(Bucket::Global, "b".into());
-    assert_eq!(reopened.get(Bucket::Global, "b".into()), None);
+    assert_eq!(reopened.get(Bucket::Global, "b".into()).expect("storage read succeeds"), None);
     assert!(diagnostics.lock().unwrap().is_empty());
+}
+
+#[test]
+fn conditional_storage_update_has_one_winner_across_instances() {
+    use std::sync::Barrier;
+    let root = tempfile::tempdir().unwrap();
+    let context = context("example.notes", Side::Server, "/project", "default", 1024);
+    let (first, _, _) = adapter(root.path(), context.clone());
+    let (second, _, _) = adapter(root.path(), context);
+    let barrier = Arc::new(Barrier::new(2));
+    let threads: Vec<_> = [first, second].into_iter().enumerate().map(|(index, mut storage)| {
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            storage.compare_exchange(Bucket::Shared, "reservation".into(), None, Some(vec![index as u8])).unwrap()
+        })
+    }).collect();
+    let winners = threads.into_iter().map(|thread| thread.join().unwrap()).filter(|won| *won).count();
+    assert_eq!(winners, 1);
+}
+
+#[test]
+fn conditional_storage_mismatch_and_quota_failure_preserve_the_value() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut storage, _, _) = adapter(root.path(), context("example.notes", Side::Server, "/project", "default", 16));
+    storage.put(Bucket::Global, "key".into(), b"old".to_vec()).unwrap();
+    assert!(!storage.compare_exchange(Bucket::Global, "key".into(), Some(b"wrong".to_vec()), Some(b"new".to_vec())).unwrap());
+    assert_eq!(storage.compare_exchange(Bucket::Global, "key".into(), Some(b"old".to_vec()), Some(vec![0; 16])).unwrap_err().code, ErrorCode::QuotaExceeded);
+    assert_eq!(storage.get(Bucket::Global, "key".into()).unwrap(), Some(b"old".to_vec()));
+    assert!(storage.compare_exchange(Bucket::Global, "key".into(), Some(b"old".to_vec()), None).unwrap());
+    assert_eq!(storage.get(Bucket::Global, "key".into()).unwrap(), None);
 }
 
 #[test]
@@ -107,20 +138,20 @@ fn server_client_and_session_contexts_share_only_the_documented_buckets() {
         root.path(),
         context("example.notes", Side::Client, "/a", "two", 1024),
     );
-    assert_eq!(client.get(Bucket::Global, "k".into()), Some(vec![1]));
-    assert_eq!(client.get(Bucket::Project, "k".into()), Some(vec![1]));
-    assert_eq!(client.get(Bucket::Session, "k".into()), None);
-    assert_eq!(client.get(Bucket::Shared, "k".into()), Some(vec![1]));
+    assert_eq!(client.get(Bucket::Global, "k".into()).expect("storage read succeeds"), Some(vec![1]));
+    assert_eq!(client.get(Bucket::Project, "k".into()).expect("storage read succeeds"), Some(vec![1]));
+    assert_eq!(client.get(Bucket::Session, "k".into()).expect("storage read succeeds"), None);
+    assert_eq!(client.get(Bucket::Shared, "k".into()).expect("storage read succeeds"), Some(vec![1]));
     let (mut other, _, _) = adapter(
         root.path(),
         context("example.other", Side::Server, "/a", "one", 1024),
     );
-    assert_eq!(other.get(Bucket::Shared, "k".into()), None);
+    assert_eq!(other.get(Bucket::Shared, "k".into()).expect("storage read succeeds"), None);
     let (mut project, _, _) = adapter(
         root.path(),
         context("example.notes", Side::Server, "/b", "one", 1024),
     );
-    assert_eq!(project.get(Bucket::Project, "k".into()), None);
+    assert_eq!(project.get(Bucket::Project, "k".into()).expect("storage read succeeds"), None);
 }
 
 #[test]
@@ -154,8 +185,8 @@ fn revoked_instance_returns_or_reports_every_refusal_and_preserves_data() {
             .code,
         ErrorCode::Revoked
     );
-    assert_eq!(storage.get(Bucket::Global, "k".into()), None);
-    assert!(storage.keys(Bucket::Global, "".into()).is_empty());
+    assert_eq!(storage.get(Bucket::Global, "k".into()).unwrap_err().code, ErrorCode::Revoked);
+    assert_eq!(storage.keys(Bucket::Global, "".into()).unwrap_err().code, ErrorCode::Revoked);
     let _ = storage.remove(Bucket::Global, "k".into());
     assert!(!storage.lease("index".into(), 1000));
     assert_eq!(diagnostics.lock().unwrap().len(), 6);
@@ -206,7 +237,7 @@ fn missing_scope_and_invalid_keys_are_reported_without_fabricating_values() {
         storage.try_get(Bucket::Project, "k").unwrap_err().code,
         ErrorCode::InvalidArgument
     );
-    assert_eq!(storage.get(Bucket::Project, "k".into()), None);
+    assert_eq!(storage.get(Bucket::Project, "k".into()).unwrap_err().code, ErrorCode::InvalidArgument);
     let _ = storage.remove(Bucket::Global, "".into());
     assert_eq!(diagnostics.lock().unwrap().len(), 2);
     assert_eq!(
@@ -249,7 +280,7 @@ fn invalid_and_over_quota_batches_cannot_mutate_existing_values() {
             .code,
         ErrorCode::QuotaExceeded
     );
-    assert_eq!(storage.get(Bucket::Global, "a".into()), Some(vec![1]));
+    assert_eq!(storage.get(Bucket::Global, "a".into()).expect("storage read succeeds"), Some(vec![1]));
     assert_eq!(diagnostics.lock().unwrap().len(), 2);
 }
 

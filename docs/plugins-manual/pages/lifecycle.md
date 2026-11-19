@@ -427,7 +427,7 @@ A plugin may contribute to a point whose owner is not installed or not enabled. 
 
 ## Disable and enable
 
-`plugins.set-enabled(id, false)` and the Settings switch take effect at once. The call returns `ok` when the change is recorded. Then the plugin receives `deactivate(disabled)` within its deadline, its contributions are withdrawn, its locks are released and its requests are cancelled. Enabling records the change and activates the plugin by its normal rules: a `startup` plugin at once, a lazy plugin at its next trigger.
+`plugins.set-enabled(id, false)` returns a request ID after admission. The matching `request-completed` event confirms whether the change was recorded; a timeout can leave its outcome uncertain. The plugin receives `deactivate(disabled)` within its deadline, its contributions are withdrawn, its locks are released and its requests are cancelled. Enabling follows the plugin's normal rules: a `startup` plugin starts at once, and a lazy plugin at its next trigger.
 
 Disabling or uninstalling removes all decorations of the plugin. A disable keeps the plugin's `data` directory and its storage. An uninstall keeps or deletes them by the rules in [Install, update and uninstall](/pages/reference-install-update-uninstall/). A session bucket is deleted with its session.
 

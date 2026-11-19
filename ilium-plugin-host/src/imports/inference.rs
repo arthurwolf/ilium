@@ -151,6 +151,7 @@ impl InferenceImport {
 
     /// Records a new pending entry, or `busy` at the 64-request limit.
     fn hold_pending(&self, entry: Held) -> Result<RequestId, PluginError> {
+        self.env.ensure_job_request_capacity()?;
         let mut state = lock(&self.state);
         if state.held.len() >= PENDING_REQUEST_LIMIT {
             return Err(error(

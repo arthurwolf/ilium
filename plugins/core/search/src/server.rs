@@ -51,7 +51,7 @@ pub const SCAN_JOB: &str = "scan-files";
 pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// One `fs.read` call reads at most 1 MiB.
 const READ_CHUNK: u32 = 1024 * 1024;
-/// The job answers with at most this much text; paths beyond it come back as `unread`.
+/// Maximum encoded job response size; paths beyond it come back as `unread`.
 const JOB_OUTPUT_BUDGET: usize = 12 * 1024 * 1024;
 /// The server reads at most this much text itself when the job could not.
 const INLINE_BUDGET: usize = 8 * 1024 * 1024;
@@ -121,7 +121,7 @@ enum FilesFlow {
     #[default]
     Idle,
     Scanning,
-    Running(Vec<String>),
+    Running { paths: Vec<String>, snapshot: FileSnapshot },
 }
 
 /// One batch chain that embeds the changed panes.
@@ -379,20 +379,29 @@ pub fn run_scan_job(input: &[u8]) -> Vec<u8> {
     let listing = String::from_utf8_lossy(input);
     let mut files: Vec<Value> = Vec::new();
     let mut unread: Vec<String> = Vec::new();
-    let mut produced = 0usize;
+    // Count the exact encoded JSON, including escaping and separators, before accepting a file.
+    let mut produced = br#"{"files":[],"unread":[]}"#.len();
     for path in listing.split('\n').filter(|path| !path.is_empty()) {
-        if produced >= JOB_OUTPUT_BUDGET {
-            unread.push(path.to_string());
-            continue;
-        }
         match read_file(path) {
             Some(text) => {
-                produced += text.len();
-                files.push(json!({ "path": path, "text": text }));
+                let file = json!({ "path": path, "text": text });
+                let size = file.to_string().len() + usize::from(!files.is_empty());
+                if produced.saturating_add(size) <= JOB_OUTPUT_BUDGET {
+                    produced += size;
+                    files.push(file);
+                    continue;
+                }
             }
-            None if too_large(path) => {}
-            None => unread.push(path.to_string()),
+            None if too_large(path) => continue,
+            None => {}
         }
+        let size = json!(path).to_string().len() + usize::from(!unread.is_empty());
+        if produced.saturating_add(size) > JOB_OUTPUT_BUDGET {
+            // The caller still has the complete input list, so it can safely fall back to it.
+            return br#"{"fallback":true}"#.to_vec();
+        }
+        produced += size;
+        unread.push(path.to_string());
     }
     json!({ "files": files, "unread": unread })
         .to_string()
@@ -454,11 +463,11 @@ struct FileSnapshot {
     files: Vec<(String, String)>,
 }
 
-fn read_unread(paths: &[String], snapshot: &mut FileSnapshot) {
+fn read_unread(paths: &[String], snapshot: &mut FileSnapshot) -> Vec<String> {
     let mut budget = INLINE_BUDGET;
-    for path in paths {
+    for (index, path) in paths.iter().enumerate() {
         if budget == 0 {
-            break;
+            return paths[index..].to_vec();
         }
         let Some(text) = read_file(path) else {
             continue;
@@ -466,17 +475,22 @@ fn read_unread(paths: &[String], snapshot: &mut FileSnapshot) {
         budget = budget.saturating_sub(text.len());
         snapshot.files.push((path.clone(), text));
     }
+    Vec::new()
 }
 
-fn snapshot_from_output(output: Option<Vec<u8>>, paths: &[String]) -> FileSnapshot {
+fn snapshot_from_output(output: Option<Vec<u8>>, paths: &[String]) -> (FileSnapshot, Vec<String>) {
     let mut snapshot = FileSnapshot::default();
     let parsed = output
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .filter(Value::is_object);
     let Some(parsed) = parsed else {
-        read_unread(paths, &mut snapshot);
-        return snapshot;
+        let remaining = read_unread(paths, &mut snapshot);
+        return (snapshot, remaining);
     };
+    if parsed["fallback"].as_bool() == Some(true) {
+        let remaining = read_unread(paths, &mut snapshot);
+        return (snapshot, remaining);
+    }
     for file in parsed["files"].as_array().into_iter().flatten() {
         if let (Some(path), Some(text)) = (file["path"].as_str(), file["text"].as_str()) {
             snapshot.files.push((path.to_string(), text.to_string()));
@@ -488,8 +502,8 @@ fn snapshot_from_output(output: Option<Vec<u8>>, paths: &[String]) -> FileSnapsh
         .flatten()
         .filter_map(|path| path.as_str().map(str::to_string))
         .collect();
-    read_unread(&unread, &mut snapshot);
-    snapshot
+    let remaining = read_unread(&unread, &mut snapshot);
+    (snapshot, remaining)
 }
 
 // ---- meaning -----------------------------------------------------------------------------
@@ -646,8 +660,12 @@ impl ServerState {
         } else {
             Vec::new()
         };
+        self.continue_files(paths, FileSnapshot::default(), out);
+    }
+
+    fn continue_files(&mut self, paths: Vec<String>, mut snapshot: FileSnapshot, out: &mut Vec<Submission>) {
         if paths.is_empty() {
-            self.finish_files(FileSnapshot::default(), out);
+            self.finish_files(snapshot, out);
             return;
         }
         let started = {
@@ -661,11 +679,14 @@ impl ServerState {
         match started {
             Ok(job) => {
                 self.requests.insert(job.0, Purpose::Job);
-                self.files = FilesFlow::Running(paths);
+                self.files = FilesFlow::Running { paths, snapshot };
             }
             Err(_) => {
-                let mut snapshot = FileSnapshot::default();
-                read_unread(&paths, &mut snapshot);
+                // If the job service is unavailable, keep processing bounded batches locally.
+                let mut remaining = paths;
+                while !remaining.is_empty() {
+                    remaining = read_unread(&remaining, &mut snapshot);
+                }
                 self.finish_files(snapshot, out);
             }
         }
@@ -677,20 +698,28 @@ impl ServerState {
         result: &RequestResult,
         out: &mut Vec<Submission>,
     ) {
-        let paths = match std::mem::take(&mut self.files) {
-            FilesFlow::Running(paths) => paths,
-            _ => Vec::new(),
+        let (paths, mut accumulated) = match std::mem::take(&mut self.files) {
+            FilesFlow::Running { paths, snapshot } => (paths, snapshot),
+            _ => return,
         };
-        let snapshot = if succeeded(&result.outcome) {
-            let output = {
-                let mut api = host();
-                HostJobs::take_output(&mut *api, RequestId(request))
-            };
-            snapshot_from_output(output, &paths)
+        let cancelled = match &result.outcome {
+            Outcome::Cancelled => true,
+            Outcome::Failed(error) | Outcome::Refused(error) => error.code == ErrorCode::Cancelled,
+            _ => false,
+        };
+        if cancelled {
+            self.finish_files(FileSnapshot::default(), out);
+            return;
+        }
+        let output = if succeeded(&result.outcome) {
+            let mut api = host();
+            HostJobs::take_output(&mut *api, RequestId(request))
         } else {
-            FileSnapshot::default()
+            None
         };
-        self.finish_files(snapshot, out);
+        let (batch, remaining) = snapshot_from_output(output, &paths);
+        accumulated.files.extend(batch.files);
+        self.continue_files(remaining, accumulated, out);
     }
 
     /// Gives every query that waits for files its file hits.

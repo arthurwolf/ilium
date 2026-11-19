@@ -305,6 +305,7 @@ where
 {
     static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let connection_id = NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let direct_tx = direct_tx.with_client_id(connection_id);
     let mut frame_reader = FrameReader::new(read_half);
     let preparation = match codec_client(Some(&state), true) {
         Ok(preparation) => preparation,
@@ -356,6 +357,15 @@ where
         };
 
         let request = decoded.view();
+        if let ClientRequest::Attach { hello, .. } | ClientRequest::AttachInteractive { hello, .. } = request {
+            if hello.plugin_protocol != ilium_ipc::PLUGIN_PROTOCOL_VERSION || hello.contract != ilium_plugin_api::CONTRACT {
+                let _ = direct_tx.send(ServerEvent::Rejected(ilium_ipc::plugin::Rejection {
+                    code: "ipc.protocol-mismatch".to_owned(),
+                    message: format!("plugin protocol mismatch: server requires version {} and contract {}", ilium_ipc::PLUGIN_PROTOCOL_VERSION, ilium_plugin_api::CONTRACT),
+                })).await;
+                break;
+            }
+        }
         if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
             // Validated and replaced as a whole, so a refused set never runs
             // partially. The client fences every observation by revision and
@@ -607,7 +617,7 @@ where
             attach_phase_tx.send_replace(AttachPhase::Replaying);
         }
         if refresh_resources && plugin_presence.is_none() {
-            plugin_presence = crate::plugin_host::ClientPresence::attach(&state, connection_id);
+            plugin_presence = crate::plugin_host::ClientPresence::attach(&state, connection_id, direct_tx.clone());
         }
         // Deep mutation handlers need their own poll stack rather than the
         // connection reader/writer and retained-decoding frames below them.

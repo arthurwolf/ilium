@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Upgrading Ilium and rolling back the host | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details open><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/" aria-current="page">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Guides</b></p>
+<h1>Upgrading Ilium and rolling back the host</h1>
+
+<p>This page is the operator procedure for replacing the Ilium binary while plugins are installed, ending the running server, and undoing a host release. It covers the three open items of <a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a>: what happens when the binary is swapped, which restart applies, and how to roll back the host. It does not describe a plugin update. For that, see <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a>.</p>
+<p>Requirement ids have the form <code>LIF-nnn</code>. They are collected in <a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a>.</p>
+<h3 id="terms">Terms</h3>
+<ul>
+<li><strong>Host</strong>: the Ilium binary and the server process it starts. The host version is the version of that binary.</li>
+<li><strong>Clean stop</strong>: ending the server so that it runs its shutdown path. Each live instance then receives <code>deactivate</code> with reason <code>shutdown</code>. A clean stop is the only server stop that does this (see <a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a>).</li>
+<li><strong>Kill</strong>: ending the server with a signal or a crash. No <code>deactivate</code> is sent.</li>
+<li><strong>Instance</strong>: one running copy of one side of a plugin. It lives from <code>activate</code> until <code>deactivate</code>, a trap or a restart.</li>
+<li><strong>Package state</strong>: the one state per installed plugin shown by <code>ilium plugin list --json</code>, for example <code>installed-enabled</code>. See <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>.</li>
+<li><strong>Plugin rollback</strong>: <code>ilium plugin rollback &lt;id&gt;</code>. <strong>Host rollback</strong>: replacing the binary with an earlier release.</li>
+</ul>
+<h3 id="inputs-outputs-and-limits">Inputs, outputs and limits</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Input of a binary replacement</td>
+<td>The new Ilium binary on disk</td>
+<td>this page</td>
+</tr>
+<tr>
+<td>Output of <code>ilium plugin list --json</code></td>
+<td>The package state and side states of each plugin</td>
+<td><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a></td>
+</tr>
+<tr>
+<td><code>deactivate</code> deadline at a server stop</td>
+<td>500 ms by default, 1,000 ms ceiling for a T1 plugin</td>
+<td><a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a></td>
+</tr>
+<tr>
+<td>Whole server shutdown</td>
+<td>5 s, then remaining plugins are dropped and <code>host.shutdown-timeout</code> is logged</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>Restore bytes</td>
+<td>1 MiB at most; a larger return is dropped with one warning</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>Log lines read after an upgrade</td>
+<td><code>--tail 100</code> per plugin</td>
+<td>LIF-298</td>
+</tr>
+</tbody>
+</table>
+<h3 id="two-different-rollbacks">Two different rollbacks</h3>
+<p>Rolling back a plugin and rolling back the host are separate operations. Use the table to pick the right one.</p>
+<table>
+<thead>
+<tr>
+<th>You want to undo</th>
+<th>Command or step</th>
+<th>What changes</th>
+<th>What does not change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The version of one plugin</td>
+<td><code>ilium plugin rollback &lt;id&gt;</code></td>
+<td>The installed version of that plugin</td>
+<td>The Ilium binary and the host version</td>
+</tr>
+<tr>
+<td>The Ilium host release</td>
+<td>Install the earlier binary, then end and start the server</td>
+<td>The binary and the host version</td>
+<td>The installed plugin versions</td>
+</tr>
+</tbody>
+</table>
+<h3 id="replacing-the-ilium-binary">Replacing the Ilium binary</h3>
+<ul>
+<li>[LIF-295] When the Ilium binary on disk is replaced, the running server MUST keep its loaded instances unchanged, and the new binary MUST take effect only at the next server start.</li>
+</ul>
+<p>Replacing the binary does not stop your plugin. Its instances keep running on the old code until the server stops. At that stop each live instance receives <code>deactivate</code> with reason <code>shutdown</code>, as described in <a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a>. After the new server starts, the host activates each plugin again when its trigger fires.</p>
+<ul>
+<li>[LIF-299] Before replacing the Ilium binary, the operator MUST run <code>ilium plugin list --json</code> and MUST keep its output as the record to compare against after the restart.</li>
+<li>[LIF-300] A clean server stop MUST give the whole shutdown 5 s. A plugin that is still running at that point MUST be dropped without <code>deactivate</code>, with <code>host.shutdown-timeout</code> logged, so an operator MUST NOT treat a quiet plugin log after a stop as proof that <code>deactivate</code> ran.</li>
+</ul>
+<p>Operator steps:</p>
+<ol>
+<li>Run <code>ilium plugin list --json</code> and write down the package state and the version of each plugin (LIF-299). This is the record to compare against after the restart.</li>
+<li>Replace the Ilium binary with the new release.</li>
+<li>End the running server as described in the next section, then start Ilium again.</li>
+<li>Run the checks in <a href="#checks-after-an-upgrade-or-a-host-rollback">Checks after an upgrade or a host rollback</a>.</li>
+</ol>
+<p>Decision needed: confirm that a new binary takes effect only at the next server start, and do not apply it to a live server in place. The default is the rule in LIF-295, because the only documented server stop that runs <code>deactivate</code> is a clean stop with <code>shutdown</code>. Consequence: an operator must plan a restart after each binary replacement, and plugins run the old code until then.</p>
+<h3 id="ending-and-starting-the-server">Ending and starting the server</h3>
+<ul>
+<li>[LIF-296] An operator MUST end the running server with a clean stop, not with a kill signal, when the new binary is to take effect. A kill skips <code>deactivate</code>, so the server side loses its restore bytes and every plugin loses its in-memory state.</li>
+</ul>
+<p>Decision needed: name the one <code>ilium</code> command that performs a clean server stop and start, and document it on this page. The manual does not name it today, so this page cannot give the exact command. The default is to add that command to the operator steps once the owner confirms its name. Consequence: until then an operator can only end the session through the normal Ilium quit, and the steps above name no restart command.</p>
+<h3 id="rolling-back-a-plugin">Rolling back a plugin</h3>
+<ul>
+<li>[LIF-297] <code>ilium plugin rollback &lt;id&gt;</code> MUST NOT change the Ilium binary or the host version, so an operator who needs to undo a host release MUST NOT use it for that.</li>
+</ul>
+<p>The plugin rollback restores an earlier version of one plugin, and it follows the data rules of <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a>. It is refused with <code>migration.data-newer</code> when the stored data is newer than the target version supports. A plugin rollback has no effect on the Ilium binary, so a plugin rollback never undoes a host upgrade.</p>
+<h3 id="rolling-back-the-host">Rolling back the host</h3>
+<p>A host rollback is the operator's replacement of the Ilium binary with an earlier release, followed by a clean stop and a start of the server, as in LIF-296.</p>
+<p>Decision needed: decide whether this release supports a host rollback, and how earlier binaries are kept. The default is to document a host rollback as the steps above, with the checks in the next section, and to make no promise about stored data until the owner confirms that an earlier host starts with the data a later host wrote. Consequence: operators who need to undo a host release have no confirmed procedure yet, and the only refusal the manual states for a rollback is <code>migration.data-newer</code>, which applies to a plugin rollback.</p>
+<h3 id="data-written-by-a-newer-host">Data written by a newer host</h3>
+<p>A host rollback changes the binary, not the data on disk. The earlier host meets whatever the newer host wrote at its next start. These rules decide what it does; the first three are stated elsewhere and are repeated here only as they apply to a rollback.</p>
+<ul>
+<li>The earlier host reads a file only when its format number is at most its own (LIF-304). It never converts newer data downward (PKG-288).</li>
+<li>A file with a higher format number in <code>installed.json</code>, a bucket or a stamp makes the earlier host start with the affected plugins disabled, log <code>host.format-newer</code> naming the file, and leave the file unchanged (LIF-305).</li>
+<li>A plugin bucket whose stamp is newer than the earlier plugin version is refused with <code>migration.data-newer</code> on activation, unless <code>--restore-backup</code> or <code>--discard-data</code> is given (LIF-079).</li>
+<li>A core snapshot or config file written by a newer build is kept unmodified, and the earlier build starts with persistence read-only and a notice naming both versions (COR-093). See <a href="/pages/reference-config-and-data-migration/#data-written-by-a-newer-build-and-unknown-section-versions">Data written by a newer build, and unknown section versions</a>.</li>
+</ul>
+<p>The following rules are new and apply to any host rollback.</p>
+<ul>
+<li>[LIF-950] Before replacing the Ilium binary, the operator MUST keep a copy of the previous Ilium binary and of the plugin state files (<code>installed.json</code>, the plugin buckets and the stamps), and MUST keep both until the checks in the next section pass. Keeping one previous binary is the minimum this page relies on (proposed, owner to confirm).</li>
+<li>[LIF-951] After a host rollback, an operator MUST NOT enable a plugin whose log shows <code>host.format-newer</code> until either the newer host has been started again or the file named in that log line has been restored from the copy kept under LIF-950, because the earlier host cannot read that file.</li>
+</ul>
+<p>The owner has not yet decided whether this release supports a host rollback at all. LIF-950 and LIF-951 state the data rule that applies in either case, and the numbers they carry are proposals.</p>
+<h3 id="checks-after-an-upgrade-or-a-host-rollback">Checks after an upgrade or a host rollback</h3>
+<ul>
+<li>[LIF-298] After a host upgrade or a host rollback, the operator MUST run <code>ilium plugin list --json</code> and MUST read <code>ilium plugin logs &lt;id&gt; --tail 100</code> for each plugin that does not behave as expected. A plugin in <code>stopped-by-failure</code> MUST be enabled again only after its cause is fixed, because enabling clears its failure window.</li>
+</ul>
+<p>Look for these log lines in the output of <code>ilium plugin logs</code>:</p>
+<ul>
+<li><code>deactivate.deadline</code>: a plugin did not finish <code>deactivate</code> in time and its instance was dropped.</li>
+<li><code>host.shutdown-timeout</code>: the server shutdown took longer than the host allows, and the remaining plugins were dropped without <code>deactivate</code>.</li>
+<li><code>restart.scheduled</code>: a plugin stopped and the host will start it again.</li>
+<li><code>update.rolled-back</code>: a plugin update was undone.</li>
+</ul>
+<p>Compare the package state of each plugin with the record from the first step. A plugin that changed state without a plugin update or an operator action needs its log read before it is enabled again.</p>
+<h3 id="failure-behaviour">Failure behaviour</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+<th>Code or log line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The server is killed instead of stopped cleanly</td>
+<td>No <code>deactivate</code>; server restore bytes and in-memory state are lost</td>
+<td>none</td>
+</tr>
+<tr>
+<td>A plugin misses its <code>deactivate</code> deadline</td>
+<td>The instance is dropped, its bytes are discarded, the plugin is not counted as failed</td>
+<td><code>deactivate.deadline</code></td>
+</tr>
+<tr>
+<td>The whole shutdown exceeds 5 s</td>
+<td>Remaining plugins are dropped without <code>deactivate</code></td>
+<td><code>host.shutdown-timeout</code></td>
+</tr>
+<tr>
+<td>A plugin rollback targets a version older than the stored data</td>
+<td>The rollback is refused unless <code>--restore-backup</code> or <code>--discard-data</code> is given</td>
+<td><code>migration.data-newer</code></td>
+</tr>
+<tr>
+<td><code>--restore-backup</code> is given but the snapshot is gone</td>
+<td>The rollback fails</td>
+<td><code>rollback.no-backup</code></td>
+</tr>
+<tr>
+<td>A plugin was <code>stopped-by-failure</code> before the stop</td>
+<td>The server side stays stopped after the restart (stored as <code>failure_stopped</code>)</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h3 id="examples">Examples</h3>
+<p>Upgrade with a clean stop:</p>
+<pre><code>ilium plugin list --json &gt; before.json
+# replace the binary, then end the server cleanly and start Ilium again
+ilium plugin list --json &gt; after.json
+ilium plugin logs my.plugin --tail 100
+</code></pre>
+<p>Read the log for <code>deactivate.deadline</code> and <code>host.shutdown-timeout</code>. A plugin whose package state differs between <code>before.json</code> and <code>after.json</code> without an update or an operator action needs its log read before it is enabled (LIF-298).</p>
+<p>Wrong host rollback: running <code>ilium plugin rollback my.plugin</code> after a bad host release changes only that plugin and leaves the binary unchanged (LIF-297).</p>
+<h3 id="what-this-page-does-not-cover">What this page does not cover</h3>
+<ul>
+<li>Plugin updates, plugin versions and data migration: <a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a> and <a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a>.</li>
+<li>What each running instance sees at a stop, and which state survives: <a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a> and <a href="/pages/reference-persistence-and-restart/">Persistence and restart</a>.</li>
+<li>Crash-loop guard and safe mode after repeated crashes: <a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a>.</li>
+</ul>
+<h3 id="staged-update-rollout">Staged update rollout</h3>
+<p>An operator who manages many machines or sessions applies a plugin update to a small group first. This section is the target behaviour of that staged rollout.</p>
+<ul>
+<li>[LIF-306] A policy MUST be able to assign an update to a rollout stage of a named share of sessions or machines, and a host outside the current stage MUST NOT apply that update, and MUST report it as <code>held</code> in <code>ilium plugin list --json</code>.</li>
+<li>[LIF-307] A rollout MUST halt on its own when the plugin fails inside the failure window on a host of the current stage. A halted rollout MUST stop widening, MUST log <code>rollout.halt</code> with the plugin id and version, and MUST NOT roll back hosts that already updated.</li>
+<li>[LIF-308] An operator MUST be able to resume a halted rollout or cancel it with <code>ilium plugin rollout resume &lt;id&gt;</code> and <code>ilium plugin rollout cancel &lt;id&gt;</code>, and each command MUST write an audit event.</li>
+</ul>
+<h4 id="stage-shares-and-the-placement-of-a-host">Stage shares and the placement of a host</h4>
+<p>A rollout names its stages as cumulative shares of the host population, written as a percentage with two decimal places (steps of 0.01 %). The shares MUST increase from stage to stage, and the last stage MUST be 100 %. Example shares (proposed, owner to confirm): stage 1 at 1 %, stage 2 at 10 %, stage 3 at 50 %, stage 4 at 100 %.</p>
+<p>A host is placed by a number that it computes itself, the same way on every start:</p>
+<ol>
+<li>The host reads its installation key. The server creates the key once, at its first start, and keeps it in its own state directory beside <code>installed.json</code>. Each user has their own state ([SEC-199]), so each user session is a separate host, and two users on one machine give two placements.</li>
+<li>The host computes the SHA-256 of the text <code>&lt;rollout id&gt;:&lt;installation key&gt;</code>.</li>
+<li>The host reads the first four bytes of that digest as a big-endian integer and takes it modulo 10,000. The result is the bucket, from 0 (0.00 %) to 9,999 (99.99 %).</li>
+<li>The host is in stage <em>k</em> when its bucket is below the cumulative share of stage <em>k</em> (in units of 0.01 %). It applies the update only when the bucket is below the share of the current stage. Otherwise it reports <code>held</code>.</li>
+</ol>
+<p>Consequences an operator can rely on:</p>
+<ul>
+<li><strong>Stable across restarts.</strong> The bucket depends only on the rollout id and the installation key, so a restart gives the same answer. A host held before a restart is still held after it, and a host that has applied the update keeps it.</li>
+<li><strong>Widening keeps earlier hosts in.</strong> Raising a stage's share only raises the cutoff. A host below an earlier cutoff stays below every later one, so no host moves out of a stage that it has entered.</li>
+<li><strong>Different rollouts place hosts differently.</strong> The rollout id is part of the digest, so the same machine is not always in the first stage.</li>
+<li><strong>A host moves only if its key changes.</strong> Deleting the state directory creates a new installation key, which can move the host into another stage.</li>
+</ul>
+<p>The stage holds about its share of the hosts, not exactly that share: a hash spreads hosts at random. For a population of 300 installations, stage 1 at 1 % expects about 3 hosts and stage 2 at 10 % about 30. The count of hosts actually in a stage is known only from the hosts that report their stage (see the next section). The manual does not yet define a fleet-level count (owner to confirm).</p>
+<h4 id="what-an-administrator-sees-for-a-held-host">What an administrator sees for a held host</h4>
+<ul>
+<li><strong>Version and state.</strong> A held host keeps the installed version. Its package state stays <code>installed-enabled</code>, as for any update that has not yet been applied. The newer version is shown in <code>update-available</code> from the cached registry data.</li>
+<li><strong>The <code>held</code> value.</strong> <code>ilium plugin list --json</code> reports <code>held</code> for the plugin's pending rollout update, as [LIF-306] requires. <code>held</code> is not one of the package states in <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a>, so the field that carries it is to be confirmed by the owner. The output also gives the host's stage number for that rollout (owner to confirm).</li>
+<li><strong>Not a failure.</strong> A held host has <code>failed</code> false and is not counted by the halt rule of [LIF-307], which counts only hosts in the current stage.</li>
+<li><strong>When it updates.</strong> A held host applies the update at its first update check after its stage's cutoff includes its bucket. It does not need a restart for that.</li>
+<li><strong>Audit.</strong> Proposed, owner to confirm: one <code>rollout.held</code> audit event when a host first holds the update, and one <code>rollout.applied</code> event when it applies it. Both must be added to the audit catalogue of <a href="/pages/reference-audit-log/">Audit log</a> before they are written.</li>
+<li><strong>Fleet view.</strong> Held hosts are visible on each machine only. <code>ilium plugin list --json --inventory</code> ([USR-341]) has a fixed field list without the rollout stage, so a fleet tool sees a held host as running the old version and cannot tell it from a host that was never offered the update. An administrator who needs the held count across machines must run <code>ilium plugin list --json</code> on each machine, as for crash counts (<a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a>). The owner needs to decide whether the inventory carries the stage.</li>
+</ul>
+<p>Halt, using the example shares above: in stage 1 (about 3 hosts of 300), one counted failure of the new version on a host in that stage halts the rollout under [LIF-307]. Stage 2 does not open, and the hosts that already updated keep the new version. The admin must then decide, by [LIF-308], whether to resume or cancel. How a failure on one host reaches the rollout record, and how many failures count as a halt, are not yet defined (owner to confirm).</p>
+<h4 id="how-a-host-failure-reaches-the-rollout-record-and-the-halt-threshold">How a host failure reaches the rollout record, and the halt threshold</h4>
+<p>This section defines the signal path that [LIF-307] needs. The rules that follow refine [LIF-306], [LIF-307] and [LIF-308]; they add no new requirement id. Wording that has no id yet is marked "proposed, owner to confirm".</p>
+<p><strong>Where the rollout record lives.</strong> The record is a file named <code>rollout-&lt;rollout id&gt;.json</code> in the rollout state directory that the administrator names with <code>rollout_state_dir</code> in <code>/etc/ilium/policy.toml</code> (see <a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a>). The directory is a path every host of the fleet can read and write, for example a mounted share. The policy file holds the stage shares and the halt threshold; the state directory holds only what changes at run time. Fields of the record:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rollout</code></td>
+<td>The rollout id</td>
+</tr>
+<tr>
+<td><code>plugin</code>, <code>version</code></td>
+<td>The plugin id and the version being rolled out</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>The current stage number, starting at 1</td>
+</tr>
+<tr>
+<td><code>state</code></td>
+<td><code>open</code>, <code>halted</code> or <code>cancelled</code></td>
+</tr>
+<tr>
+<td><code>failures</code></td>
+<td>A list of counted failures, one entry per host and failure: <code>bucket</code>, <code>ts</code> (UTC ISO 8601) and the failure code</td>
+</tr>
+</tbody>
+</table>
+<p>A host with no <code>rollout_state_dir</code> cannot take part in a staged rollout. It stays <code>held</code> and the policy reports <code>policy.invalid</code> at start (proposed, owner to confirm).</p>
+<p><strong>How a host reports a counted failure.</strong> A host in the current stage reports in two steps, both on the host itself:</p>
+<ol>
+<li>The host writes the audit event of the failure (<code>failure-disable</code> or the trap record named in <a href="/pages/reference-audit-log/">Audit log</a>) for the new version.</li>
+<li>The host appends one entry to <code>failures</code> of the rollout record. It takes the file lock, re-reads the record, appends and writes the file by replacing it atomically, so two hosts never lose each other's entry.</li>
+</ol>
+<p>A failure is counted only when all of these hold: the host is in the current stage (its bucket is below the cutoff of that stage), the plugin version is the version of the rollout, and the failure is one that counts toward the crash-loop guard of HST-400 (a trap, a crash or a missed deadline; not a <code>deactivate.deadline</code> at a stop). A held host never reports, because it never ran the new version. A failure of an older version is not counted.</p>
+<p>A host that cannot write the record (the directory is unreachable or locked for more than 5 s) logs <code>rollout.record-unwritable</code>, keeps the failure in memory, and retries at its next update check. While it has an unwritten failure it MUST NOT widen the rollout (proposed, owner to confirm).</p>
+<p><strong>The halt threshold.</strong> The rollout halts when the record holds 3 counted failures from at least 2 different hosts within 10 minutes, or 3 counted failures from one host (the crash-loop limit of HST-400, which already stops that host). Both numbers, and the 10-minute window, are the defaults and can be set per rollout in the policy as <code>halt_failures</code>, <code>halt_hosts</code> and <code>halt_window_seconds</code>; a value below 1 is refused with <code>policy.invalid</code>. Stage 1 of the example in <a href="#stage-shares-and-the-placement-of-a-host">Stage shares and the placement of a host</a> holds about 3 hosts of 300, so a single crash-looping host in it halts the rollout.</p>
+<p>The first host that reads a record meeting the threshold sets <code>state</code> to <code>halted</code>, logs <code>rollout.halt</code> with the plugin id and version ([LIF-307]), and writes the audit event <code>rollout.halt</code>. Every other host reads <code>state</code> at its next update check, which is at most one check interval later. A halted rollout does not open the next stage, and hosts that already updated keep the new version. <code>ilium plugin rollout resume &lt;id&gt;</code> sets <code>state</code> to <code>open</code> and clears <code>failures</code>; <code>ilium plugin rollout cancel &lt;id&gt;</code> sets it to <code>cancelled</code> and every host stays on its current version ([LIF-308]).</p>
+<p><strong>What the administrator reads on a host.</strong> <code>ilium plugin list --json</code> carries a <code>rollout</code> object on each plugin that has a pending rollout update, and no <code>rollout</code> field on others:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rollout.id</code></td>
+<td>The rollout id</td>
+</tr>
+<tr>
+<td><code>rollout.state</code></td>
+<td><code>held</code>, <code>applied</code>, <code>halted</code> or <code>cancelled</code></td>
+</tr>
+<tr>
+<td><code>rollout.stage</code></td>
+<td>The stage number of this host (the lowest stage whose cutoff includes its bucket)</td>
+</tr>
+<tr>
+<td><code>rollout.current_stage</code></td>
+<td>The stage the rollout is at now</td>
+</tr>
+</tbody>
+</table>
+<p>A host is <code>held</code> when <code>rollout.stage</code> is greater than <code>rollout.current_stage</code>. A host that was never offered the update has no <code>rollout</code> object, so the administrator tells the two apart by its presence. A halted rollout shows <code>halted</code> on held hosts and on hosts that applied the update. The package state stays <code>installed-enabled</code> in all cases. The <code>--inventory</code> output of [USR-341] keeps its fixed field list and does not carry <code>rollout</code>; the fleet count of held hosts is read from the <code>rollout.held</code> and <code>rollout.applied</code> audit events, or from <code>rollout.stage</code> on each machine.</p>
+<p><strong>Audit events.</strong> Two events are added to the catalogue of <a href="/pages/reference-audit-log/">Audit log</a>; <code>rollout.halt</code> and the resume and cancel events of [LIF-308] are written beside them.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rollout.held</code></td>
+<td>A host first holds a rollout update; once per host, rollout and version</td>
+</tr>
+<tr>
+<td><code>rollout.applied</code></td>
+<td>A host applies a rollout update after its stage opened</td>
+</tr>
+</tbody>
+</table>
+<p>Both carry <code>plugin_id</code>, <code>version</code>, the rollout id in <code>target</code>, the stage number in <code>reason</code> and <code>result</code> <code>ok</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+<th>Code or log line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Counted failure while the record is unwritable</td>
+<td>Kept in memory, retried, widening blocked</td>
+<td><code>rollout.record-unwritable</code></td>
+</tr>
+<tr>
+<td>Threshold reached</td>
+<td>State becomes <code>halted</code>, one audit event</td>
+<td><code>rollout.halt</code></td>
+</tr>
+<tr>
+<td><code>resume</code> or <code>cancel</code> on a rollout that is not halted</td>
+<td>Refused, nothing changes</td>
+<td><code>usage.invalid-value</code></td>
+</tr>
+<tr>
+<td>Threshold value below 1 in the policy</td>
+<td>The policy is refused</td>
+<td><code>policy.invalid</code></td>
+</tr>
+</tbody>
+</table>
+<p>Test of the path: with a state directory shared by two hosts in stage 1, fail the new version three times on one host, and assert that <code>rollout.state</code> reads <code>halted</code> on the other host within one check interval and that stage 2 hosts stay <code>held</code>.</p>
+<h2 id="operator-runbook-for-failure-modes">Operator runbook for failure modes</h2>
+<p>Each entry gives detection, mitigation and recovery. The runbook is part of the contract: the commands and codes it names MUST exist.</p>
+<ul>
+<li>[EXT-074] The runbook MUST cover a crash loop: detection by the plugin state <code>stopped-by-failure</code> with a restart count shown by <code>ilium plugin list --json</code>; mitigation by <code>ilium plugin disable &lt;id&gt;</code>; recovery by reading <code>ilium plugin logs &lt;id&gt;</code> and re-enabling. The host MUST stop restarting a plugin at the third failure within 10 minutes (HST-400).</li>
+<li>[EXT-075] The runbook MUST cover a quarantined or blocked plugin that users still depend on: detection by <code>Quarantined</code> or <code>Blocked</code> in the list; mitigation by naming the replacement or the fixed version; recovery by upgrade, with the data kept as stated in [SEC-327].</li>
+<li>[EXT-076] The runbook MUST cover an upgrade that fails part way: detection by the error code and the audit line; mitigation by the guarantee that the previous version stays installed ([EXT-062]); recovery by <code>ilium plugin rollback &lt;id&gt;</code> and a retry after the cause is fixed.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/host-upgrade-while-plugins-run/">Host upgrade and restart while plugins run</a> for what happens to running instances at a stop</li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a> for plugin versions, updates and plugin rollback</li>
+<li><a href="/pages/reference-install-update-uninstall/">Install, update and uninstall</a> for the update pipeline and the data rules</li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a> for the states named in the checks</li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a> for the restart rules and the recovery page</li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<h2 id="production-additions-t9-compat-deprecation">Production additions: T9-compat-deprecation</h2>
+<ul>
+<li><strong>[DEV-992]</strong> <code>ilium plugin preflight --target &lt;host-version&gt;</code> (command name proposed, owner to confirm) MUST list, for every installed plugin, whether it would load, load with a <code>deprecated</code> record or be refused with a code, using the matrix data shipped in the target binary or a manifest file, without starting any plugin.</li>
+</ul>
+<h2 id="requirement-statements">Requirement statements</h2>
+<ul>
+<li><strong>[EXT-074]</strong> The runbook MUST cover a crash loop: detection by the plugin state <code>stopped-by-failure</code> with a restart count shown by <code>ilium plugin list --json</code>; mitigation by <code>ilium plugin disable &lt;id&gt;</code>; recovery by reading <code>ilium plugin logs &lt;id&gt;</code> and re-enabling. The host MUST stop restarting a plugin at the third failure within 10 minutes (HST-400).</li>
+<li><strong>[EXT-075]</strong> The runbook MUST cover a quarantined or blocked plugin that users still depend on: detection by <code>Quarantined</code> or <code>Blocked</code> in the list; mitigation by naming the replacement or the fixed version; recovery by upgrade, with the data kept as stated in [SEC-327].</li>
+<li><strong>[EXT-076]</strong> The runbook MUST cover an upgrade that fails part way: detection by the error code and the audit line; mitigation by the guarantee that the previous version stays installed ([EXT-062]); recovery by <code>ilium plugin rollback &lt;id&gt;</code> and a retry after the cause is fixed.</li>
+<li><strong>[LIF-295]</strong> When the Ilium binary on disk is replaced, the running server MUST keep its loaded instances unchanged, and the new binary MUST take effect only at the next server start.</li>
+<li><strong>[LIF-296]</strong> An operator MUST end the running server with a clean stop, not with a kill signal, when the new binary is to take effect. A kill skips <code>deactivate</code>, so the server side loses its restore bytes and every plugin loses its in-memory state.</li>
+<li><strong>[LIF-297]</strong> <code>ilium plugin rollback &lt;id&gt;</code> MUST NOT change the Ilium binary or the host version, so an operator who needs to undo a host release MUST NOT use it for that.</li>
+<li><strong>[LIF-298]</strong> After a host upgrade or a host rollback, the operator MUST run <code>ilium plugin list --json</code> and MUST read <code>ilium plugin logs &lt;id&gt; --tail 100</code> for each plugin that does not behave as expected. A plugin in <code>stopped-by-failure</code> MUST be enabled again only after its cause is fixed, because enabling clears its failure window.</li>
+<li><strong>[LIF-299]</strong> Before replacing the Ilium binary, the operator MUST run <code>ilium plugin list --json</code> and MUST keep its output as the record to compare against after the restart.</li>
+<li><strong>[LIF-300]</strong> A clean server stop MUST give the whole shutdown 5 s. A plugin that is still running at that point MUST be dropped without <code>deactivate</code>, with <code>host.shutdown-timeout</code> logged, so an operator MUST NOT treat a quiet plugin log after a stop as proof that <code>deactivate</code> ran.</li>
+<li><strong>[LIF-306]</strong> A policy MUST be able to assign an update to a rollout stage of a named share of sessions or machines, and a host outside the current stage MUST NOT apply that update, and MUST report it as <code>held</code> in <code>ilium plugin list --json</code>.</li>
+<li><strong>[LIF-307]</strong> A rollout MUST halt on its own when the plugin fails inside the failure window on a host of the current stage. A halted rollout MUST stop widening, MUST log <code>rollout.halt</code> with the plugin id and version, and MUST NOT roll back hosts that already updated.</li>
+<li><strong>[LIF-308]</strong> An operator MUST be able to resume a halted rollout or cancel it with <code>ilium plugin rollout resume &lt;id&gt;</code> and <code>ilium plugin rollout cancel &lt;id&gt;</code>, and each command MUST write an audit event.</li>
+<li><strong>[LIF-950]</strong> Before replacing the Ilium binary, the operator MUST keep a copy of the previous Ilium binary and of the plugin state files (<code>installed.json</code>, the plugin buckets and the stamps), and MUST keep both until the checks after the upgrade pass. Keeping one previous binary is the minimum this page relies on (proposed, owner to confirm).</li>
+<li><strong>[LIF-951]</strong> After a host rollback, an operator MUST NOT enable a plugin whose log shows <code>host.format-newer</code> until either the newer host has been started again or the file named in that log line has been restored from the copy kept under LIF-950, because the earlier host cannot read that file.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/guide-example-plugins/"><small>Previous</small>Example plugin catalogue</a><a class="next" href="/pages/guide-plugins-without-the-sdk/"><small>Next</small>Plugins without the SDK</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#terms">Terms</a></li><li class="l2"><a href="#inputs-outputs-and-limits">Inputs, outputs and limits</a></li><li class="l2"><a href="#two-different-rollbacks">Two different rollbacks</a></li><li class="l2"><a href="#replacing-the-ilium-binary">Replacing the Ilium binary</a></li><li class="l2"><a href="#ending-and-starting-the-server">Ending and starting the server</a></li><li class="l2"><a href="#rolling-back-a-plugin">Rolling back a plugin</a></li><li class="l2"><a href="#rolling-back-the-host">Rolling back the host</a></li><li class="l2"><a href="#data-written-by-a-newer-host">Data written by a newer host</a></li><li class="l2"><a href="#checks-after-an-upgrade-or-a-host-rollback">Checks after an upgrade or a host rollback</a></li><li class="l2"><a href="#failure-behaviour">Failure behaviour</a></li><li class="l2"><a href="#examples">Examples</a></li><li class="l2"><a href="#what-this-page-does-not-cover">What this page does not cover</a></li><li class="l2"><a href="#staged-update-rollout">Staged update rollout</a></li><li class="l3"><a href="#stage-shares-and-the-placement-of-a-host">Stage shares and the placement of a host</a></li><li class="l3"><a href="#what-an-administrator-sees-for-a-held-host">What an administrator sees for a held host</a></li><li class="l3"><a href="#how-a-host-failure-reaches-the-rollout-record-and-the-halt-threshold">How a host failure reaches the rollout record, and the halt threshold</a></li><li class="l2"><a href="#operator-runbook-for-failure-modes">Operator runbook for failure modes</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l2"><a href="#production-additions-t9-compat-deprecation">Production additions: T9-compat-deprecation</a></li><li class="l2"><a href="#requirement-statements">Requirement statements</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

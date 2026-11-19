@@ -1,7 +1,7 @@
 //! Twins of ilium-server/tests/frozen_session.rs: a frozen pane keeps its saved provider session and
 //! its worktree ownership, and thaws only when every restored pane runs.
 
-use ilium_plugin_sdk::types::{NodeId, PaneLifecycleState};
+use ilium_plugin_sdk::types::{Event, NodeId, PaneLifecycleState};
 
 use crate::common::*;
 
@@ -74,6 +74,82 @@ fn port_a_frozen_pane_that_exits_instead_of_running_is_not_thawed() {
     restore_panes(&mut host, &[pane]);
     let thaw = unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Exited)]));
     assert!(thaw.is_empty());
+}
+
+#[test]
+fn an_exited_pane_does_not_leave_other_restored_panes_frozen() {
+    let mut host = activated_server();
+    let exited = add_shell(&mut host, "exited");
+    let running = add_shell(&mut host, "running");
+    restore_panes(&mut host, &[exited, running]);
+    assert!(unfreezes(&host.deliver(vec![lifecycle_event(
+        exited,
+        PaneLifecycleState::Exited,
+    )]))
+    .is_empty());
+    let submissions = host.deliver(vec![lifecycle_event(running, PaneLifecycleState::Running)]);
+    let thawed = unfreezes(&submissions);
+    assert_eq!(thawed.len(), 1);
+    assert_eq!(thawed[0].0.pane, NodeId(running));
+}
+
+#[test]
+fn removing_a_restored_pane_does_not_leave_the_others_frozen() {
+    let mut host = activated_server();
+    let removed = add_shell(&mut host, "removed");
+    let running = add_shell(&mut host, "running");
+    restore_panes(&mut host, &[removed, running]);
+    host.deliver(vec![Event::NodeRemoved(NodeId(removed))]);
+    let submissions = host.deliver(vec![lifecycle_event(running, PaneLifecycleState::Running)]);
+    let thawed = unfreezes(&submissions);
+    assert_eq!(thawed.len(), 1);
+    assert_eq!(thawed[0].0.pane, NodeId(running));
+}
+
+#[test]
+fn a_stalled_restored_pane_is_released_after_the_timeout() {
+    let mut host = activated_server();
+    let pane = add_shell(&mut host, "stalled");
+    restore_panes(&mut host, &[pane]);
+    host.active_timers().into_iter().find_map(|(id, repeat)| {
+        repeat.is_none().then_some(id)
+    }).expect("a restored pane must have a timeout");
+    let before = host.submitted().len();
+    host.advance_clock(30_000);
+    let submissions = host.submitted()[before..].to_vec();
+    let thawed = unfreezes(&submissions);
+    assert_eq!(thawed.len(), 1);
+    assert_eq!(thawed[0].0.pane, NodeId(pane));
+}
+
+#[test]
+fn a_stalled_pane_timeout_does_not_release_another_waiting_pane() {
+    let mut host = activated_server();
+    let first = add_shell(&mut host, "first");
+    let second = add_shell(&mut host, "second");
+    restore_panes(&mut host, &[first]);
+    assert!(!host.active_timers().is_empty(), "first timer");
+    host.advance_clock(10_000);
+    restore_panes(&mut host, &[second]);
+    let before = host.submitted().len();
+    host.advance_clock(20_000);
+    let expired = host.submitted()[before..].to_vec();
+    let thawed = unfreezes(&expired);
+    assert_eq!(thawed.len(), 1);
+    assert_eq!(thawed[0].0.pane, NodeId(first));
+    let ready = host.deliver(vec![lifecycle_event(second, PaneLifecycleState::Running)]);
+    let thawed = unfreezes(&ready);
+    assert_eq!(thawed.len(), 1);
+    assert_eq!(thawed[0].0.pane, NodeId(second));
+}
+
+#[test]
+fn a_large_restore_uses_bounded_timers_and_freezes_every_pane() {
+    let mut host = activated_server();
+    let panes: Vec<_> = (0..100).map(|index| add_shell(&mut host, &format!("pane {index}"))).collect();
+    let submissions = restore_panes(&mut host, &panes);
+    assert_eq!(freezes(&submissions).len(), 100);
+    assert!(host.active_timers().len() <= 1, "restore must not consume one timer per pane");
 }
 
 /// REQ: PORT:ilium-server/tests/frozen_session.rs::unfreeze_preserves_worktree_ownership

@@ -31,6 +31,7 @@ pub fn start_shell_run(screen: &[&str]) -> (FakeHost, u64, Invocation) {
     let pane = host.tree().add(shell_pane("build shell"));
     host.tree().set_screen(pane, rows(screen));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     (host, pane, invocation)
 }
 
@@ -42,6 +43,7 @@ pub fn start_agent_run(transcript: &[&str]) -> (FakeHost, u64, Invocation) {
     host.tree()
         .set_agent_session(pane, "session-1", rows(transcript));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     (host, pane, invocation)
 }
 
@@ -105,6 +107,7 @@ pub fn start_agent_run_with_goals(
         host.tree().set_agent_goal(pane, objective, status);
     }
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     (host, pane, invocation)
 }
 

@@ -20,10 +20,10 @@ The `storage` import keeps small key-value data for a plugin. Every value lives 
 ```wit
 // Excerpt of ilium:host/storage in reference-wit
 enum bucket { global, project, session, shared }
-get: func(bucket: bucket, key: string) -> option<list<u8>>;
+get: func(bucket: bucket, key: string) -> result<option<list<u8>>, plugin-error>;
 put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
 remove: func(bucket: bucket, key: string) -> result<_, plugin-error>;
-keys: func(bucket: bucket, prefix: string) -> list<string>;
+keys: func(bucket: bucket, prefix: string) -> result<list<string>, plugin-error>;
 record entry { key: string, value: option<list<u8>> }   // none removes the key
 write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;
 ```
@@ -32,14 +32,15 @@ write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-erro
 
 | Function | Rust | TypeScript | Returns | Error codes |
 |---|---|---|---|---|
-| `get` | `get(bucket, key) -> Option<Vec<u8>>` | `get(bucket, key): Uint8Array \| undefined` | the value, or nothing | none |
-| `put` | `put(bucket, key, &[u8]) -> Result<(), PluginError>` | `put(bucket, key, Uint8Array): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io` (`no-space`, [LIF-119]), `conflict` (`stale-data-version`, [LIF-121]) |
-| `remove` | `remove(bucket, key) -> Result<(), PluginError>` | `remove(bucket, key): void`, throws | nothing | `conflict` (`stale-data-version`, [LIF-121]) |
+| `get` | `get(bucket, key) -> Result<Option<Vec<u8>>, PluginError>` | `get(bucket, key): Uint8Array \| undefined`, throws | the value, or nothing | `invalid-argument`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
+| `put` | `put(bucket, key, &[u8]) -> Result<(), PluginError>` | `put(bucket, key, Uint8Array): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
+| `remove` | `remove(bucket, key) -> Result<(), PluginError>` | `remove(bucket, key): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
 | `lease` | `lease(key, ttl_millis) -> bool` | `lease(key, ttlMillis): boolean` | true for the one caller that may refresh a `shared` entry | none; a caller that does not win the lease gets false, which is not an error |
-| `keys` | `keys(bucket, prefix) -> Vec<String>` | `keys(bucket, prefix): string[]` | matching keys | none |
-| `write-batch` | `write_batch(bucket, &[Entry]) -> Result<(), PluginError>` | `writeBatch(bucket, entries): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io` (`no-space`, [LIF-119]), `conflict` (`stale-data-version`, [LIF-121]) |
+| `keys` | `keys(bucket, prefix) -> Result<Vec<String>, PluginError>` | `keys(bucket, prefix): string[]`, throws | matching keys | `invalid-argument`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
+| `write-batch` | `write_batch(bucket, &[Entry]) -> Result<(), PluginError>` | `writeBatch(bucket, entries): void`, throws | nothing | `invalid-argument`, `quota-exceeded`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
+| `compare-exchange` | `compare_exchange(bucket, key, expected, value) -> Result<bool, PluginError>` | `compareExchange(bucket, key, expected, value): boolean`, throws | true if the expected value matched and the change committed | `invalid-argument`, `quota-exceeded`, `io`, `conflict`, `not-permitted`, `revoked`, `internal` |
 
-The bucket type is the enum `Bucket` with the variants `Global`, `Project`, `Session` and `Shared` in Rust. In TypeScript it is the string `'global'`, `'project'`, `'session'` or `'shared'` (see [The shared bucket and the lease](#the-shared-bucket-and-the-lease)). All six functions (`get`, `put`, `remove`, `keys`, `write-batch` and `lease`) are synchronous: each call returns when the host has applied it, with no request id to wait for.
+The bucket type is the enum `Bucket` with the variants `Global`, `Project`, `Session` and `Shared` in Rust. In TypeScript it is the string `'global'`, `'project'`, `'session'` or `'shared'` (see [The shared bucket and the lease](#the-shared-bucket-and-the-lease)). All seven functions are synchronous: each call returns when the host has applied it, with no request id to wait for. `compare-exchange` compares and applies the replacement under the same bucket lock; `none` for the expected value means the key must be absent, and `none` for the replacement removes it. A false result changes nothing.
 
 `put` also returns the universal codes `not-permitted`, `revoked` and `internal` (see [errors and limits](/pages/reference-errors-and-limits/)). In practice these appear only when the grant is revoked during a call.
 
@@ -68,7 +69,7 @@ A session's name comes from its file under `.ilium/sessions/`. The bare `ilium` 
 - [LIF-117] `write-batch` MUST apply all its entries or none of them. A batch holds at most 256 entries and at most 4 MiB of key and value bytes together; more is `invalid-argument`. A refused batch keeps every previous value. Test: write a batch whose last entry breaks the quota and read all keys.
 - [LIF-118] `put`, `remove` and `write-batch` MUST return only after the change is flushed to stable storage, so that a crash or power loss after the return cannot lose it. A crash before the return leaves the previous value. Test: kill the process in the middle of a batch and read back.
 - [LIF-119] A write that fails because the disk is full MUST return `io` with the message `no-space`, never `quota-exceeded`, which is only for the plugin's own quota. Test: fill the disk and `put`. See [offline and low disk](/pages/reference-offline-and-low-disk/).
-- [LIF-120] Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set; use a version key and `write-batch` if you need one. Test: two servers write the same key and read it back.
+- [LIF-120] Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set: a version key and `write-batch` cannot make a prior read and subsequent write conditional or atomic. Test: two servers write the same key and read it back.
 - [LIF-121] The bucket also carries a data version stamp that the plugin cannot see. A write from an instance older than the stamp MUST return `conflict` with the message `stale-data-version`. See [data migration](/pages/guide-data-migration/). Test: see LIF-113.
 
 A storage database that fails its integrity check is moved aside and the plugin starts with empty storage ([offline and low disk](/pages/reference-offline-and-low-disk/)).
@@ -120,14 +121,14 @@ use ilium_plugin_sdk::prelude::*;
 
 const COUNTER_KEY: &str = "saves";
 
-fn read_counter() -> u64 {
-    storage::get(Bucket::Project, COUNTER_KEY)
+fn read_counter() -> Result<u64, PluginError> {
+    Ok(storage::get(Bucket::Project, COUNTER_KEY)?
         .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
-        .map_or(0, u64::from_le_bytes)
+        .map_or(0, u64::from_le_bytes))
 }
 
 fn increment_counter() -> Result<u64, PluginError> {
-    let next = read_counter() + 1;
+    let next = read_counter()? + 1;
     storage::put(Bucket::Project, COUNTER_KEY, &next.to_le_bytes())?;
     Ok(next)
 }
@@ -181,20 +182,20 @@ fn save_cursor(pane_key: &str, cursor: u32) -> Result<(), PluginError> {
     storage::put(Bucket::Session, &cursor_key(pane_key), &cursor.to_le_bytes())
 }
 
-fn load_cursor(pane_key: &str) -> u32 {
-    storage::get(Bucket::Session, &cursor_key(pane_key))
+fn load_cursor(pane_key: &str) -> Result<u32, PluginError> {
+    Ok(storage::get(Bucket::Session, &cursor_key(pane_key))?
         .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
-        .map_or(0, u32::from_le_bytes)
+        .map_or(0, u32::from_le_bytes))
 }
 
-fn panes_with_cursor() -> Vec<String> {
-    storage::keys(Bucket::Session, "pane/")
+fn panes_with_cursor() -> Result<Vec<String>, PluginError> {
+    Ok(storage::keys(Bucket::Session, "pane/")?
         .into_iter()
         .filter_map(|key| {
             let pane_key = key.strip_prefix("pane/")?.strip_suffix("/cursor")?;
             Some(pane_key.to_owned())
         })
-        .collect()
+        .collect())
 }
 
 fn forget_cursor(pane_key: &str) {
@@ -309,11 +310,11 @@ Several sessions can notice at the same moment that a cache entry is stale. The 
 ```rust
 use ilium_plugin_sdk::host::storage::{self, Bucket};
 
-fn index_bytes() -> Option<Vec<u8>> {
+fn index_bytes() -> Result<Option<Vec<u8>>, ilium_plugin_sdk::types::PluginError> {
     if storage::lease("index", 60_000) {
         let fresh = rebuild_index();                       // slow work, done once
         let _ = storage::put(Bucket::Shared, "index", &fresh);
-        return Some(fresh);
+        return Ok(Some(fresh));
     }
     storage::get(Bucket::Shared, "index")                  // someone else refreshes
 }
@@ -424,7 +425,7 @@ Enabling, disabling and uninstalling a plugin reach every running session within
 - **[HST-656]** The host MUST provide `ilium plugin data export <id> <dir>` and `ilium plugin data import <id> <dir>` that write and read every bucket as JSON lines of base64 key and value plus the data version, so a user can move one plugin's data without moving the plugin. Import MUST refuse a data version higher than the installed plugin's with `migration.data-newer`, and MUST be all-or-nothing per bucket.
 - **[LIF-117]** `write-batch` MUST apply all its entries or none of them. A batch holds at most 256 entries and at most 4 MiB of key and value bytes together; more is `invalid-argument`. A refused batch keeps every previous value.
 - **[LIF-118]** `put`, `remove` and `write-batch` MUST return only after the change is flushed to stable storage, so that a crash or power loss after the return cannot lose it. A crash before the return leaves the previous value.
-- **[LIF-120]** Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set; use a version key and `write-batch` if you need one.
+- **[LIF-120]** Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set: a version key and `write-batch` cannot make a prior read and subsequent write conditional or atomic.
 
 ## Production additions (round 13)
 

@@ -155,6 +155,14 @@ Custom agents are profiles, not additional detection signatures. A stable profil
 
 [Detailed design](architecture/crate-roles.md).
 
+## Plugin storage boundary
+
+The plugin host owns durable storage and enforces each plugin's bucket scope, lifecycle permissions and quotas. Plugins own the meaning and recovery of their stored values. Storage reads and key listings return an explicit error separately from a missing key or an empty listing: callers must not replace state or assume no work exists when the host cannot read it. The WebAssembly interface, generated bindings, native test host and storage adapter share this contract. A failed write leaves the previously committed value intact; stateful workflows must persist their transition before performing side effects that cannot safely be replayed.
+
+Conditional storage updates compare the observed value and commit its replacement under one cross-process bucket lock. Plugins use this for shared decisions such as provider request reservations; an evictable cache lease does not protect durable rate-limit state. Scene reservations use the persistent global bucket and adopt an existing shared reservation before the first update.
+
+Plugin lifecycle mutations use an asynchronous, instance-owned request: admission returns an identifier, and a completion reports the server's result. The client mirrors catalogue state and sends the operation to the server's persisted lifecycle transaction; it must not treat queueing as success. Timeouts are uncertain because a queued change can still apply later. Direct replies identify their requests separately from unsolicited state broadcasts, and retiring an instance discards its pending completions.
+
 ## Worker and service execution
 
 [Part 1](architecture/worker-and-service-execution-01.md), [Part 2](architecture/worker-and-service-execution-02.md), [Part 3](architecture/worker-and-service-execution-03.md), [Part 4](architecture/worker-and-service-execution-04.md), [Part 5](architecture/worker-and-service-execution-05.md).

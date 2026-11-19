@@ -110,6 +110,7 @@ impl PendingEvents {
             events: self.clone(),
             plugin: plugin.to_owned(),
             instance,
+            job_requests: None,
         }
     }
 }
@@ -132,12 +133,26 @@ pub struct EventSink {
     events: PendingEvents,
     plugin: String,
     instance: u64,
+    job_requests: Option<crate::imports::job_requests::JobRequests>,
 }
 
 impl EventSink {
     /// Queues one event.
     pub fn send(&self, event: Event) {
+        if let Some(book) = &self.job_requests {
+            if let Event::RequestCompleted(result) = event {
+                if let ilium_plugin_api::generated::types::requests::RequestRef::Call(request) = result.request {
+                    book.complete(request, result.outcome);
+                }
+            }
+            return;
+        }
         self.events.push(&self.plugin, self.instance, event);
+    }
+
+    pub(crate) fn with_job_requests(mut self, book: Option<crate::imports::job_requests::JobRequests>) -> Self {
+        self.job_requests = book;
+        self
     }
 
     /// The plugin this sink delivers to.

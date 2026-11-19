@@ -161,6 +161,7 @@ fn offline_summary(text: &str) -> String {
 /// Chunk count after which a pending cancel request takes effect (a test host sets it; production hosts do not).
 fn cancel_after_chunks(api: &mut dyn HostApi) -> usize {
     HostStorage::get(api, Bucket::Global, CANCEL_AFTER_CHUNKS_KEY.to_string())
+        .ok().flatten()
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .and_then(|text| text.trim().parse().ok())
         .unwrap_or(0)

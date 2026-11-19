@@ -1,6 +1,6 @@
 //! Wire tests for the kernel-routing seam commit: the appended plugin protocol records
 //! (CLI control records, forwarded intents, the pane signal request, the plugin pane kind) and
-//! the protocol version bump from 1 to 2. Variant order is the bincode index, so every new
+//! the plugin protocol version. Variant order is the bincode index, so every new
 //! variant is checked at its appended index.
 
 use ilium_core::NodeId;
@@ -125,8 +125,8 @@ fn plugin_call_is_the_request_appended_after_signal_pane_process() {
 }
 
 #[test]
-fn protocol_version_is_two() {
-    assert_eq!(PLUGIN_PROTOCOL_VERSION, 2);
+fn protocol_version_is_three() {
+    assert_eq!(PLUGIN_PROTOCOL_VERSION, 3);
 }
 
 #[test]

@@ -32,6 +32,7 @@ fn start_shell_run(
     host.tree()
         .set_screen(pane, screen.iter().map(|row| row.to_string()).collect());
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     (host, pane, invocation)
 }
 
@@ -170,6 +171,7 @@ fn f_112_unanswered_onboarding_request_within_two_seconds_means_closed() {
     host.leave_client_requests_unanswered();
     host.tree().add(shell_pane("s"));
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     host.advance_clock(2_001);
     host.settle();
     let records = jsonl(&host.cli().refresh(&invocation).stdout());
@@ -234,6 +236,7 @@ fn f_112_goal_lines_come_from_the_transcript_goal_not_from_the_model() {
         vec!["user: /goal Finish the parser refactor".to_string()],
     );
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let records = finish_run(&mut host, &invocation, answer(5, 20));
     assert_eq!(
         of_type(&records, "recap")[0]["goals"],
@@ -570,6 +573,7 @@ fn f_112_run_timeout_reports_panes_still_running_as_failed_and_keeps_finished_te
         host.tree().set_screen(pane, vec![format!("$ {name}")]);
     }
     let invocation = host.cli().invoke(&["recap", "--timeout-seconds", "1"], b"");
+    host.settle();
     let first = host.jobs().list()[0].request;
     host.jobs().finish(first, Ok(answer(3, 3)));
     host.advance_clock(1_001);
@@ -592,6 +596,7 @@ fn f_112_max_concurrency_limits_the_jobs_running_at_the_same_time() {
         host.tree().set_screen(pane, vec![format!("$ job {index}")]);
     }
     host.cli().invoke(&["recap", "--max-concurrency", "2"], b"");
+    host.settle();
     assert_eq!(
         host.jobs().list().len(),
         6,

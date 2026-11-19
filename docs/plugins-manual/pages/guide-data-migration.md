@@ -126,7 +126,7 @@ impl Migrator for Notes {
 
 fn migrate_v1_to_v2() -> Result<(), PluginError> {
     let mut entries = Vec::new();
-    if let Some(blob) = storage::get(Bucket::Project, "prefs") {
+    if let Some(blob) = storage::get(Bucket::Project, "prefs")? {
         let prefs: serde_json::Value = serde_json::from_slice(&blob)
             .map_err(|error| PluginError::invalid_argument(format!("prefs: {error}")))?;
         for field in ["theme", "layout"] {
@@ -136,7 +136,7 @@ fn migrate_v1_to_v2() -> Result<(), PluginError> {
         }
         entries.push(Entry::remove("prefs"));
     }
-    if let Some(count) = storage::get(Bucket::Project, "count") {
+    if let Some(count) = storage::get(Bucket::Project, "count")? {
         entries.push(Entry::put("opened", count));
         entries.push(Entry::remove("count"));
     }

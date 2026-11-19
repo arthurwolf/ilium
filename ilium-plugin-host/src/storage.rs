@@ -426,7 +426,7 @@ impl PluginStorage {
         }
         let identity = self.identity(bucket)?;
         let _lock = self.locked(&identity)?;
-        let mut database = self.load(&identity)?;
+        let database = self.load(&identity)?;
         self.check_version(bucket, &database)?;
         if bucket != "shared"
             && database
@@ -435,6 +435,47 @@ impl PluginStorage {
         {
             return Err(error(ErrorCode::Conflict, "migration-required"));
         }
+        self.apply_entries(bucket, &identity, database, entries)
+    }
+
+    /// Compares and changes one value while holding the cross-process bucket lock.
+    pub fn compare_exchange(
+        &mut self,
+        bucket: &str,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        value: Option<Vec<u8>>,
+    ) -> Result<bool, PluginError> {
+        if !key_valid(key)
+            || expected.as_ref().is_some_and(|bytes| bytes.len() > VALUE_MAX_BYTES)
+            || value.as_ref().is_some_and(|bytes| bytes.len() > VALUE_MAX_BYTES)
+        {
+            return Err(invalid("invalid-conditional-update"));
+        }
+        if bucket == "shared" && value.as_ref().is_some_and(|bytes| key.len().saturating_add(bytes.len()) > self.shared_bytes) {
+            return Err(error(ErrorCode::QuotaExceeded, "bucket-quota-exceeded"));
+        }
+        let identity = self.identity(bucket)?;
+        let _lock = self.locked(&identity)?;
+        let database = self.load(&identity)?;
+        self.check_version(bucket, &database)?;
+        if bucket != "shared" && database.stamp.is_some_and(|stamp| stamp < self.context.data_version) {
+            return Err(error(ErrorCode::Conflict, "migration-required"));
+        }
+        if database.values.get(key).map(|(_, bytes)| bytes.as_slice()) != expected.as_deref() {
+            return Ok(false);
+        }
+        self.apply_entries(bucket, &identity, database, &[(key.to_owned(), value)])?;
+        Ok(true)
+    }
+
+    fn apply_entries(
+        &self,
+        bucket: &str,
+        identity: &str,
+        mut database: Database,
+        entries: &[(String, Option<Vec<u8>>)],
+    ) -> Result<(), PluginError> {
         for (key, value) in entries {
             if let Some(value) = value {
                 database.sequence = database
@@ -478,7 +519,7 @@ impl PluginStorage {
         if bucket != "shared" && database.stamp.is_none() {
             database.stamp = Some(self.context.data_version);
         }
-        self.save(&identity, &database)
+        self.save(identity, &database)
     }
 
     /// A shared-cache refresh lease uses actual host wall time, never a guest

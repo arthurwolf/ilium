@@ -809,6 +809,17 @@ mod tests {
         )
     }
 
+    #[test]
+    fn enabling_a_failed_plugin_without_a_component_reports_failure() {
+        let mut runtime = runtime();
+        add_plugin(&mut runtime, OWNER, Tier::T1, owner_manifest(json!({})));
+        let record = runtime.plugins.get_mut(OWNER).expect("plugin record");
+        record.instance = None;
+        record.state = PluginState::Failed("trap.abi".into());
+        assert!(runtime.set_enabled(OWNER, true).is_err());
+        assert!(matches!(runtime.state(OWNER), Some(PluginState::Failed(_))));
+    }
+
     /// Adds an active plugin with a scripted guest and loads its manifest contributions.
     fn add_plugin(
         runtime: &mut HostRuntime,

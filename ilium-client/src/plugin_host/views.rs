@@ -492,10 +492,11 @@ impl App {
     /// Runs a plugin's terminal menu entry with the pane the menu was opened on.
     pub(crate) fn run_plugin_terminal_entry(&mut self, command: &str, pane: ilium_core::NodeId) {
         let arguments = serde_json::json!({ "node": pane.0 }).to_string();
-        self.invoke_plugin_command(
+        self.invoke_plugin_command_for_pane(
             command,
             arguments,
             ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            Some(pane),
         );
     }
 

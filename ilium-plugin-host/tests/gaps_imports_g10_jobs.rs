@@ -150,7 +150,6 @@ fn a_finished_job_completes_through_an_event_and_hands_its_output_over_once() {
         &events.sink("test.jobs", 1),
     );
     assert_eq!(completed(&events, request), Some(Outcome::Ok));
-    jobs.wait_request(request, 100).expect("finished");
     assert_eq!(jobs.take_output(request), Some(b"result".to_vec()));
     assert_eq!(jobs.take_output(request), None, "output is taken once");
 }
@@ -190,10 +189,6 @@ fn a_deadline_or_memory_failure_reaches_the_plugin_as_the_failure_that_ended_the
     assert!(
         matches!(outcome_of(heavy), Some(Outcome::Failed(error)) if error.code == ErrorCode::QuotaExceeded)
     );
-    assert_eq!(
-        jobs.wait_request(slow, 10).expect_err("failed job").code,
-        ErrorCode::TimedOut
-    );
     assert_eq!(jobs.take_output(slow), None, "a failed job has no output");
 }
 
@@ -214,8 +209,8 @@ fn cancelling_a_queued_job_completes_it_as_cancelled_and_it_never_starts() {
         "a cancelled job is not started"
     );
     assert_eq!(
-        jobs.wait_request(request, 10).expect_err("cancelled").code,
-        ErrorCode::Cancelled
+        jobs.wait_request(request, 10).expect_err("handlers cannot wait").code,
+        ErrorCode::Unsupported
     );
 }
 
@@ -302,24 +297,22 @@ fn another_plugin_can_neither_cancel_nor_read_a_job_it_did_not_start() {
             .wait_request(request, 10)
             .expect_err("not the owner")
             .code,
-        ErrorCode::TimedOut
+        ErrorCode::Unsupported
     );
     assert_eq!(owner.take_output(request), Some(b"secret".to_vec()));
 }
 
 /// REQ: HST-499
 #[test]
-fn waiting_returns_as_soon_as_the_job_finishes_on_another_thread() {
+fn waiting_returns_as_soon_as_the_jobs_request_finishes_on_another_thread() {
     let rig = Rig::new();
-    let (book, events) = (rig.book.clone(), rig.events.clone());
-    let mut jobs = rig.instance("test.jobs");
-    let request = jobs.start("index".to_owned(), Vec::new()).expect("starts");
-    book.take_queued();
-    let worker_book = book.clone();
-    let sink = events.sink("test.jobs", 1);
+    let env = rig.env("test.jobs").with_job_scope();
+    let request = env.next_request();
+    let mut jobs = JobsImport::for_job(env.clone(), rig.book.clone(), RequestId(99));
+    let worker_env = env.clone();
     let worker = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(150));
-        worker_book.finish(request, Ok(Vec::new()), &sink);
+        worker_env.complete(request, Outcome::Ok);
     });
     let started = Instant::now();
     jobs.wait_request(request, 10_000)
@@ -329,7 +322,7 @@ fn waiting_returns_as_soon_as_the_job_finishes_on_another_thread() {
         "the wait ended on the finish"
     );
     worker.join().expect("worker thread");
-    let early = jobs.start("index".to_owned(), Vec::new()).expect("starts");
+    let early = env.next_request();
     assert_eq!(
         jobs.wait_request(early, 0).expect_err("unfinished").code,
         ErrorCode::TimedOut

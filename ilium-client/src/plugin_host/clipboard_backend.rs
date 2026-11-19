@@ -67,6 +67,10 @@ fn answer_of(asked: Asked<PluginClipboardReply>) -> PluginClipboardReply {
             ErrorCode::Unsupported,
             "the client has no clipboard route",
         )),
+        Asked::Busy => Err(PluginError::new(
+            ErrorCode::Busy,
+            "the client request queue is full",
+        )),
         Asked::Stopped => Err(PluginError::new(
             ErrorCode::Cancelled,
             "the plugin host is stopping",
@@ -134,6 +138,10 @@ mod tests {
         assert_eq!(
             answer_of(Asked::Dropped).expect_err("dropped").code,
             ErrorCode::Unsupported
+        );
+        assert_eq!(
+            answer_of(Asked::Busy).expect_err("queue full").code,
+            ErrorCode::Busy
         );
         assert_eq!(
             answer_of(Asked::Stopped).expect_err("stopped").code,

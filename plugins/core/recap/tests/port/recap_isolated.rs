@@ -43,6 +43,7 @@ fn port_isolated_closed_gate_denies_without_inference() {
     let (mut host, _, _) = start_shell_run(&["SELECTED_RECAP_MARKER"]);
     close_gate(&mut host);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let record = first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()));
     assert_eq!(record["state"], "denied");
 }

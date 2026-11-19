@@ -504,6 +504,7 @@ impl Handler for AmbientPlugin {
                 continue;
             }
             let last = storage::get(Bucket::Global, LAST_SCENE)
+                .ok().flatten()
                 .and_then(|bytes| String::from_utf8(bytes).ok())
                 .unwrap_or_else(|| "stars".into());
             self.suggestion = Some(last); // offered as the starting scene

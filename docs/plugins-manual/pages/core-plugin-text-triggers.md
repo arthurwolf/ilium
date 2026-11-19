@@ -333,7 +333,8 @@ use ilium_plugin_sdk::host::storage::{self, Bucket};
 
 fn count_match(rule_id: &str, line: &str) {
     let key = format!("count/{rule_id}");
-    let current = storage::get(Bucket::Session, &key)
+    let Ok(value) = storage::get(Bucket::Session, &key) else { return; };
+    let current = value
         .and_then(|b| b.try_into().ok())
         .map(u64::from_le_bytes)
         .unwrap_or(0);

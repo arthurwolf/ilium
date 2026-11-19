@@ -42,6 +42,7 @@ tempfile = { version = "3.27.0", optional = true }
 
 [dev-dependencies]
 zip = "8.6"
+wat = "=1.258.3"
 # Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
 proptest = "1"
 tempfile = "3.27.0"

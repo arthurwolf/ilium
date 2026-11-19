@@ -1,0 +1,2015 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Open security decisions | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/" aria-current="page">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Open security decisions</h1>
+
+<p>Every security value that a page marks as <code>proposed, owner to confirm</code> appears once in this register. Each row names the requirement ID, the proposed text, the page that owns the requirement, and the owner decision still needed. The owner column reads <code>Not recorded</code> until the project owner records a decision, and the due release is the first public release.</p>
+<p>A release MUST NOT ship while a row has no confirmed value, and the release checklist lists every open row. When the owner confirms a value, change the owner page first, remove the words <code>proposed, owner to confirm</code> there, and then remove or update the row here.</p>
+<h3 id="register">Register</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Proposed text (shortened, full text on the owner page)</th>
+<th>Owner page</th>
+<th>Owner</th>
+<th>Due release</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PKG-000</td>
+<td>Every trust-store entry and every <code>publisher.pub</code> MUST record the key's <code>algorithm</code>, and the host MUST verify a signature object with the algorithm stored for its <code>key_id</code>, never with the <code>algorithm</code> ...</td>
+<td><code>reference-signing-and-trust</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-036</td>
+<td><code>trust add --rotation</code>, <code>trust add --additional</code> and <code>install --trust</code> MUST refuse a new key whose <code>key_id</code> is revoked in either store with <code>trust.key-revoked</code>, and a rotation statement whose ...</td>
+<td><code>reference-signing-and-trust</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-037</td>
+<td><code>ilium plugin trust revoke --statement &lt;file&gt;</code> MUST import an <code>ilium-rev/1</code> revocation statement, verify its signature under PKG-242 against a key trusted for the same publisher id (the revoked key ...</td>
+<td><code>reference-signing-and-trust</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-038</td>
+<td><code>plugins/&lt;id&gt;.json</code> MUST carry, in <code>signed.rotations</code>, every <code>ilium-rot/1</code> rotation statement published for the plugin's publisher id, and a client MUST apply each statement that passes PKG-241 as ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-039</td>
+<td>When a key is added to <code>revocations.json</code> with reason <code>compromised</code>, the registry MUST yank with a <code>security:</code> reason every version signed by that key whose countersignature <code>published_at</code> is at or ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-046</td>
+<td>The transparency log entry types MUST include <code>key-revocation</code>, and the registry MUST append one such entry (with <code>key_id</code>, <code>reason</code> and <code>effective</code>, <code>plugin_id</code> null) for every key it adds to ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-047</td>
+<td>A registry countersignature object MUST carry the same <code>publisher_id</code> as the publisher object and a <code>key_id</code> listed in the <code>targets</code> role of the registry's current <code>root.json</code>; the client MUST verify ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-048</td>
+<td>The <code>published_at</code> written into the countersignature object MUST equal the <code>published</code> field of that version in <code>plugins/&lt;id&gt;.json</code> and the <code>time</code> of the <code>publish</code> log entry whose <code>sha256</code> is the ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-049</td>
+<td>A <code>root.json</code> in which one <code>key_id</code> appears in more than one role, or in which the <code>root</code> role threshold is 0 or larger than the number of its keys, MUST be refused by the client with ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-066</td>
+<td>A publish of a package whose <code>signature</code> document already holds a registry countersignature object MUST be refused with <code>registry.countersigned</code>, and the registry MUST countersign only a document ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-067</td>
+<td>Every version entry of <code>plugins/&lt;id&gt;.json</code> MUST carry <code>publisher_sha256</code>, the SHA-256 of the exact bytes the publisher uploaded before countersigning, beside <code>sha256</code> of the stored blob; the publish ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-068</td>
+<td><code>ilium plugin registry log-head &lt;url&gt; [--json]</code> MUST print the stored transparency-log head of that registry (<code>tree_size</code>, <code>root_hash</code>, <code>version</code>, the time it was accepted), and <code>--compare ... |</code>reference-registry`</td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+<td></td>
+</tr>
+<tr>
+<td>PKG-069</td>
+<td>A registry that requires review level B MUST parse <code>sbom.json</code> as CycloneDX 1.5 JSON and MUST refuse the publish with <code>registry.policy</code> and the detail <code>sbom-invalid</code> when the document does not parse, ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-080</td>
+<td>The registry operator MUST keep root keys offline: a root private key MUST NOT be stored on, or reachable from, the host that serves or signs <code>timestamp.json</code>, <code>snapshot.json</code> or <code>targets</code> documents, ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-081</td>
+<td>A rotation statement MUST carry <code>expires</code> (<code>YYYY-MM-DD HH:mm:ss</code>, UTC, at most 2 years after <code>created</code>, proposed, owner to confirm) covered by the signed message after the new <code>key_id</code> (one <code>0x00</code> ...</td>
+<td><code>reference-signing-and-trust</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-082</td>
+<td>The resolver, <code>ilium plugin update</code>, <code>--from-registry</code> adoption and auto-update MUST exclude, before any download, every registry version whose index <code>api</code> is outside the host's supported window or ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-083</td>
+<td>The review record of PKG-680 MUST be stored in the version entry of <code>plugins/&lt;id&gt;.json</code> as <code>review</code> (null, or <code>{ "reviewer_id", "time", "sha256" }</code>), covered by the document signature; a client MUST ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-084</td>
+<td>The registry MUST refuse to attach a review record whose <code>reviewer_id</code> is a maintainer of the plugin's publisher id or the signer of the package, with <code>registry.review-self</code>; a level B review MUST be ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-085</td>
+<td>The transparency log entry <code>type</code> MUST also admit <code>review</code>, <code>review-withdrawn</code>, <code>appeal</code> and <code>abuse-decision</code>; attaching or withdrawing a review record, publishing an appeal decision and recording a ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-086</td>
+<td>When served as <code>policy.json</code>, the content policy MUST be listed in <code>snapshot.json</code>, MUST carry the wrapper of every metadata document signed with the <code>timestamp</code> role keys, and MUST contain ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-087</td>
+<td>When a domain publisher id loses new-publish rights under [PKG-386], the registry MUST set <code>publisher_verified: false</code> on every <code>index.json</code> entry of that namespace within 24 hours (proposed, owner ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-088</td>
+<td>The confusable check of [PKG-389] MUST also apply to the <code>publisher</code> display name: a claim or publish whose display name skeleton equals the skeleton of another publisher id, of another publisher's ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-089</td>
+<td>The registry MUST accept a transfer statement ([PKG-390]) only when it is also countersigned by a trusted key of the receiving publisher id ([LIF-309]), MUST refuse a receiving publisher id that does ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-090</td>
+<td><code>owner add</code> and <code>owner remove</code> ([PKG-819]) MUST send a notice to every maintainer of every owner publisher id, including the removed one, naming the actor's key fingerprint and the log entry index; ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-091</td>
+<td>A publisher id under a temporary or permanent ban (<a href="/pages/governance/">Governance</a>) MUST be marked <code>suspended</code> in the signed metadata, every token of its maintainers MUST be revoked ([PKG-970]), and ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-092</td>
+<td>Yank, unyank, deprecate, unlist and owner-change requests MUST count toward the per-publisher quota of [PKG-400] and [PKG-704], and a request over the quota MUST be refused with ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-093</td>
+<td>A registry account MUST hold a verified contact address before it can claim a publisher id or be added as a maintainer, and the address of each maintainer MUST be the one that receives the notices of ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-094</td>
+<td>The manifest <code>[privacy]</code> table of <a href="/pages/user-privacy/">USR-329</a> MUST hold <code>telemetry_hosts</code>, a list of host names or patterns that the plugin sends telemetry to. A plugin that declares telemetry is ...</td>
+<td><code>reference-manifest</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-095</td>
+<td><code>i18n/</code> MUST be an allowed top-level folder. It MUST hold only files named <code>&lt;tag&gt;.json</code>, where <code>&lt;tag&gt;</code> is a canonical BCP 47 tag. Any other entry, a nested folder, or a file whose name is not a ...</td>
+<td><code>reference-package-format</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-096</td>
+<td>The <code>name</code> sort order of [PKG-382] MUST order entries by the folded form of the name defined in [PKG-379] (Unicode NFKD, combining marks removed, case folded), comparing code points of the folded ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-097</td>
+<td><code>ilium plugin export-bundle</code> MUST include the registry's current <code>revocations.json</code>, <code>quarantine.json</code> and transparency log head, and <code>ilium plugin install --from-bundle</code> MUST verify and apply them ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-098</td>
+<td><code>ilium plugin export-bundle</code> MUST write a deterministic bundle (entries sorted by path, fixed modification times, no owner names, identical bytes for two exports of the same set from the same ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-099</td>
+<td>For an id listed in <code>packages.pinned_versions</code> ([SEC-952]), an auto-update check MUST NOT show a notice for, download or install any version other than the pinned one, and the plugin's row on the ...</td>
+<td><code>reference-install-and-update</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-801</td>
+<td>A yank MUST record <code>yanked_at</code> (UTC, second precision), <code>yanked_by</code> (key fingerprint) and <code>reason</code> (1 to 500 (proposed, owner to confirm) Unicode scalar values) in plugins/<id>.json. <code>ilium plugin ... |</code>reference-registry`</td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+<td></td>
+</tr>
+<tr>
+<td>PKG-804</td>
+<td>The resolver MUST refuse a graph with more than 256 (proposed, owner to confirm) distinct plugins or a dependency chain deeper than 32 (proposed, owner to confirm) with <code>resolve.graph-too-large</code> ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-805</td>
+<td><code>requires.plugins</code> and <code>requires.services</code> MUST each hold at most 64 entries (proposed limit, owner to confirm). A longer list MUST be refused with <code>manifest.limit</code> naming the key.</td>
+<td><code>reference-manifest</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-809</td>
+<td>A successful publish MUST answer 201 with JSON <code>{id, version, sha256, length, url, channel, published_at}</code> and a registry timestamp, and the CLI MUST print the same fields as a <code>result</code> record. The ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-822</td>
+<td>A publish on channel <code>stable</code> of a version lower than the highest stable version already published MUST be accepted only for a different MAJOR line (proposed, owner to confirm), otherwise refused ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-824</td>
+<td>A search request with <code>--limit</code> outside 1..100 or <code>--offset</code> above 10,000 (proposed, owner to confirm) MUST fail with <code>usage.invalid-value</code> before any network request, and a result page MUST contain ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-950</td>
+<td>On an isolated network, the administrator MUST re-run <code>ilium plugin mirror sync</code> (or re-export the bundle with <code>export-bundle</code>) on a connected machine at least once a day (proposed, owner to confirm).</td>
+<td><code>guide-plugin-administration</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-952</td>
+<td>After every sync, the administrator MUST read the <code>signed.expires</code> field of <code>timestamp.json</code> in each mirror folder or unpacked bundle and MUST raise an alert when less than 12 hours remain (proposed, ...</td>
+<td><code>guide-plugin-administration</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-955</td>
+<td>A release that is to become <code>stable</code> MUST first be published on <code>beta</code> and MUST stay there for at least 7 days (proposed, owner to confirm) before promotion.</td>
+<td><code>reference-release-rollout</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-956</td>
+<td>A new <code>stable</code> host release MUST start with a rollout percentage of at most 10 (proposed, owner to confirm), with the cohort rule of PKG-687; a client outside the cohort MUST be offered the release ...</td>
+<td><code>reference-release-rollout</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-957</td>
+<td>A publisher MUST wait at least 24 hours (proposed, owner to confirm) between two widening steps of a staged <code>stable</code> host release, and MUST NOT widen a paused release.</td>
+<td><code>reference-release-rollout</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-958</td>
+<td>A host release MUST be paused by setting its rollout percentage to 0 by a maintainer with release permission, starting within 24 hours (proposed, owner to confirm) of a confirmed report of data ...</td>
+<td><code>reference-release-rollout</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-968</td>
+<td>A registry token MUST be issued to one publisher id and MUST authorise publishes only under the namespace of that id ([PKG-388]). A token expires 90 days after it is issued (proposed, owner to ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-969</td>
+<td>A publisher MUST be able to issue a new token and revoke an old one without a gap in publishing. The new token works as soon as it is issued, and the old one keeps working until it is revoked or ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-970</td>
+<td>A revocation MUST take effect within 1 hour of the publisher's request or of the operator's report of a leak (proposed, owner to confirm). From that moment a publish with the revoked token is refused ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-972</td>
+<td>A client MUST treat an HTTP <code>429</code> response as retryable. This is an exception to [PKG-373] for that status code. It waits for the <code>Retry-After</code> value, given in seconds or as an HTTP date, and MUST ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-973</td>
+<td>The registry MUST answer a request over its per-client limit on metadata and download requests with <code>429</code>, the code <code>registry.rate-limited</code> and a <code>Retry-After</code> header, as [PKG-704] requires. The ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-974</td>
+<td>The <code>signed</code> object of every metadata document MUST carry <code>spec</code>, the registry protocol version it follows, with the same value that <code>root.json</code> carries (proposed, owner to confirm: the examples of ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-976</td>
+<td>After a successor <code>spec</code> is first published, the registry MUST keep serving the previous <code>spec</code> for at least 12 months (proposed, owner to confirm). During that window the previous <code>spec</code> keeps the ...</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PKG-978</td>
+<td>A bundle <code>.tar</code> MUST NOT expand beyond 2 GiB or contain more than 10,000 entries (proposed, owner to confirm). A bundle over either limit is refused with <code>registry.size</code> before any file is written.</td>
+<td><code>reference-registry</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-000</td>
+<td>A version in <code>queued-review</code> MUST carry <code>review_queued_at</code> (UTC, second precision) in its <code>plugins/&lt;id&gt;.json</code> entry and <code>ilium plugin info &lt;id&gt;@&lt;version&gt;</code> MUST print it; when the time since ...</td>
+<td><code>publish-publisher-workflow</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-002</td>
+<td>A version that reaches <code>rejected</code> MUST NOT be stored as a published version, and its version number MUST remain free for a new upload. Proposed, owner to confirm: the rejection record names the stage ...</td>
+<td><code>publish-publisher-workflow</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-006</td>
+<td>After a <code>registry.unreachable</code> or a timeout on <code>publish</code>, the publisher MUST run <code>ilium plugin info &lt;id&gt;@&lt;version&gt;</code> before publishing again. If the registry returns the version with the same SHA-256 ...</td>
+<td><code>publish-publisher-workflow</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-008</td>
+<td><code>yank</code> MUST require <code>--reason &lt;text&gt;</code> and MUST store the reason in the signed metadata, and the reason MUST appear to the user in <code>ilium plugin info</code>. Proposed, owner to confirm: the reason has at ...</td>
+<td><code>publish-yank-deprecate-takedown</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-011</td>
+<td>A <code>security:</code> yank MUST NOT be reversed by <code>unyank</code> while the reason is not withdrawn. Proposed, owner to confirm: <code>unyank</code> of a security yank requires the operator's confirmation, recorded in the ...</td>
+<td><code>publish-yank-deprecate-takedown</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-017</td>
+<td>A mirror MUST be synced at an interval of no more than half of the shortest <code>expires</code> lifetime of the metadata it serves. Proposed, owner to confirm: the timestamp document expires 24 hours after it ...</td>
+<td><code>publish-mirror-runbook</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-018</td>
+<td>A mirror operator MUST alert when the <code>expires</code> time of <code>timestamp.json</code> on the mirror is less than 6 hours away. Proposed, owner to confirm: the alert threshold is 6 hours. Test: stop the sync, wait ...</td>
+<td><code>publish-mirror-runbook</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-022</td>
+<td>A takedown (<a href="/pages/reference-registry/#policy">PKG-403</a>) MUST be applied to a mirror within 6 hours of the source registry publishing it. Proposed, owner to confirm: a mirror operator who cannot ...</td>
+<td><code>publish-mirror-runbook</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-024</td>
+<td>A full mirror's folder MUST have free space of at least twice the size of the source's current blobs, so that a sync can write a new file before it removes the old one. Proposed, owner to confirm: ...</td>
+<td><code>publish-mirror-runbook</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-025</td>
+<td>A mirror operator MUST NOT store a mirror on a disk that is also the root of the operator's own build cache. Proposed, owner to confirm: keep the mirror on its own filesystem, so that a full build ...</td>
+<td><code>publish-mirror-runbook</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-027</td>
+<td>The timestamp document MUST expire 24 hours after it is signed, and the registry MUST re-sign it at least every 12 hours even when nothing changed. Proposed, owner to confirm: 24 hours is the ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-028</td>
+<td>The snapshot document MUST expire no sooner than the timestamp document, and SHOULD expire 7 days after it is signed. Proposed, owner to confirm: 7 days.</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-033</td>
+<td>A publish token MUST be issued to one publisher id and MUST expire 90 days after it is issued (<a href="/pages/reference-registry/#publish-tokens">PKG-968</a>). The operator MUST run a report of tokens older ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-037</td>
+<td>A takedown MUST be approved by a second operator when the registry has more than one operator. Proposed, owner to confirm: the second approval is recorded in the transparency log with the first.</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-040</td>
+<td>When a published version is found to carry malware, the operator MUST take it down under <a href="/pages/reference-registry/#policy">PKG-403</a> within 24 hours of the report. Proposed, owner to confirm: 24 ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-042</td>
+<td>A review refusal of a <code>queued-review</code> version MUST be handled as a takedown of that version under [PKG-403] and [PKG-821] (blob removed, tombstone kept, <code>registry.version-exists</code> for a re-publish of ...</td>
+<td><code>publish-publisher-workflow</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-043</td>
+<td>An appeal MUST NOT suspend the takedown. The <code>blocked_ids</code> entry MUST stay in <code>revocations.json</code>, and installed copies MUST stay <code>disabled-blocked</code>, until the decision is published. After a ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-044</td>
+<td>The operator MUST accept an appeal only from a maintainer of the publisher id, authenticated by the registry account with its second factor or by a signature of a trusted key of that publisher id. An ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-045</td>
+<td>The registry MUST NOT include the identity, address or report text of an abuse reporter in <code>revocations.json</code>, <code>quarantine.json</code>, <code>policy.json</code>, any transparency log entry, any plugin page, or any ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-046</td>
+<td>The abuse intake of PKG-705 MUST accept a report that names a plugin id, a version or a package <code>sha256</code>, and one rule id of <code>policy.json</code>. It MUST return a report id in the acknowledgement, and it ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-047</td>
+<td>The registry MUST refuse a yank reason, a deprecate message or a takedown reason that contains a control character other than line feed, with <code>registry.reason-invalid</code>; a client MUST render these ...</td>
+<td><code>publish-yank-deprecate-takedown</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-048</td>
+<td>After a takedown, the registry MUST send a notice to every maintainer of every plugin whose latest release has a non-optional <code>requires.plugins</code> range that only the taken-down version satisfies, and ...</td>
+<td><code>publish-yank-deprecate-takedown</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-049</td>
+<td>During the 24-hour decision window of PKG-705 the operator MAY quarantine the reported range through <code>quarantine.json</code>. When the decision is <code>none</code>, the quarantine MUST be withdrawn (EXT-059) within ...</td>
+<td><code>publish-registry-operator-guide</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-050</td>
+<td>A rights holder MUST send a claim that names the plugin id, the version or the package <code>sha256</code>, the work claimed, the proof of ownership, the legal name and a contact address of the rights holder, ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-051</td>
+<td>The operator MUST acknowledge a complete claim within 1 business day with a claim id, and MUST decide within 10 business days whether to quarantine, take down or take no action. The decision MUST be ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-053</td>
+<td>A publisher whose version is quarantined or taken down for a claim MAY send a counter-notice to the claims address, stating the version, why the publisher believes the claim is wrong, and a contact ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-054</td>
+<td>When the claimant does not show a court filing or a written agreement within 14 calendar days of the forwarding of a counter-notice, the operator MUST withdraw the quarantine of that version within 1 ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-055</td>
+<td>When three claims against one publisher id are upheld within 12 months, the operator MUST suspend that publisher id under <a href="/pages/reference-registry/#policy">PKG-091</a> for 90 days, and MUST tell every ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-056</td>
+<td>The registry MUST record every decision on a claim in the transparency log with the claim id, the plugin id, the version, the decision and the time. It MUST NOT publish the claimant's contact ...</td>
+<td><code>publish-rights-claims</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-057</td>
+<td>A release whose manifest <code>license</code> differs from the <code>license</code> of the previous version MUST name the old and the new SPDX identifier in its release notes, and <code>ilium plugin info &lt;id&gt;@&lt;version&gt;</code> MUST ...</td>
+<td><code>guide-publishing-and-support</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-058</td>
+<td>With <code>auto_update = install</code>, the host MUST NOT install a version whose <code>license</code> differs from the <code>license</code> of the installed version. It MUST show the change as a notice, and it MUST install the ...</td>
+<td><code>guide-publishing-and-support</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-060</td>
+<td>Before a release changes the licence of a plugin, the publisher MUST hold written consent from every contributor whose code is still in the tree of that release, or MUST remove or rewrite that code ...</td>
+<td><code>guide-publishing-and-support</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-061</td>
+<td>The registry operator MUST screen every new publisher account against the sanctions lists that bind the operator, at account creation and before the operator issues a new token to an existing ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-062</td>
+<td>A refusal on sanctions grounds MUST NOT name the list, the matched entry or the country to the requester. The requester MUST see only <code>registry.account-refused</code> and the claims contact of ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-063</td>
+<td>The operator MUST keep the screening result and the date of each screen in the operator's private record. The registry MUST NOT publish the result in <code>revocations.json</code>, <code>policy.json</code>, the ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-064</td>
+<td>The project MUST keep a written export classification statement for every encryption function of the host, the WASM sandbox and the TLS client. The statement MUST name each library and each ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-065</td>
+<td>A package that bundles a non-code asset, meaning a model weight file, a dataset, a font, an image or a sound file, MUST list each asset in its <code>NOTICE</code> file with the asset's path in the package, its ...</td>
+<td><code>guide-publishing</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-066</td>
+<td>An author MUST NOT package an asset whose licence does not allow redistribution in the package. The author MUST instead tell the user where to fetch that asset. A level B review MUST refuse a version ...</td>
+<td><code>guide-publishing</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-068</td>
+<td>A use restriction in an asset licence, such as a limit to non-commercial use or to a field of use, MUST appear in <code>NOTICE</code> in the words of the licence text, and the README MUST state the restriction ...</td>
+<td><code>guide-publishing</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-069</td>
+<td>A plugin MAY be sold, or licensed with a licence key, under any licence its author chooses. The registry MUST NOT refuse a publish because the plugin charges for use (proposed, owner to confirm).</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-070</td>
+<td>A plugin that charges for use MUST carry its end-user terms in its <code>LICENSE</code> file or in a terms file named in its README, and MUST state in its README the price model and the refund address ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-071</td>
+<td>The registry operator MUST NOT take payment, hold entitlement data or mediate a refund for a plugin. The plugin page of a paid plugin MUST show the seller's contact address, and that address is the ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>PUB-072</td>
+<td>A licence key MUST NOT appear in the package, in a test fixture or in the release notes. The seller issues the key outside Ilium, and a plugin that checks a key MUST declare that check in its ...</td>
+<td><code>governance</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-000</td>
+<td>On every uninstall that keeps data, the host MUST record the <code>publisher_id</code> and <code>key_id</code> of the uninstalled version in <code>storage/&lt;id&gt;/owner.json</code> (host-only, mode 0600); a later install of the same id ...</td>
+<td><code>reference-install-update-uninstall</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-015</td>
+<td>The host MUST refuse a revocation feed, a release blocklist or a policy blocklist whose <code>issued</code> time is earlier than the <code>issued</code> of the last good copy from the same source, MUST keep the last good ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-016</td>
+<td>Every host release MUST publish <code>SHA256SUMS.sig</code>, a detached Ed25519 signature over the exact bytes of <code>SHA256SUMS</code> made with a release-archive key that is distinct from the blocklist release key and ...</td>
+<td><code>reference-host-release-verification</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-017</td>
+<td><code>channels.json</code> MUST carry an <code>issued</code> time and the host MUST refuse a <code>channels.json</code> whose <code>issued</code> is earlier than the cached one or more than 24 h in the future, keeping the cached copy and ...</td>
+<td><code>reference-host-release-verification</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-018</td>
+<td>The helper MUST set its own <code>oom_score_adj</code> to 500 before the Wasmtime engine starts and MUST NOT be able to lower it afterwards, and the session server MUST leave its own <code>oom_score_adj</code> unchanged, ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-019</td>
+<td>The helper cgroup leaf MUST set <code>memory.swap.max</code> to 0 so that the helper's <code>memory.max</code> is enforced in RAM and plugin memory never reaches swap; when the swap controller is not delegated the host ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-036</td>
+<td>In the <code>setrlimit</code> fallback of SEC-065 the server watchdog MUST terminate the helper with SIGKILL when two consecutive one-second RSS samples exceed the helper's <code>memory.max</code> equivalent (the instance ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-037</td>
+<td>The fallback <code>RLIMIT_AS</code> value MUST equal the helper's <code>memory.max</code> equivalent plus the engine's fixed virtual reservations: the guard region and static reservation of SEC-053 and the platform table ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-038</td>
+<td>Because <code>RLIMIT_NPROC</code> counts every process of the user and not only the helper's children, the fallback of SEC-065 MUST compute it at each helper start as the user's current process count plus the ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-039</td>
+<td>A fork or clone refused by the helper's <code>pids.max</code> (or by <code>RLIMIT_NPROC</code> in the fallback) MUST be returned to the plugin as <code>busy</code> with reason <code>process-limit</code> and <code>retry-after-ms</code> 1,000, MUST be ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-047</td>
+<td>Because <code>RLIMIT_CPU</code> is cumulative over the life of the process, the fallback of SEC-065 MUST set its soft value to the <code>ilium-execution</code> refill of the hosted sides over 24 hours (500 ms per second ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-048</td>
+<td>Each <code>process.run</code> or <code>process.spawn</code> child MUST run in its own cgroup leaf below the helper's leaf (below a per-plugin leaf for T1) with <code>memory.max</code> equal to <code>process_memory_mib</code> (default 256, ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-049</td>
+<td>The <code>telemetry</code> entry of a plugin in <code>consents.json</code> MUST be an object with <code>state</code> (<code>not-asked</code>, <code>granted</code> or <code>declined</code>), <code>changed_at</code> (UTC, ISO 8601), <code>plugin_version</code> (the installed version when ...</td>
+<td><code>reference-grant-review-and-consent</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-068</td>
+<td>The host text catalogue of [AUT-623] MUST be embedded in the Ilium binaries or read only from the install location of those binaries, MUST NOT be loaded from a config, data, cache or plugin path, and ...</td>
+<td><code>security</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-069</td>
+<td>The server MUST open the system policy file and the system trust store without following a symbolic link or reparse point at the system path, and MUST apply the owner and mode check of [SEC-182] to ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-088</td>
+<td>No environment variable (<code>ILIUM_CONFIG_DIR</code>, <code>ILIUM_TRUST_STORE</code>, <code>XDG_*</code>, <code>HOME</code>) and no command-line flag MUST change the path of the system policy file of [SEC-180], of the system trust store of ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-089</td>
+<td>A <code>policy-loaded</code> record MUST carry one <code>sources</code> entry per file read, each with <code>path</code>, <code>sha256</code>, <code>owner</code> and <code>used</code> (true or false, with <code>reason</code> when false), plus the <code>effective_sha256</code> of the ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-090</td>
+<td>Each <code>install</code>, <code>update</code> and <code>downgrade</code> record MUST carry <code>source</code> (<code>registry:&lt;url&gt;</code>, <code>bundle:&lt;sha256 of the bundle&gt;</code>, <code>file</code> or <code>url</code>) and, when a lockfile drove it, <code>lockfile_sha256</code>; a <code>sync ... |</code>reference-audit-log`</td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+<td></td>
+</tr>
+<tr>
+<td>SEC-091</td>
+<td><code>ilium plugin policy show</code> MUST exit 0 only when every system policy file that exists is <code>used</code> and valid; it MUST exit 1 when a system file is ignored ([SEC-182]) or malformed ([SEC-187]), while ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-092</td>
+<td>The policy parser MUST accept CRLF line endings and one leading UTF-8 byte-order mark in a policy file, because management tools on Windows write both, and MUST treat any other encoding or a ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-093</td>
+<td><code>settings.locked</code> MUST accept <code>plugins.registry.urls</code>, <code>plugins.registry.root</code> and <code>plugins.registry.offline</code>; when one is locked, <code>ilium plugin registry add</code>, <code>ilium plugin registry remove</code> and the ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-094</td>
+<td>For every event of the catalogue of [SEC-222], the kernel MUST append the audit record, or queue it under [SEC-225], before the result of the action is reported to the user interface or the CLI ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-095</td>
+<td>The server MUST open <code>audit.jsonl</code>, the audit directory and <code>&lt;state&gt;/crashes/</code> without following symbolic links or reparse points; when any of them is a link, the server MUST write nothing through ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-096</td>
+<td>The kernel MUST write only <code>event</code> values listed in the catalogue of [SEC-222] or in a section of this page that extends it, and the catalogue MUST list every event the kernel can write, including ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-101</td>
+<td>(proposed, owner to confirm) Schema version <code>1</code> is the only version in 0.1.0 ([SEC-187]). A later schema version is introduced in a release note, and a server MUST keep reading the previous version ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-115</td>
+<td>(proposed, owner to confirm) The reason codes are the stable contract for every notice on this page: <code>policy.invalid</code>, <code>policy.tier-denied</code>, <code>policy.id-denied</code>, <code>policy.publisher-denied</code>, ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-125</td>
+<td><code>ilium plugin audit --verify</code> MUST verify every <code>audit-&lt;first seq&gt;.jsonl</code> file in the audit directory in <code>seq</code> order and then <code>audit.jsonl</code>, MUST check that the first record of each file carries the ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-126</td>
+<td>When <code>[audit] sink</code> is <code>syslog</code> or <code>journald</code> and the system log cannot be reached, the server MUST still append the record to the local file, MUST NOT delay or refuse the audited action, MUST count ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-127</td>
+<td>An append to <code>audit.jsonl</code> MUST NOT block the server's main loop for more than 100 ms (proposed, owner to confirm) while waiting for the writer file lock of another server; when the lock is not ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-128</td>
+<td>A rotated audit file <code>audit-&lt;first seq&gt;.jsonl</code> MUST be set to mode 0400 (read-only for the owner on Windows) at rotation, and the server MUST never append to, rewrite or rename a rotated file; the ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-129</td>
+<td>An <code>update</code> or <code>downgrade</code> record MUST carry the version that was active before the change in its <code>detail</code> string as <code>from=&lt;version&gt;</code>, with <code>version</code> holding the version installed by the change, ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-130</td>
+<td>A <code>policy-loaded</code> record MUST carry in <code>detail</code> the absolute path and the SHA-256 of every policy file read and whether it was <code>used</code> or <code>ignored</code>, in the form <code>path=&lt;abs&gt; sha256=&lt;hex&gt; source=used</code>, ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-131</td>
+<td>The kernel MUST write one <code>server-start</code> record at each server start, with <code>detail</code> holding the host version, the host API range and <code>prev=clean</code> or <code>prev=unclean</code> according to whether the previous ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-132</td>
+<td>Each run of <code>ilium plugin support-bundle &lt;id&gt;</code> or <code>support-bundle --all</code> that writes an archive, and each attach of a diagnostics log through the attach flow, MUST write one <code>support-bundle</code> audit ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-133</td>
+<td>Turning diagnostics file logging on or off ([OPS-002]), starting the server with <code>ILIUM_PLUGIN_TRACE=1</code> ([HST-360]) and raising a plugin's log threshold to <code>debug</code> or <code>trace</code> ([OPS-010]) MUST each ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-134</td>
+<td>Every audit record MUST carry an integer field <code>schema</code> whose value is 1 for the schema of [SEC-221]; a change that adds, removes or renames a field or changes a field's meaning MUST increase the ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-135</td>
+<td>While the focused pane's PTY has echo turned off (for example at a password prompt), the host MUST NOT deliver any <code>key-pressed</code> event to a <code>keys.intercept</code> grab, whether the grab names that pane or ...</td>
+<td><code>capability-keys-intercept</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-136</td>
+<td>The audit catalogue (SEC-222) MUST include <code>key-grab-start</code> and <code>key-grab-end</code>, written once per grab whose <code>pane</code> is <code>none</code>, with the plugin id, the client id and the chord list, and never the keys ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-137</td>
+<td><code>command-origin</code> MUST include the case <code>plugin</code>, and a <code>command-invoked</code> event produced by another plugin's <code>commands.invoke</code> MUST carry that origin together with the invoking plugin id in ...</td>
+<td><code>api-commands</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-138</td>
+<td>A command of a T1 plugin whose handler exercises a T1-only grant (<code>plugins.manage</code>, <code>settings.write-kernel</code>, <code>settings.read-all</code>, <code>process.run:sh</code>) MUST refuse a <code>command-invoked</code> event with origin ...</td>
+<td><code>reference-extension-security</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-139</td>
+<td>The native video decoder MUST run in a separate decoder process confined like a helper (no network, read access to the one opened file only, memory and pids limits) and never in the server or client ...</td>
+<td><code>api-media</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-157</td>
+<td>The <code>fonts</code> import MUST be classified as pure compute: a package font asset (at most 4 MiB) MUST be parsed and rasterised inside the plugin's own helper, never forwarded to the server or client ...</td>
+<td><code>reference-host-helper</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-158</td>
+<td>Node ids are allocated by a counter and are guessable, so for every submission, intent or call that names a node id, the host MUST refuse with <code>refused(not-found)</code> (identical to a nonexistent id, per ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-159</td>
+<td>A <code>close-node</code> on a pane whose process is still running MUST be refused with <code>refused(conflict)</code> and the message <code>process running</code>, unless the plugin also holds <code>panes.signal</code>. A close made with ...</td>
+<td><code>capability-tree-write</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-160</td>
+<td>The data-read list of SEC-004 MUST also contain every normal-risk grant that delivers user content to a plugin: <code>editor.read</code>, <code>terminal.output-filter</code>, <code>fs.read:&lt;scope&gt;</code> for every normal-risk scope ...</td>
+<td><code>reference-threat-model</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-161</td>
+<td>The egress list of SEC-004 MUST also contain <code>open-external</code> (a URL query string carries data to a remote server), <code>location.geocode</code> (place names leave the machine), <code>inference.embed</code> and ...</td>
+<td><code>reference-threat-model</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-162</td>
+<td>The host MUST cap the panes a plugin can hold open through <code>create-pane</code> at <code>limits.panes_per_plugin</code> (default 16 for T2 and T3, 64 for T1); a <code>create-pane</code> beyond the cap MUST be refused with ...</td>
+<td><code>capability-panes-create</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-163</td>
+<td>The loopback HTTP API listener MUST limit unauthenticated requests to 20 per second and 8 concurrent connections per source port owner, MUST close a connection whose headers do not arrive within 5 s, ...</td>
+<td><code>reference-network-egress</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-164</td>
+<td>The <code>sessions.list-live</code> function MUST return the <code>project</code> path only for sessions in which the calling plugin is installed and enabled; other live sessions MUST be listed with their session id and ...</td>
+<td><code>capability-sessions-cross</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-165</td>
+<td>Cells, retained-mode nodes and glyph-plane output that a plugin emits outside the rectangle the layout allotted to its pane, panel or scene MUST be discarded by the client before compositing, so no ...</td>
+<td><code>reference-host-rendering</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-166</td>
+<td>The mitigation table of SEC-030 MUST contain one row for every high-risk grant in the capability table and one row for every host import interface of <code>ilium:plugin@0.1.0</code> (a row may state class ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-167</td>
+<td><code>journal.log-event</code> MUST refuse with <code>invalid-argument</code> any <code>kind</code> that equals a host entry kind (<code>pane-created</code>, <code>pane-exited</code>, <code>input-sent</code> and every other kind the host writes) or that starts with ...</td>
+<td><code>capability-journal-read</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-168</td>
+<td>The threat model MUST state, for each boundary B1 to B8, the WIT import and export interfaces whose data crosses it, and a CI check MUST fail when an interface of <code>ilium:plugin@0.1.0</code> is assigned to ...</td>
+<td><code>reference-threat-model</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-700</td>
+<td>A security advisory MUST be published as a machine-readable JSON document (OSV schema 1.6 (proposed, owner to confirm)) beside the human page, and MUST contain <code>id</code>, <code>aliases</code> (CVE if assigned), ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-707</td>
+<td>Before compilation the host MUST bound the component: at most 64 MiB (proposed, owner to confirm) of uncompressed bytes, 100000 functions, 1 MiB of any single function body and 16 nested component ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-709</td>
+<td>The helper MUST set <code>RLIMIT_NOFILE</code> to 64 (proposed, owner to confirm), <code>RLIMIT_FSIZE</code> to the granted storage quota and <code>RLIMIT_MEMLOCK</code> to 0, and a call that exceeds a limit MUST return ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-710</td>
+<td>A guest that exhausts its fuel or epoch budget N consecutive times (default 3 within 60 s) (proposed, owner to confirm) MUST be disabled with notice <code>Plugin stopped: repeated limit hits</code>, an audit ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-711</td>
+<td>Timers and clocks exposed to guests MUST be coarsened to 100 microseconds (proposed, owner to confirm) for T3 plugins without the <code>high-resolution-time</code> grant, and the host MUST NOT expose a ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-712</td>
+<td>On kernels that support it (Linux 5.13 or later (proposed, owner to confirm)) the helper MUST additionally apply a Landlock ruleset equal to its mount view, and a Landlock failure MUST be audited as ...</td>
+<td><code>reference-sandbox</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-717</td>
+<td>A grant MAY carry an expiry. <code>ilium plugin grant --until &lt;timestamp&gt;</code> MUST store it, the host MUST treat an expired grant as absent at the next call, write the audit line <code>grant-expired</code>, and show ...</td>
+<td><code>reference-grant-review-and-consent</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-719</td>
+<td>The consent prompt MUST NOT be drawable, answerable or dismissible by any plugin, MUST rate-limit to at most one prompt per plugin per 30 s (proposed, owner to confirm), and MUST auto-deny after 120 ...</td>
+<td><code>reference-grant-review-and-consent</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-722</td>
+<td>\</td>
+<td>Signing keys MUST be Ed25519 with a validity of at most 2 years (proposed, owner to confirm); the registry MUST refuse a publish signed with an expired key, and the CLI MUST warn from 60 days ...</td>
+<td><code>reference-signing-and-trust</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+</tr>
+<tr>
+<td>SEC-726</td>
+<td>The registry MUST run automated static analysis on every upload (denied imports, oversize components, known malicious digests) and MUST hold a version that matches a rule in state <code>pending-review</code> ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-728</td>
+<td>The release signing key MUST be generated and held in hardware (HSM or hardware token) with at least 2 of 3 custodians required to sign (proposed threshold, owner to confirm), and the key ceremony ...</td>
+<td><code>reference-release-key-compromise</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-729</td>
+<td>For an active exploit the project MUST be able to ship an emergency-disable entry (EXT-057) within 4 hours (proposed, owner to confirm) of confirmation, MUST publish an incident status page, and MUST ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-950</td>
+<td>The policy has no key that sets a ceiling for a session resource: <code>session_memory_mib</code>, <code>session_helpers</code>, <code>session_processes</code>, <code>disk_mib</code>, <code>storage_bucket_mib</code> and the <code>ilium-execution</code> CPU budget. ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-951</td>
+<td>(proposed, owner to confirm) An entry of <code>packages.blocked_versions</code> has the form <code>&lt;id&gt;@&lt;version&gt;</code> with an exact version. A package whose id and version match an entry MUST be refused at install and ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-952</td>
+<td>(proposed, owner to confirm) An entry of <code>packages.pinned_versions</code> names one version for one id. Install and update of that id MUST install only the pinned version, and a different installed version ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-953</td>
+<td>(proposed, owner to confirm) Precedence between <code>audit.keep_days</code> and the storage ceiling of [USR-258]. <code>audit.keep_days</code> is the minimum retention for audit files: the host MUST NOT delete a rotated ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-954</td>
+<td>(proposed, owner to confirm) Every deletion of an audit or crash file by the storage ceiling or by <code>audit.keep_days</code> MUST write one <code>audit-retention-deleted</code> record first, with the file name, the age ...</td>
+<td><code>reference-admin-policy</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-955</td>
+<td>Crash record retention. One period and one count apply to every crash record of [SEC-447]: a crash record MUST be deleted once it is more than 30 days old (proposed, owner to confirm), and when more ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-957</td>
+<td>Verification of a damaged final record. <code>ilium plugin audit --verify</code> MUST report a partial final line as <code>torn-tail</code> with its byte offset, and MUST NOT report it as a broken chain or as tampering. ...</td>
+<td><code>reference-audit-log</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-958</td>
+<td>(proposed, owner to confirm) Plugin data is stored as plain bytes, and the host does not encrypt it at rest. This covers the plugin data and bucket folders, the pre-migration backups, the session ...</td>
+<td><code>reference-secrets</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Search the decision record for SEC-958 and assert that it states that plugin data, pre-migration backups, session snapshots, plugin logs and <code>ilium plugin backup</code> archives are plain bytes by default.</td>
+</tr>
+<tr>
+<td>SEC-959</td>
+<td>(proposed, owner to confirm) When the keyring becomes available again after a start that used the file store ([SEC-241]), the host MUST move every value in <code>secrets.json</code> into the keyring at the next ...</td>
+<td><code>reference-secrets</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-963</td>
+<td>(proposed, owner to confirm) When the keyring is reset or emptied, or a secret value is missing from the store for any other reason, the host MUST treat that secret as unset. <code>settings.get-json</code> MUST ...</td>
+<td><code>reference-secrets</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-964</td>
+<td>(proposed, owner to confirm) A secret lost by a keyring change ([SEC-963]) or by a restore ([SEC-250]) is re-entered by the user, one secret row at a time, on the settings tab of the plugin that owns ...</td>
+<td><code>reference-secrets</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-966</td>
+<td>Security-fix window. Each host minor receives security fixes for the window of [DEV-964]: at least 12 months (proposed, owner to confirm) after its release date. Its security-fix end date is that ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-968</td>
+<td>Advisory badge. While an advisory of severity High or Critical applies to the running host, the status bar MUST show <code>Update: &lt;advisory id&gt;</code> (proposed, owner to confirm) next to the <code>SAFE</code> badge of ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-969</td>
+<td>(proposed, owner to confirm) A publisher MAY pin, for each plugin id it owns, the builder identity that its release builds must carry: the source repository URL and the CI workflow path. The registry ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-970</td>
+<td>(proposed, owner to confirm) A package MAY carry an in-toto attestation named <code>provenance.intoto.json</code>, listed in <code>files</code> and hashed like every other file. When the administrator sets ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-971</td>
+<td>(proposed, owner to confirm) The host MUST verify the attestation signature against the key that the registry lists for the builder, MUST check that the builder identity and the source repository ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-972</td>
+<td>(proposed, owner to confirm) The host MUST write <code>provenance.verified</code> or <code>provenance.refused</code> to the audit log with the package digest, the builder identity, the signing key fingerprint and the ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-973</td>
+<td>(proposed, owner to confirm) The registry MUST scan the SBOM of every published package, the CycloneDX file of [DEV-940] or the <code>sbom.spdx.json</code> that the package lists, against an advisory database ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-974</td>
+<td>(proposed, owner to confirm) A match of severity High or Critical that the publisher has not answered within 14 days MUST be shown on the package registry page as <code>Vulnerable dependency: &lt;advisory ... |</code>reference-security-response`</td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+<td></td>
+</tr>
+<tr>
+<td>SEC-975</td>
+<td>(proposed, owner to confirm) An installed plugin whose version has an open match of severity High or Critical MUST show <code>Vulnerable dependency: &lt;advisory id&gt;</code> in Plugins and in <code>ilium plugin ... |</code>reference-security-response`</td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+<td></td>
+</tr>
+<tr>
+<td>SEC-976</td>
+<td>(proposed, owner to confirm) When a required plugin B is quarantined, taken down or yanked with the reason <code>security</code>, every installed dependant A whose non-optional <code>requires</code> range is satisfied ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-977</td>
+<td>(proposed, owner to confirm) A dependant in <code>waiting-dependency</code> for a blocked B MUST NOT be instantiated. Plugins MUST show <code>Blocked: requires B, which is &lt;reason&gt;</code> for A, and any call that would ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-978</td>
+<td>(proposed, owner to confirm) When a version of B that satisfies the range of A, and that is neither quarantined nor taken down, is installed, the host MUST return A to its previous state at the next ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-979</td>
+<td>(proposed, owner to confirm) Uninstalling A while B is blocked MUST succeed without <code>--force</code>, and it MUST clear the <code>waiting-dependency</code> reason of A. Uninstalling B while a dependant A is blocked ...</td>
+<td><code>reference-dependency-resolution</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-980</td>
+<td>(proposed, owner to confirm) When the project publishes an advisory for the Rust crate <code>ilium-plugin-sdk</code> or the npm package <code>@ilium/plugin-sdk</code> in the format of [SEC-700], the registry MUST mark ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-981</td>
+<td>(proposed, owner to confirm) For an SDK advisory of severity Critical with a known exploit, the registry MAY yank the affected packages with the reason <code>sdk-advisory</code> 30 days after the advisory is ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-982</td>
+<td>(proposed, owner to confirm) The host MUST refuse to load a T2 or T3 package built with an SDK version that a shipped advisory lists as affected, with <code>package.sdk-vulnerable</code>, when the policy sets ...</td>
+<td><code>reference-trust-and-supply-chain</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-983</td>
+<td>(proposed, owner to confirm) The project MUST keep a written list of the vulnerability-reporting duties that apply to it in each region where the registry serves packages, separately for the ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-984</td>
+<td>(proposed, owner to confirm) A publisher that distributes a plugin in a region with product-security reporting law MUST report an actively exploited vulnerability in that plugin to the authority that ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>SEC-985</td>
+<td>(proposed, owner to confirm) The registry operator MUST name a contact for market surveillance authorities and MUST answer a lawful information or takedown request from such an authority within the ...</td>
+<td><code>reference-security-response</code></td>
+<td>Not recorded</td>
+<td>First public release</td>
+<td>Open</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rules-for-the-register">Rules for the register</h3>
+<ul>
+<li><strong>[SEC-990]</strong> Every security value marked <code>proposed, owner to confirm</code> MUST appear once in this register with its ID, the proposed value, the owner and a due release.</li>
+<li><strong>[SEC-991]</strong> A release MUST NOT ship while a row of this register has no confirmed value, and the release checklist MUST list every open row.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-secrets/"><small>Previous</small>Secrets</a><a class="next" href="/pages/reference-security-response/"><small>Next</small>Security response</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#register">Register</a></li><li class="l2"><a href="#rules-for-the-register">Rules for the register</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -160,9 +160,10 @@ fn state_key(pane: u64) -> String {
     format!("{STATE_PREFIX}{pane}")
 }
 
-fn load_state(api: &mut dyn HostApi, pane: u64) -> Option<State> {
-    let bytes = HostStorage::get(api, Bucket::Session, state_key(pane))?;
-    serde_json::from_slice(&bytes).ok()
+fn load_state(api: &mut dyn HostApi, pane: u64) -> Result<Option<State>, PluginError> {
+    HostStorage::get(api, Bucket::Session, state_key(pane))?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(|error| PluginError::new(ErrorCode::InvalidArgument, error.to_string())))
+        .transpose()
 }
 
 fn save_state(api: &mut dyn HostApi, state: &State) -> Result<(), PluginError> {
@@ -172,9 +173,10 @@ fn save_state(api: &mut dyn HostApi, state: &State) -> Result<(), PluginError> {
 }
 
 /// Removes the durable half of a conversion: the state and the watchdog.
-fn drop_state(api: &mut dyn HostApi, pane: u64) {
-    let _ = HostStorage::remove(api, Bucket::Session, state_key(pane));
+fn drop_state(api: &mut dyn HostApi, pane: u64) -> Result<(), PluginError> {
+    HostStorage::remove(api, Bucket::Session, state_key(pane))?;
     HostTimers::cancel_durable(api, format!("{WATCHDOG_PREFIX}{pane}"));
+    Ok(())
 }
 
 fn to_client(channel: &str, payload: &Value) -> Submission {
@@ -290,9 +292,10 @@ pub fn begin(
     }
     // The menu runs one conversion at a time; another plugin calling the service may start several, one per pane.
     let busy = if strict {
-        !HostStorage::keys(api, Bucket::Session, STATE_PREFIX.to_string()).is_empty()
+        !HostStorage::keys(api, Bucket::Session, STATE_PREFIX.to_string())
+            .map_err(|error| refusal(error.code, error.message))?.is_empty()
     } else {
-        load_state(api, pane).is_some()
+        load_state(api, pane).map_err(|error| refusal(error.code, error.message))?.is_some()
     };
     if busy {
         return Err(refusal(ErrorCode::Conflict, "another conversion runs"));
@@ -322,16 +325,20 @@ pub fn begin(
         source: None,
         session_id: None,
     };
-    save_state(api, &state).map_err(|error| refusal(error.code, error.message))?;
+    let watchdog = format!("{WATCHDOG_PREFIX}{pane}");
+    let deadline = HostClock::now_unix_millis(api).saturating_add(WATCHDOG_MILLIS);
+    HostTimers::at(api, EpochMs(deadline), watchdog.clone())
+        .map_err(|error| refusal(error.code, error.message))?;
+    if let Err(error) = save_state(api, &state) {
+        HostTimers::cancel_durable(api, watchdog);
+        return Err(refusal(error.code, error.message));
+    }
     let _ = HostJournal::log_event(
         api,
         Some(NodeId(pane)),
         "convert-started".to_string(),
         json!({ "target": target }).to_string(),
     );
-    let deadline = HostClock::now_unix_millis(api) + WATCHDOG_MILLIS;
-    let _ = HostTimers::at(api, EpochMs(deadline), format!("{WATCHDOG_PREFIX}{pane}"));
-
     out.push(to_client(
         "begin",
         &json!({"pane": pane, "source": source, "target": target}),
@@ -392,7 +399,7 @@ pub fn on_cancel(api: &mut dyn HostApi, payload: &[u8], out: &mut Vec<Submission
     let Some(pane) = pane_of_message(payload) else {
         return;
     };
-    let Some(state) = load_state(api, pane) else {
+    let Ok(Some(state)) = load_state(api, pane) else {
         return;
     };
     if state.phase != "stopped" {
@@ -412,7 +419,7 @@ pub fn on_resume(api: &mut dyn HostApi, payload: &[u8], out: &mut Vec<Submission
     let Some(pane) = pane_of_message(payload) else {
         return;
     };
-    let Some(state) = load_state(api, pane) else {
+    let Ok(Some(state)) = load_state(api, pane) else {
         return;
     };
     if state.phase != "failed" || state.can_resume != Some(true) {
@@ -428,7 +435,10 @@ pub fn on_resume(api: &mut dyn HostApi, payload: &[u8], out: &mut Vec<Submission
             None => return,
         },
     };
-    discard(api, pane);
+    if let Err(error) = discard(api, pane) {
+        out.push(toast(&format!("Could not clear conversion state: {}", error.message)));
+        return;
+    }
     let _ = HostJournal::log_event(
         api,
         Some(NodeId(pane)),
@@ -467,14 +477,22 @@ pub fn on_timer(api: &mut dyn HostApi, name: &str, out: &mut Vec<Submission>) {
 
 /// Ends a conversion without a result: stops what runs, unfreezes the pane and tells the client.
 fn abandon(api: &mut dyn HostApi, pane: u64, out: &mut Vec<Submission>) {
-    if load_state(api, pane).is_none() {
-        return;
+    match load_state(api, pane) {
+        Ok(Some(_)) => {}
+        Ok(None) => return,
+        Err(error) => {
+            retry_recovery(api, pane, &error, out);
+            return;
+        }
     }
     let job = with_run(pane, |run| run.job).flatten();
     if let Some(job) = job {
         HostJobs::cancel(api, RequestId(job));
     }
-    discard(api, pane);
+    if let Err(error) = discard(api, pane) {
+        retry_recovery(api, pane, &error, out);
+        return;
+    }
     let _ = HostJournal::log_event(
         api,
         Some(NodeId(pane)),
@@ -487,10 +505,18 @@ fn abandon(api: &mut dyn HostApi, pane: u64, out: &mut Vec<Submission>) {
     out.push(finished(pane, false));
 }
 
+fn retry_recovery(api: &mut dyn HostApi, pane: u64, error: &PluginError, out: &mut Vec<Submission>) {
+    let retry = HostClock::now_unix_millis(api).saturating_add(5_000);
+    match HostTimers::at(api, EpochMs(retry), format!("{WATCHDOG_PREFIX}{pane}")) {
+        Ok(_) => out.push(toast(&format!("Could not recover conversion; retrying: {}", error.message))),
+        Err(timer_error) => out.push(toast(&format!("Could not retry conversion recovery: {}", timer_error.message))),
+    }
+}
+
 /// Forgets a conversion: its durable state, its watchdog, its child process and its pending completions.
-fn discard(api: &mut dyn HostApi, pane: u64) {
+fn discard(api: &mut dyn HostApi, pane: u64) -> Result<(), PluginError> {
+    drop_state(api, pane)?;
     stop_child(api, pane);
-    drop_state(api, pane);
     RUNTIME.with(|cell| {
         let mut runtime = cell.borrow_mut();
         runtime.runs.remove(&pane);
@@ -501,6 +527,7 @@ fn discard(api: &mut dyn HostApi, pane: u64) {
         runtime.scans.retain(|_, (owner, _)| *owner != pane);
         runtime.children.retain(|_, owner| *owner != pane);
     });
+    Ok(())
 }
 
 /// Asks the app-server of a pane to end, once.
@@ -522,7 +549,7 @@ fn fail(
     left_out: usize,
     out: &mut Vec<Submission>,
 ) {
-    let Some(mut state) = load_state(api, pane) else {
+    let Ok(Some(mut state)) = load_state(api, pane) else {
         return;
     };
     stop_child(api, pane);
@@ -576,7 +603,10 @@ fn succeed(
     hook: Value,
     out: &mut Vec<Submission>,
 ) {
-    discard(api, pane);
+    if let Err(error) = discard(api, pane) {
+        out.push(toast(&format!("Could not clear conversion state: {}", error.message)));
+        return;
+    }
     let _ = HostJournal::log_event(
         api,
         Some(NodeId(pane)),
@@ -660,7 +690,7 @@ fn describe(outcome: &Outcome) -> String {
 
 /// The agent process was asked to stop: on success the conversion starts.
 fn on_stopped(api: &mut dyn HostApi, pane: u64, outcome: Outcome, out: &mut Vec<Submission>) {
-    let Some(mut state) = load_state(api, pane) else {
+    let Ok(Some(mut state)) = load_state(api, pane) else {
         return;
     };
     if state.phase != "frozen" {
@@ -750,7 +780,7 @@ fn on_job_done(
     outcome: Outcome,
     out: &mut Vec<Submission>,
 ) {
-    if load_state(api, pane).is_none() {
+    if !matches!(load_state(api, pane), Ok(Some(_))) {
         return;
     }
     with_run(pane, |run| run.job = None);
@@ -863,7 +893,7 @@ fn on_proposal_done(
     let Some(written) = with_run(pane, |run| run.written.take()).flatten() else {
         return;
     };
-    if load_state(api, pane).is_none() {
+    if !matches!(load_state(api, pane), Ok(Some(_))) {
         return;
     }
     if !outcome.is_ok() {
@@ -1045,7 +1075,7 @@ pub fn on_child_output(api: &mut dyn HostApi, child: u64, bytes: &[u8], out: &mu
             // A line that is not JSON is noise of the child, not an answer.
             continue;
         };
-        if load_state(api, pane).is_none() || with_run(pane, |run| run.finishing).unwrap_or(true) {
+        if !matches!(load_state(api, pane), Ok(Some(_))) || with_run(pane, |run| run.finishing).unwrap_or(true) {
             return;
         }
         on_app_server_message(api, pane, &message, out);
@@ -1272,7 +1302,7 @@ fn on_scan_done(
     request: RequestId,
     out: &mut Vec<Submission>,
 ) {
-    if load_state(api, pane).is_none() {
+    if !matches!(load_state(api, pane), Ok(Some(_))) {
         return;
     }
     let found = HostFs::take_entries(api, request).and_then(|entries| {

@@ -114,6 +114,59 @@ fn every_component_is_a_stamped_webassembly_component() {
 }
 
 #[test]
+fn component_optional_exports_match_their_manifest() {
+    let mut mismatches = Vec::new();
+    for plugin in plugins() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(plugin.manifest).expect("manifest is JSON");
+        for side in SIDES {
+            let Some(bytes) = plugin.component(side) else {
+                continue;
+            };
+            let declared: BTreeSet<String> = manifest[side]["exports"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect();
+            let mut actual = BTreeSet::new();
+            let mut depth = 0;
+            for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+                match payload.expect("valid component") {
+                    wasmparser::Payload::ModuleSection { .. }
+                    | wasmparser::Payload::ComponentSection { .. } => depth += 1,
+                    wasmparser::Payload::End(_) if depth > 0 => depth -= 1,
+                    wasmparser::Payload::ComponentExportSection(section) if depth == 0 => {
+                        for export in section {
+                            let export = export.expect("valid export");
+                            let name = export.name.name.split('@').next().unwrap_or_default();
+                            let name = name.strip_prefix("ilium:exports/").unwrap_or(name);
+                            let required = if side == "scene" {
+                                ["lifecycle", "renderer"]
+                            } else {
+                                ["lifecycle", "handler"]
+                            };
+                            if !required.contains(&name) {
+                                actual.insert(name.to_owned());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if declared != actual {
+                mismatches.push(format!(
+                    "{}/{side}: declared {declared:?}, component {actual:?}",
+                    plugin.id
+                ));
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
 fn completeness_agrees_with_the_mode_and_the_missing_list() {
     assert!(["skip", "lenient", "strict"].contains(&MODE));
     assert_eq!(COMPLETE, MODE != "skip" && MISSING.is_empty());

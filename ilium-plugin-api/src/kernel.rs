@@ -3,6 +3,7 @@
 
 pub use crate::generated::primitives::terminal::Cell;
 pub use crate::generated::primitives::terminal::ForegroundProcess;
+pub use crate::generated::primitives::terminal::Selection;
 pub use crate::generated::types::tree::NodeView as TreeNode;
 
 use crate::generated::types::{Intent, NodeId, Outcome, PluginId};
@@ -46,10 +47,34 @@ pub trait TreeRead: Send + Sync {
 pub trait PaneRead: Send + Sync {
     /// The visible screen as text.
     fn screen_text(&self, pane: NodeId) -> Option<String>;
+    /// Visible rows, bounded before passing them to a plugin.
+    fn screen_rows(&self, pane: NodeId, max_rows: u32) -> Option<Vec<String>> {
+        Some(self.screen_text(pane)?.lines().take(max_rows as usize).map(str::to_owned).collect())
+    }
+    /// Visible rows and their metadata; implementations may capture them atomically.
+    fn visible_screen(&self, pane: NodeId, max_rows: u32) -> Option<VisibleScreen> {
+        Some(VisibleScreen {
+            rows: self.screen_rows(pane, max_rows)?,
+            columns: self.size(pane).map_or(0, |(columns, _)| columns),
+            state: self.screen_state(pane).unwrap_or_default(),
+        })
+    }
     /// Styled cells of the given rows.
     fn cells(&self, pane: NodeId, rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>>;
+    /// Capture the screen and history atomically, retaining the pane's allocation charge.
+    /// Backends without an atomic capture must refuse rather than return a moving screen.
+    fn freeze_cells(&self, _pane: NodeId) -> Result<Box<dyn FrozenTerminal>, crate::generated::types::PluginError> {
+        Err(crate::generated::types::PluginError::new(
+            crate::generated::types::ErrorCode::Unsupported,
+            "atomic terminal snapshots are unavailable",
+        ))
+    }
     /// The last `lines` lines of history.
     fn history(&self, pane: NodeId, lines: u32) -> Option<Vec<String>>;
+    /// The selection owned by this pane in the client, when available.
+    fn selection(&self, _pane: NodeId) -> Option<Selection> {
+        None
+    }
     /// The size of the pane in columns and rows, when this process knows it.
     fn size(&self, _pane: NodeId) -> Option<(u16, u16)> {
         None
@@ -67,6 +92,17 @@ pub trait PaneRead: Send + Sync {
     }
 }
 
+/// A pane-owned immutable terminal capture. Dropping it releases its retention charge.
+pub trait FrozenTerminal: Send + Sync {
+    /// Bytes charged to this capture, including its retained history.
+    fn retained_bytes(&self) -> usize;
+    /// Whether the original pane instance still exists.
+    fn is_live(&self) -> bool;
+    /// Read rows from this immutable capture, refusing if the pane instance was removed.
+    /// The backend must synchronize that check with removal, not rely on a prior `is_live` call.
+    fn read_cells(&self, first_row: u32, count: u32) -> Option<crate::generated::primitives::terminal::CellRows>;
+}
+
 /// The cursor and revision of a pane's visible screen (`ilium:primitives/terminal` `screen`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ScreenState {
@@ -76,6 +112,17 @@ pub struct ScreenState {
     pub cursor_column: u16,
     /// Grows with every output the screen took in.
     pub revision: u64,
+}
+
+/// One visible screen read, including the metadata associated with its rows.
+#[derive(Debug, Clone)]
+pub struct VisibleScreen {
+    /// Rows in display order, capped to the requested count.
+    pub rows: Vec<String>,
+    /// Width of the captured terminal in cells.
+    pub columns: u16,
+    /// Cursor and revision from the same capture when supported.
+    pub state: ScreenState,
 }
 
 /// What the plugin host needs from the kernel (reference-host-architecture.md).

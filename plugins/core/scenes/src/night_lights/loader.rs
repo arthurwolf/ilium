@@ -91,7 +91,7 @@ impl Imagery for HostImagery {
             &mut *ilium_plugin_sdk::host(),
             Bucket::Shared,
             key.to_owned(),
-        )
+        ).ok().flatten()
     }
 
     fn remember(&mut self, key: &str, value: &[u8]) {

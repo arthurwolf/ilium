@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+#[path = "plugin_management.rs"]
+mod plugin_management;
+
 use ilium_core::{
     ContainerKind as CoreContainerKind, NodeKind, PaneContentKind, SplitOrientation, Tree,
 };
@@ -62,7 +65,7 @@ const SHUTDOWN_BUDGET: Duration = Duration::from_secs(2);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
 /// How long opening a context menu waits for a plugin's dynamic entries.
 const MENU_WAIT: Duration = Duration::from_millis(250);
-/// Outputs the event loop has not collected yet; beyond this the oldest are dropped.
+/// Outputs the event loop has not collected yet; overflow preserves pending requests.
 const OUTBOX_LIMIT: usize = 1024;
 /// The epoch tick of the client engine in milliseconds.
 const EPOCH_TICK_MS: u64 = 10;
@@ -125,6 +128,8 @@ impl ClientPluginStart {
 pub(crate) enum Output {
     /// Send this to the server.
     Request(ClientRequest),
+    /// A cross-side message needs the event loop's admission decision.
+    MessageRequest { request: ClientRequest, reply: mpsc::Sender<bool> },
     /// Show a toast a plugin asked for (toast spec as JSON).
     Toast { plugin: String, toast_json: String },
     /// A plugin view changed.
@@ -156,6 +161,13 @@ pub(crate) enum Output {
         request: super::clipboard_backend::PluginClipboardRequest,
         reply: mpsc::Sender<super::clipboard_backend::PluginClipboardReply>,
     },
+    /// Read the selection from the event loop that owns the painted terminal.
+    TerminalSelection {
+        pane: NodeId,
+        reply: mpsc::Sender<Option<ilium_plugin_api::kernel::Selection>>,
+    },
+    /// Read the last acknowledged visible screen from the event loop.
+    TerminalScreen { pane: NodeId, max_rows: u32, reply: mpsc::Sender<Option<ilium_plugin_api::kernel::VisibleScreen>> },
     /// A plugin asks the user for a path (`fs.pick`); the event loop shows the file picker and
     /// answers on `reply`, `None` when the user dismisses it. Dropping `reply` also dismisses.
     PickPath {
@@ -178,6 +190,8 @@ pub(crate) enum Asked<T> {
     TimedOut,
     /// The event loop dropped the question without an answer.
     Dropped,
+    /// The bounded event-loop outbox could not admit the question.
+    Busy,
     /// The host is stopping or the caller gave up.
     Stopped,
 }
@@ -204,13 +218,10 @@ impl OutputPort {
             .is_none_or(|shared| shared.stopping.load(Ordering::Acquire))
     }
 
-    /// Hands `output` to the event loop; `false` when the host is stopping.
+    /// Hands `output` to the event loop without evicting an already queued output.
     fn send(&self, output: Output) -> bool {
         match self.shared.upgrade() {
-            Some(shared) if !shared.stopping.load(Ordering::Acquire) => {
-                shared.push(output);
-                true
-            }
+            Some(shared) if !shared.stopping.load(Ordering::Acquire) => shared.try_push(output),
             _ => false,
         }
     }
@@ -225,7 +236,7 @@ impl OutputPort {
     ) -> Asked<T> {
         let (reply, answer) = mpsc::channel();
         if !self.send(question(reply)) {
-            return Asked::Stopped;
+            return if self.stopping() { Asked::Stopped } else { Asked::Busy };
         }
         let started = std::time::Instant::now();
         loop {
@@ -472,6 +483,10 @@ struct Shared {
     outbox: Mutex<VecDeque<Output>>,
     notification: Arc<tokio::sync::Notify>,
     waiting: Mutex<HashMap<u64, mpsc::Sender<Outcome>>>,
+    management: Mutex<HashMap<u64, plugin_management::PendingChange>>,
+    management_owner_next: AtomicU64,
+    management_states: Mutex<BTreeMap<String, String>>,
+    management_catalogue: Vec<CataloguePlugin>,
     next_seq: AtomicU64,
     stopping: AtomicBool,
     panels: Mutex<BTreeMap<(String, String), String>>,
@@ -524,13 +539,18 @@ impl Shared {
     }
 
     fn push(&self, output: Output) {
-        if let Ok(mut outbox) = self.outbox.lock() {
-            if outbox.len() >= OUTBOX_LIMIT {
-                outbox.pop_front();
-            }
-            outbox.push_back(output);
+        let accepted = self.outbox.lock().is_ok_and(|mut outbox| enqueue_output(&mut outbox, output));
+        if accepted {
+            self.notification.notify_one();
         }
-        self.notification.notify_one();
+    }
+
+    fn try_push(&self, output: Output) -> bool {
+        let accepted = self.outbox.lock().is_ok_and(|mut outbox| try_enqueue(&mut outbox, output));
+        if accepted {
+            self.notification.notify_one();
+        }
+        accepted
     }
 
     fn envelope(&self, plugin: &str, body: EnvelopeBody) -> (u64, ClientRequest) {
@@ -889,6 +909,26 @@ impl Shared {
     }
 }
 
+fn try_enqueue(outbox: &mut VecDeque<Output>, output: Output) -> bool {
+    if outbox.len() >= OUTBOX_LIMIT {
+        return false;
+    }
+    outbox.push_back(output);
+    true
+}
+
+fn enqueue_output(outbox: &mut VecDeque<Output>, output: Output) -> bool {
+    if outbox.len() >= OUTBOX_LIMIT {
+        let removable = outbox.iter().position(|queued| !matches!(queued,
+            Output::Request(_) | Output::MessageRequest { .. } | Output::TerminalSelection { .. }
+            | Output::TerminalScreen { .. } | Output::Clipboard { .. } | Output::PickPath { .. }));
+        let Some(index) = removable else { return false; };
+        let _ = outbox.remove(index);
+    }
+    outbox.push_back(output);
+    true
+}
+
 fn failed(code: ErrorCode, message: &str) -> Outcome {
     Outcome::Failed(PluginError::new(code, message))
 }
@@ -921,8 +961,8 @@ impl ClientFacade {
             }
             Err(_) => return failed(ErrorCode::Internal, "the plugin host state is poisoned"),
         }
-        self.shared
-            .push(Output::Request(ClientRequest::Plugin(PluginEnvelope {
+        let queued = self.shared
+            .try_push(Output::Request(ClientRequest::Plugin(PluginEnvelope {
                 plugin: plugin.to_owned(),
                 seq,
                 body: EnvelopeBody::Submit(WireSubmission {
@@ -931,6 +971,12 @@ impl ClientFacade {
                     intent_json,
                 }),
             })));
+        if !queued {
+            if let Ok(mut waiting) = self.shared.waiting.lock() {
+                waiting.remove(&seq);
+            }
+            return failed(ErrorCode::Busy, "the client request queue is full");
+        }
         let result = outcome.recv_timeout(OUTCOME_WAIT);
         if let Ok(mut waiting) = self.shared.waiting.lock() {
             waiting.remove(&seq);
@@ -962,8 +1008,19 @@ impl ClientFacade {
                         payload: spec.payload,
                     }),
                 );
-                self.shared.push(Output::Request(request));
-                Outcome::Ok
+                let port = OutputPort { shared: Arc::downgrade(&self.shared) };
+                match port.ask(
+                    |reply| Output::MessageRequest { request, reply },
+                    Some(OUTCOME_WAIT),
+                    &|| false,
+                ) {
+                    Asked::Answered(true) => Outcome::Ok,
+                    Asked::Answered(false) | Asked::Dropped | Asked::Busy => {
+                        failed(ErrorCode::Busy, "the client message queue refused delivery")
+                    }
+                    Asked::TimedOut => failed(ErrorCode::TimedOut, "message admission timed out; it may still be delivered"),
+                    Asked::Stopped => Outcome::Cancelled,
+                }
             }
             PluginSide::Client => {
                 let target = plugin.0.clone();
@@ -1287,11 +1344,26 @@ impl TreeRead for ClientFacade {
     }
 }
 
-/// Pane content is not mirrored for client plugins yet: the client renders screens from the
-/// server's stream and hands none of it to the host (foundation contract section 12.4).
+/// The event loop owns terminal presentation; reads are requested from that owner.
 impl PaneRead for ClientFacade {
-    fn screen_text(&self, _pane: NodeId) -> Option<String> {
-        None
+    fn screen_text(&self, pane: NodeId) -> Option<String> {
+        Some(self.screen_rows(pane, 10_000)?.join("\n"))
+    }
+
+    fn screen_rows(&self, pane: NodeId, max_rows: u32) -> Option<Vec<String>> {
+        Some(self.visible_screen(pane, max_rows)?.rows)
+    }
+
+    fn visible_screen(&self, pane: NodeId, max_rows: u32) -> Option<ilium_plugin_api::kernel::VisibleScreen> {
+        let port = OutputPort { shared: Arc::downgrade(&self.shared) };
+        match port.ask(
+            |reply| Output::TerminalScreen { pane, max_rows: max_rows.min(10_000), reply },
+            Some(OUTCOME_WAIT),
+            &|| false,
+        ) {
+            Asked::Answered(screen) => screen,
+            _ => None,
+        }
     }
 
     fn cells(&self, _pane: NodeId, _rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
@@ -1300,6 +1372,18 @@ impl PaneRead for ClientFacade {
 
     fn history(&self, _pane: NodeId, _lines: u32) -> Option<Vec<String>> {
         None
+    }
+
+    fn selection(&self, pane: NodeId) -> Option<ilium_plugin_api::kernel::Selection> {
+        let port = OutputPort { shared: Arc::downgrade(&self.shared) };
+        match port.ask(
+            |reply| Output::TerminalSelection { pane, reply },
+            Some(OUTCOME_WAIT),
+            &|| false,
+        ) {
+            Asked::Answered(selection) => selection,
+            _ => None,
+        }
     }
 }
 
@@ -1756,6 +1840,14 @@ impl ClientPlugins {
             outbox: Mutex::new(VecDeque::new()),
             notification: Arc::new(tokio::sync::Notify::new()),
             waiting: Mutex::new(HashMap::new()),
+            management: Mutex::new(HashMap::new()),
+            management_owner_next: AtomicU64::new(1),
+            management_states: Mutex::new(BTreeMap::new()),
+            management_catalogue: start.catalogue.iter().map(|plugin| CataloguePlugin {
+                id: plugin.id.clone(),
+                manifest: plugin.manifest.clone(),
+                component: None,
+            }).collect(),
             next_seq: AtomicU64::new(1),
             stopping: AtomicBool::new(false),
             panels: Mutex::new(BTreeMap::new()),
@@ -1829,7 +1921,7 @@ impl ClientPlugins {
         // Gateway calls go out through the paid proxies the client loaded, never the home IP.
         let inference = ilium_plugin_host::imports::inference_backend::SettingsInference::of_user();
         inference.set_paid_proxies(paid_proxies);
-        let provider = wiring::import_provider(wiring::ProcessImports {
+        let base_provider = wiring::import_provider(wiring::ProcessImports {
             storage_root: wiring::storage_root(&start.data_dir),
             scope: StorageContext {
                 project: Some(session_cwd.to_path_buf()),
@@ -1860,6 +1952,11 @@ impl ClientPlugins {
                         .unwrap_or_default(),
                 },
             ),
+        });
+        let management_shared = Arc::clone(&shared);
+        let provider = Box::new(move |context: &ilium_plugin_host::runtime::InstanceContext, set: &mut ilium_plugin_host::imports::generated_dispatch::ImportSet| {
+            base_provider(context, set);
+            set.plugins = Some(Box::new(plugin_management::ClientManagement::new(Arc::clone(&management_shared), context)));
         });
         let mut runtime = HostRuntime::new(
             engine,
@@ -2011,6 +2108,7 @@ impl ClientPlugins {
     /// `[animations]` table a plugin writes through `kernel-settings` (tab `animations`). The
     /// plugin host does not own it, so the caller applies it.
     pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) -> ConfigReload {
+        plugin_management::expire(&self.shared);
         let mut batch = Vec::new();
         let mut reload = ConfigReload::default();
         let focused = focused.map(to_plugin);
@@ -2148,6 +2246,15 @@ impl ClientPlugins {
                 });
                 false
             }
+            EnvelopeBody::Control(ControlBody::SetEnabledResult { request_seq, plugin: target, state }) => {
+                let changed = self.on_envelope(PluginEnvelope {
+                    plugin: target.clone(),
+                    seq,
+                    body: EnvelopeBody::Control(ControlBody::PluginState { plugin: target.clone(), state: state.clone() }),
+                });
+                plugin_management::complete(&self.shared, request_seq, &target, &state);
+                changed
+            }
             EnvelopeBody::Control(ControlBody::PluginState {
                 plugin: target,
                 state,
@@ -2157,6 +2264,9 @@ impl ClientPlugins {
                     return true;
                 }
                 self.last_refusal = None;
+                if let Ok(mut states) = self.shared.management_states.lock() {
+                    states.insert(target.clone(), state.clone());
+                }
                 let enabled = !wiring::is_disabled_state(&state);
                 let was_enabled = self
                     .server_states
@@ -2233,7 +2343,8 @@ impl ClientPlugins {
     }
 
     /// Runs a plugin command (`<plugin id>/<command>`) on the client side of its plugin, with
-    /// the focused pane as context. Returns at once; false when no plugin host is running.
+    /// the supplied pane as context, or the focused pane when none is supplied.
+    /// Returns at once; false when no plugin host is running.
     /// A command no enabled plugin contributes becomes a toast, so the user is told.
     pub(crate) fn invoke_command(
         &self,
@@ -2241,13 +2352,16 @@ impl ClientPlugins {
         arguments_json: String,
         origin: CommandOrigin,
         screen: (u16, u16),
+        pane: Option<ilium_core::NodeId>,
     ) -> bool {
         self.shared.set_screen(screen);
+        let pane = pane.map(|pane| NodeId(pane.0))
+            .or_else(|| self.shared.focused.lock().ok().and_then(|focused| *focused));
         let shared = Arc::clone(&self.shared);
         let command = command.to_owned();
         self.shared.post(move |runtime| {
             let context = CommandContext {
-                pane: shared.focused.lock().ok().and_then(|focused| *focused),
+                pane,
                 ..CommandContext::default()
             };
             if let Err(error) = runtime.invoke_command(&command, &arguments_json, origin, context) {
@@ -2999,6 +3113,7 @@ impl ClientPlugins {
     /// are cancelled at once, because the event loop no longer carries them to the server.
     pub(crate) async fn stop(&self) {
         self.shared.stopping.store(true, Ordering::Release);
+        plugin_management::cancel_all(&self.shared);
         let thread = self
             .shared
             .runtime
@@ -3024,6 +3139,33 @@ impl ClientPlugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_questions_refuse_a_full_outbox_without_displacing_existing_work() {
+        let mut outbox = VecDeque::new();
+        outbox.push_back(Output::Toast { plugin: "first".to_owned(), toast_json: "{}".to_owned() });
+        while outbox.len() < OUTBOX_LIMIT {
+            outbox.push_back(Output::Redraw);
+        }
+        assert!(!try_enqueue(&mut outbox, Output::Redraw));
+        assert!(matches!(outbox.front(), Some(Output::Toast { plugin, .. }) if plugin == "first"));
+        outbox.pop_front();
+        assert!(try_enqueue(&mut outbox, Output::Redraw));
+        assert_eq!(outbox.len(), OUTBOX_LIMIT);
+    }
+
+    #[test]
+    fn later_outputs_cannot_evict_a_queued_plugin_question() {
+        let (reply, _answer) = mpsc::channel();
+        let mut outbox = VecDeque::new();
+        outbox.push_back(Output::TerminalScreen { pane: NodeId(1), max_rows: 1, reply });
+        while outbox.len() < OUTBOX_LIMIT {
+            outbox.push_back(Output::Redraw);
+        }
+        assert!(enqueue_output(&mut outbox, Output::Redraw));
+        assert!(matches!(outbox.front(), Some(Output::TerminalScreen { .. })));
+        assert_eq!(outbox.len(), OUTBOX_LIMIT);
+    }
 
     #[test]
     fn activity_detail_signals_name_changes_and_departures() {
@@ -3099,5 +3241,13 @@ mod tests {
 
         let unchanged = ConfigReload::between(&after, &[]);
         assert_eq!(unchanged, ConfigReload::default());
+    }
+
+    #[test]
+    fn an_editor_settings_write_requests_a_live_reload() {
+        let before = config("[editor]\nshow_line_numbers = true\n");
+        let after = config("[editor]\nshow_line_numbers = false\n");
+        let events = events_feed::config_events(&before, &after);
+        assert_ne!(ConfigReload::between(&after, &events), ConfigReload::default());
     }
 }

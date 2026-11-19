@@ -289,7 +289,7 @@ fn decode(bytes: &[u8]) -> Option<(u64, &[u8])> {
 
 /// Returns fresh bytes, stale bytes while another session refreshes, or None.
 pub fn read_cached(key: &str, now: u64) -> Option<Vec<u8>> {
-    let stored = storage::get(Bucket::Shared, key);
+    let stored = storage::get(Bucket::Shared, key).ok().flatten();
     let fresh = stored
         .as_deref()
         .and_then(decode)
@@ -703,7 +703,7 @@ See [Client requests](/pages/api-client-requests/) and [Messages and topics](/pa
 ```rust
 fn migrate(from: u32, to: u32) -> Result<(), PluginError> {
     if from < 2 && to >= 2 {
-        if let Some(old) = storage::get(Bucket::Global, "notes") {
+        if let Some(old) = storage::get(Bucket::Global, "notes")? {
             storage::put(Bucket::Global, "notes.v2", &upgrade_notes(&old))?;
             storage::remove(Bucket::Global, "notes");
         }

@@ -46,10 +46,10 @@ fn storage_is_real_isolated_and_manual_lease_expiry_uses_the_same_engine() {
             .put(bucket, "key".into(), vec![1, 2, 3])
             .unwrap();
         assert_eq!(
-            first.storage().get(bucket, "key".into()),
+            first.storage().get(bucket, "key".into()).expect("storage read succeeds"),
             Some(vec![1, 2, 3])
         );
-        assert_eq!(second.storage().get(bucket, "key".into()), None);
+        assert_eq!(second.storage().get(bucket, "key".into()).expect("storage read succeeds"), None);
     }
     assert!(first.storage().lease("refresh".into(), 100));
     assert!(!first.other_caller_lease("refresh", 100));
@@ -76,7 +76,7 @@ fn stopped_storage_reports_real_refusal_and_cannot_write() {
             .code,
         ErrorCode::NotPermitted
     );
-    assert_eq!(fixture.storage().get(Bucket::Global, "key".into()), None);
+    assert_eq!(fixture.storage().get(Bucket::Global, "key".into()).unwrap_err().code, ErrorCode::NotPermitted);
     assert_eq!(
         fixture.last_import_error_code(),
         Some(ErrorCode::NotPermitted)
@@ -144,6 +144,6 @@ fn future_bucket_version_is_observed_by_the_real_storage_adapter() {
         .put(Bucket::Global, "key".into(), vec![1])
         .unwrap();
     fixture.make_bucket_data_version_newer(Bucket::Global);
-    assert_eq!(fixture.storage().get(Bucket::Global, "key".into()), None);
+    assert_eq!(fixture.storage().get(Bucket::Global, "key".into()).unwrap_err().code, ErrorCode::Conflict);
     assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::Conflict));
 }

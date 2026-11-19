@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Screen reader and localized text in plugin views | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Manual</b></p>
+<h1>Screen reader and localized text in plugin views</h1>
+
+<p>A plugin view reaches a screen reader as text. The terminal has no accessibility tree, so when the user sets <code>[ui] screen_reader = true</code>, the host draws each focusable element on its own line, in focus order, with a role word and its state. The plugin supplies the words of the element: its label, its status and the text of its value. It does not supply the role word, and it does not translate the host's words. This page covers what the plugin writes for that mode, how to check it, and how to keep the text of a view translatable. The mode itself is owned by <a href="/pages/reference-requirements-user-admin/">USR-305</a> and the accessibility baseline is in <a href="/pages/api-ui/#accessibility-baseline">API: ui</a>. Message catalogues and the pseudo-locale check are owned by <a href="/pages/guide-internationalisation/">Internationalisation</a>. This page adds the plugin side of both and does not repeat their rules.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li><strong>A view with focusable widgets.</strong> Keyboard use of the view is covered in <a href="/pages/a11y-keyboard-and-focus/">Keyboard operation and focus</a>.</li>
+<li><strong>The screen reader setting.</strong> <code>[ui] screen_reader</code>, read by the host and changed by the user in <a href="/pages/core-plugin-settings/">Settings plugin</a>. The test host sets it through its settings, under the key <code>ui.screen_reader</code> (proposed key name, owner to confirm).</li>
+<li><strong>A message catalogue.</strong> Only if the plugin ships more than one language. The file layout is in <a href="/pages/reference-requirements-user-admin/">USR-310</a> and the lookup order in <a href="/pages/reference-requirements-user-admin/">USR-312</a>.</li>
+</ul>
+<h2 id="what-the-linear-mode-prints">What the linear mode prints</h2>
+<p>In screen reader mode the host prints one line per focusable element, in focus order. Each line holds the label of the element, its role word, its state where it has one, and its position where it belongs to a set. Box-drawing characters and spinner frames are not printed (<a href="/pages/reference-requirements-user-admin/">USR-305</a>).</p>
+<p>The exact form of the line is not in the contract yet. The proposed form below is the one this page checks against. The owner must confirm it before the form is tested.</p>
+<p>Proposed, owner to confirm: <code>&lt;label&gt;, &lt;role word&gt;[, &lt;state&gt;][, &lt;N&gt; of &lt;M&gt;]</code>, with the state as the words <code>checked</code>, <code>unchecked</code>, <code>selected</code>, <code>disabled</code> or <code>locked by your administrator</code>, and the position only for a row of a list, a table or a tab strip.</p>
+<figure>
+<pre class="term"><span class="t-dim">Screen reader mode, settings view at 48 columns</span>
+Search, text field, empty
+Only failing, toggle, unchecked
+Run again, button, disabled, the agent is busy
+Agents, tab, selected, 1 of 3
+Enable plugin, toggle, unchecked, locked by your administrator
+</pre>
+<figcaption>Proposed form of the linear mode for one view. The host prints each line; the plugin wrote only the labels, the values and the disabled reason.</figcaption>
+</figure>
+
+<p>The last line shows the locked control described in <a href="/pages/guide-enterprise-deployment/#locked-items-as-text">Enterprise deployment</a>. The lock state comes from the host, not from the plugin.</p>
+<h3 id="role-words">Role words</h3>
+<p>The role word tells the user what kind of control the line is. The host chooses it from the widget kind. The plugin never writes a role word into a label.</p>
+<table>
+<thead>
+<tr>
+<th>Widget</th>
+<th>Role word (proposed)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>button</code></td>
+<td>button</td>
+</tr>
+<tr>
+<td><code>toggle</code></td>
+<td>toggle, with <code>checked</code> or <code>unchecked</code></td>
+</tr>
+<tr>
+<td><code>check-list</code> item</td>
+<td>checkbox, with <code>checked</code>, <code>unchecked</code> or <code>mixed</code></td>
+</tr>
+<tr>
+<td><code>choice</code>, <code>number</code>, <code>slider</code></td>
+<td>the widget name, with its current value as the state</td>
+</tr>
+<tr>
+<td><code>text-input</code>, <code>text-area</code></td>
+<td>text field, with <code>empty</code> or the value</td>
+</tr>
+<tr>
+<td><code>tabs</code> item</td>
+<td>tab, with <code>selected</code> or nothing</td>
+</tr>
+<tr>
+<td><code>%list</code>, <code>table</code>, <code>tree-list</code> row</td>
+<td>list item, with <code>selected</code> or nothing and the position</td>
+</tr>
+</tbody>
+</table>
+<h2 id="labels-what-the-plugin-writes">Labels: what the plugin writes</h2>
+<p>The label is the only text the plugin writes for a focusable widget. It must say what the control does. The value and the state are read after it, so a label that repeats the value makes the line hard to follow.</p>
+<p>Give a control a label that names its action, such as <code>Max results</code>, and let the value carry the number. A label that only shows the value, such as <code>25</code>, leaves the user with no name for the control. An icon-only button needs a <code>label</code> as well (<a href="/pages/reference-requirements-user-admin/">USR-306</a>).</p>
+<p>Do not put meaning into a glyph or an emoji inside a label. A decorative symbol is read as a word, so a label such as a check mark drawn before <code>Saved</code> reads as the name of that mark followed by <code>Saved</code>. Put the state in words, and keep the glyph out of the label.</p>
+<h2 id="status-changes-are-not-announced">Status changes are not announced</h2>
+<p>The host has no announcement path for a plugin. When the plugin changes a status text in a view, the screen reader does not say so. The user hears the new text only when they move focus onto the row, or when they read the view again. A plugin must not depend on an announcement. <a href="/pages/api-notifications/">API: notifications</a> states the same for <code>notify</code> and <code>play-sound</code>.</p>
+<p>If a change needs the user's attention, the plugin uses a toast or a desktop notice, and it keeps a persistent text signal in its view. A toast is read as one line in the linear mode, as <a href="/pages/capability-notify-toast/#accessibility">Toast notices</a> describes, and the persistent twin rule of CAP-883 applies.</p>
+<h2 id="worked-example-a-label-that-reads-well-in-both-modes">Worked example: a label that reads well in both modes</h2>
+<p>The example is one button whose value changes with a run. It is shown as the tree the plugin returns and as the line the host prints for it in screen reader mode. The snippet uses the TypeScript builder names of the <a href="/pages/typescript-sdk/">TypeScript SDK</a>.</p>
+<pre><code class="language-ts">import { button } from '@ilium/plugin-sdk/ui/build';
+
+// Good: the label names the action, and the reason for a disabled control is in words.
+const runButton = button('Run again', { key: 'run-again', disabledReason: 'the agent is busy' });
+</code></pre>
+<p>The status line is a plain text row of the same view. Its text carries the last result in words, for example <code>Last run: failed, 2 checks</code>.</p>
+<p>In screen reader mode the button reads as <code>Run again, button, disabled, the agent is busy</code>, and the status row reads as its own line. The plugin never adds <code>button</code> to the label, because the host prints the role word too. A label of <code>Button: Run again</code> would be read as <code>Button: Run again, button</code>.</p>
+<h2 id="localized-text">Localized text</h2>
+<p>The host has a language setting for its own text (<a href="/pages/reference-requirements-user-admin/">USR-311</a>), and the plugin has its own text. Each one comes from its own catalogue.</p>
+<ul>
+<li><strong>Host text.</strong> Role words, state words such as <code>locked by your administrator</code>, and the host's key hints come from the host catalogue, keyed by message id (<a href="/pages/reference-requirements-user-admin/">USR-259</a>). A plugin cannot change them (<a href="/pages/reference-requirements-user-admin/">USR-317</a>).</li>
+<li><strong>Plugin text.</strong> Labels, values and disabled reasons come from the plugin's own messages, as <a href="/pages/guide-internationalisation/#your-own-strings">Your own strings</a> describes. A plugin that ships translations puts them in <code>i18n/&lt;tag&gt;.json</code> (<a href="/pages/reference-requirements-user-admin/">USR-310</a>).</li>
+</ul>
+<p>A label that the user hears in a screen reader is a plugin message. It is translated like any other message, and its id is never shown. A message that is missing in the user's language falls back to English for that one message (<a href="/pages/reference-requirements-user-admin/">USR-260</a>).</p>
+<p>Proposed, owner to confirm: the role words and state words of the linear mode are host text, translated with the host catalogue and selected by the same language setting as the rest of the host's dialogs.</p>
+<h2 id="pseudo-locale-check-in-screen-reader-mode">Pseudo-locale check in screen reader mode</h2>
+<p>A translated label is often longer than the English one. The check of <a href="/pages/reference-requirements-user-admin/">USR-316</a> uses the pseudo-locale <code>en-XA</code>, which lengthens each string by 40 per cent. A screen reader check repeats that test in the linear mode.</p>
+<p>Set the language to <code>en-XA</code> and <code>[ui] screen_reader = true</code>, render the view at 48 columns, and read every line. Each label must be whole. A label that is cut with <code>…</code> is a failure, because the screen reader reads the cut text as the name of the control. The release gate that uses this check is listed in <a href="/pages/guide-quality-checklist/">Quality checklist</a>.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What the screen reader gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A focusable widget with an empty label</td>
+<td>The view is refused with <code>ui.label-missing</code>. The last good tree stays on screen, as <a href="/pages/api-ui/#accessibility-baseline">API: ui</a> describes.</td>
+</tr>
+<tr>
+<td>A <code>disabled-reason</code> longer than the row</td>
+<td>The reason is cut with <code>…</code> in the normal view. The linear line keeps the full reason, so the plugin keeps the reason short.</td>
+</tr>
+<tr>
+<td>A label with wide CJK text</td>
+<td>The host measures its real cell width (<a href="/pages/reference-requirements-user-admin/">USR-315</a>). The line is not split inside a character.</td>
+</tr>
+<tr>
+<td>A translated label that the user's language lacks</td>
+<td>The English text of that message is printed, and no message id is shown.</td>
+</tr>
+<tr>
+<td>A value that changes without a focus change</td>
+<td>The row shows the new value on its next render. The user hears it only after moving to the row.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="requirements">Requirements</h2>
+<ul>
+<li><strong>[ACC-012]</strong> A plugin MUST give every focusable widget a label that names its action. The label MUST NOT contain the value, a state word or a role word that the host prints itself. Test: render the view in screen reader mode and assert that each line has the role word once.</li>
+<li><strong>[ACC-013]</strong> A plugin MUST NOT put meaning in a decorative glyph or an emoji inside a label. The meaning MUST be a word. Test: scan the labels of the view for characters outside letters, digits, spaces and punctuation, and assert that each one carries no meaning that the words do not give.</li>
+<li><strong>[ACC-014]</strong> A plugin MUST put a status change in the words of the row that shows it, not only in a colour, a glyph or a moving frame. Test: change the status in the fake host, render the view, and assert that the row text holds the new state word.</li>
+<li><strong>[ACC-015]</strong> A plugin MUST NOT rely on the screen reader to announce a text change in its view. A change that needs the user's attention MUST also raise a toast or a desktop notice with a persistent text twin (CAP-883). Test: review the change path of the view for an event that needs attention and check that it has the twin.</li>
+<li><strong>[ACC-016]</strong> A plugin that ships translations MUST build each accessible label from a message id of its own catalogue, and MUST NOT join two translated pieces into one label. Test: search the source for a label built with <code>+</code>, a format string with two translated parts, or a string concatenation.</li>
+<li><strong>[ACC-017]</strong> A plugin MUST NOT write a role word, such as <code>button</code> or <code>toggle</code>, into a label or a value. Test: render the view in screen reader mode and assert that no line holds the role word twice.</li>
+<li><strong>[ACC-018]</strong> A plugin MUST keep every label of its focusable widgets whole at 48 columns in the pseudo-locale <code>en-XA</code> with screen reader mode on. A label that is cut with <code>…</code> is a failure. Test: render the view with <code>en-XA</code> and <code>screen_reader</code> set in the test host, and assert that each linear line ends with its full label.</li>
+<li><strong>[ACC-019]</strong> A plugin MUST keep a <code>disabled-reason</code> short enough to be read in one line at 48 columns, and MUST give the reason in words, not as a symbol. Test: render each disabled widget at 48 columns and assert that the reason is complete.</li>
+<li><strong>[ACC-020]</strong> A plugin MUST NOT show a message id, a key of a setting or a catalogue key in any label or value of a view, in any language. Test: search the rendered screen text in each shipped language for a dotted identifier that the plugin defines.</li>
+<li><strong>[ACC-021]</strong> A plugin MUST keep the same focusable widgets, with the same labels, in screen reader mode and in the normal view. A change of the mode MUST NOT remove a control or change its action. Test: render the view with the setting off and on, and assert the same set of keys.</li>
+<li><strong>[ACC-022]</strong> A plugin test SHOULD check the linear output of each view once per release, with the screen reader setting on, and SHOULD compare its line order with the focus order of <a href="/pages/a11y-keyboard-and-focus/">Keyboard operation and focus</a>. Test: the test host reads the screen text and the focus order, and the assert compares both.</li>
+<li><strong>[ACC-023]</strong> In linear mode the host MUST read each cell of a <code>table</code> row as <code>&lt;column title&gt;: &lt;cell text&gt;</code>, in column order, before the role word and the position. A plugin MUST give every table column a non-empty <code>title</code>. (proposed, owner to confirm)</li>
+<li><strong>[ACC-024]</strong> In linear mode the host MUST print the <code>title</code> of a <code>block</code> or panel on its own line, before the first element inside it. A plugin MUST give a non-empty <code>title</code> to every <code>block</code> that contains a focusable widget. (proposed, owner to confirm)</li>
+<li><strong>[ACC-025]</strong> In linear mode the host MUST print non-focusable text widgets (<code>paragraph</code>, <code>markdown</code>, <code>notice</code>, <code>leader-row</code>, <code>badge</code> and <code>key-hints</code>) as plain lines in tree order, between the focusable lines. It MUST read a <code>gauge</code>, <code>line-gauge</code>, <code>meter</code> or <code>progress-row</code> as its label followed by its percentage as digits and the word <code>percent</code>. (proposed, owner to confirm)</li>
+<li><strong>[ACC-026]</strong> In linear mode the host MUST read a <code>tree-list</code> row with its depth as <code>level &lt;N&gt;</code>. For an expandable item it MUST also read the word <code>expanded</code> or <code>collapsed</code> after the position. (proposed, owner to confirm)</li>
+<li><strong>[ACC-027]</strong> In linear mode the host MUST read a secret <code>text-input</code> as <code>filled</code> or <code>empty</code>, and MUST NOT print any character of its value. A plugin MUST NOT copy a secret value into a label, a status row or a tooltip. (proposed, owner to confirm)</li>
+<li><strong>[ACC-028]</strong> After a re-render that keeps the focused element, the host MUST keep the cursor on the first cell of that element in linear mode. It MUST NOT move the cursor to the first line of the view. (proposed, owner to confirm)</li>
+<li><strong>[ACC-031]</strong> A plugin MUST give every <code>spinner</code> a non-empty <code>label</code>. In linear mode the host MUST read a spinner as its label followed by the word <code>busy</code>, and the view validator MUST refuse a spinner without a label with <code>ui.label-missing</code>. (proposed, owner to confirm)</li>
+<li><strong>[ACC-033]</strong> When <code>[ui] screen_reader</code> changes while plugin views are open, the host MUST render every open plugin view again in the new mode within one frame and MUST deliver <code>theme-changed</code>, so that a plugin needs no code and no restart to switch modes. (proposed, owner to confirm)</li>
+</ul>
+<h2 id="checklist-before-release">Checklist before release</h2>
+<ul>
+<li>Turn on the screen reader setting and read the view line by line. Each line must say what the control does and what state it is in.</li>
+<li>Switch the language to each shipped language and to <code>en-XA</code>. Each label must be whole, and no message id may appear.</li>
+<li>Change each status in the view and check that the row text changes in words.</li>
+<li>Confirm that a change that needs attention also has a toast or a desktop notice, and a text row that stays.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/accessibility-and-theming/">Accessibility and theming</a></li>
+<li><a href="/pages/a11y-keyboard-and-focus/">Keyboard operation and focus</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness</a></li>
+</ul>
+
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#what-the-linear-mode-prints">What the linear mode prints</a></li><li class="l3"><a href="#role-words">Role words</a></li><li class="l2"><a href="#labels-what-the-plugin-writes">Labels: what the plugin writes</a></li><li class="l2"><a href="#status-changes-are-not-announced">Status changes are not announced</a></li><li class="l2"><a href="#worked-example-a-label-that-reads-well-in-both-modes">Worked example: a label that reads well in both modes</a></li><li class="l2"><a href="#localized-text">Localized text</a></li><li class="l2"><a href="#pseudo-locale-check-in-screen-reader-mode">Pseudo-locale check in screen reader mode</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#requirements">Requirements</a></li><li class="l2"><a href="#checklist-before-release">Checklist before release</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

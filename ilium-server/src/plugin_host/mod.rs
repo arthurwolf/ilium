@@ -191,6 +191,7 @@ struct Published {
 struct Publisher {
     state: Weak<ServerState>,
     published: Arc<Mutex<Published>>,
+    pane_states: Arc<Mutex<BTreeMap<String, String>>>,
     next_envelope: Arc<AtomicU64>,
     /// The kernel facade, whose queue holds the chrome server plugins set.
     facade: Arc<ServerFacade>,
@@ -225,6 +226,9 @@ impl Publisher {
                 Some((id, wiring::state_name(&state)))
             })
             .collect();
+        if let Ok(mut pane_states) = self.pane_states.lock() {
+            *pane_states = observed.iter().cloned().collect();
+        }
         let Ok(mut published) = self.published.lock() else {
             return;
         };
@@ -469,9 +473,11 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         }
     };
     let cli = Arc::new(CliRoutes::default());
+    let pane_states = Arc::new(Mutex::new(BTreeMap::new()));
     let publisher = Publisher {
         state: Arc::downgrade(state),
         published: Arc::new(Mutex::new(Published::default())),
+        pane_states: Arc::clone(&pane_states),
         next_envelope,
         facade: Arc::clone(&facade),
         cli: Arc::clone(&cli),
@@ -492,7 +498,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             .catalogue
             .iter()
             .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str())),
-    ));
+    ).with_states(pane_states));
     facade.set_pane_kinds(Arc::clone(&pane_kinds));
     let catalogue = start.catalogue;
     let first = publisher.clone();
@@ -890,7 +896,7 @@ impl PluginHostHandle {
                 let event = Event::Message(MessageEvent {
                     from: PluginId(plugin.clone()),
                     from_side: PluginSide::Client,
-                    from_client: None,
+                    from_client: direct_tx.client_id().map(ilium_plugin_api::generated::types::ClientId),
                     channel: message.topic,
                     payload: message.payload,
                 });
@@ -914,7 +920,15 @@ impl PluginHostHandle {
             }) => {
                 let state = self.set_enabled(target.clone(), enabled).await;
                 let _ = direct_tx
-                    .send(self.publisher.state_event(&target, &state))
+                    .send(ServerEvent::Plugin(PluginEnvelope {
+                        plugin: target.clone(),
+                        seq: self.publisher.next_envelope.fetch_add(1, Ordering::Relaxed),
+                        body: EnvelopeBody::Control(ControlBody::SetEnabledResult {
+                            request_seq: seq,
+                            plugin: target,
+                            state,
+                        }),
+                    }))
                     .await;
             }
             EnvelopeBody::Control(ControlBody::CliInvoke {
@@ -1035,15 +1049,22 @@ impl PluginHostHandle {
         let installed = wiring::installed_path(&self.data_dir);
         let (reply, result) = tokio::sync::oneshot::channel();
         let posted = self.post(move |runtime| {
-            // The store first: a plugin never runs in a state the next start would not keep.
-            let name = match registry::set_plugin_enabled(&installed, &plugin, &version, enabled) {
+            // Catalogue entries can fail to load. Refuse before touching the shared registry
+            // when there is no runtime record to change.
+            if runtime.state(&plugin).is_none() {
+                let _ = reply.send("refused:plugin.state".to_owned());
+                return;
+            }
+            // Keep the registry lock until the runtime accepts the change. A refusal restores
+            // the previous registry bytes without overwriting another writer's update.
+            let name = match registry::set_plugin_enabled_with(&installed, &plugin, &version, enabled, || runtime.set_enabled(&plugin, enabled)) {
                 Err(error) => format!("refused:{}", error.code()),
-                Ok(_) => match runtime.set_enabled(&plugin, enabled) {
+                Ok(change) => match change {
                     Err(error) => {
                         tracing::warn!("plugin {plugin} did not change state: {error}");
                         "refused:plugin.state".to_owned()
                     }
-                    Ok(()) => {
+                    Ok(_changed) => {
                         if enabled {
                             log_errors("startup activation", runtime.activate_startup());
                         }
@@ -1332,8 +1353,11 @@ pub(crate) struct ClientPresence {
 
 impl ClientPresence {
     /// Announces the client; `None` when the session runs without plugins.
-    pub(crate) fn attach(state: &ServerState, client: u64) -> Option<Self> {
+    pub(crate) fn attach(state: &ServerState, client: u64, sender: DirectEventSender) -> Option<Self> {
         let host = state.plugins.get()?;
+        if !host.facade.register_client(client, sender) {
+            return None;
+        }
         host.feed(vec![Event::ClientAttached(
             ilium_plugin_api::generated::types::ClientId(client),
         )]);
@@ -1347,6 +1371,7 @@ impl ClientPresence {
 impl Drop for ClientPresence {
     fn drop(&mut self) {
         if let Some(host) = self.host.upgrade() {
+            host.facade.unregister_client(self.client);
             host.feed(vec![Event::ClientDetached(
                 ilium_plugin_api::generated::types::ClientId(self.client),
             )]);

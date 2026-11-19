@@ -644,6 +644,20 @@ pub fn set_plugin_enabled(
     bundled_version: &str,
     enabled: bool,
 ) -> Result<bool, HostError> {
+    match set_plugin_enabled_with(installed, plugin, bundled_version, enabled, || Ok::<(), std::convert::Infallible>(()))? {
+        Ok(changed) => Ok(changed),
+        Err(never) => match never {},
+    }
+}
+
+/// Holds the registry lock through the live change and restores the previous bytes if it fails.
+pub fn set_plugin_enabled_with<E>(
+    installed: &Path,
+    plugin: &str,
+    bundled_version: &str,
+    enabled: bool,
+    apply: impl FnOnce() -> Result<(), E>,
+) -> Result<Result<bool, E>, HostError> {
     if let Some(parent) = installed.parent() {
         std::fs::create_dir_all(parent).map_err(|e| error("install.io", e.to_string()))?;
     }
@@ -686,13 +700,22 @@ pub fn set_plugin_enabled(
             format!("{plugin} is {current}; its enable state cannot be changed"),
         ));
     }
-    if current == wanted && transaction.record(plugin).is_some() {
-        return Ok(false);
+    let needs_write = current != wanted || transaction.record(plugin).is_none();
+    if needs_write {
+        row["state"] = json!(wanted);
+        transaction.put_complete_record(row)?;
+        if let Err(failure) = transaction.commit() {
+            transaction.rollback()?;
+            return Err(failure);
+        }
     }
-    row["state"] = json!(wanted);
-    transaction.put_complete_record(row)?;
-    transaction.commit()?;
-    Ok(current != wanted)
+    match apply() {
+        Ok(()) => Ok(Ok(current != wanted)),
+        Err(failure) => {
+            transaction.rollback()?;
+            Ok(Err(failure))
+        }
+    }
 }
 
 
@@ -707,6 +730,52 @@ mod tests {
         downloads_dir, registry_cache_dir, EnableFlags, GrantStore, InstalledRecord,
         InstalledRegistry, PackageStore,
     };
+
+    #[test]
+    fn failed_live_enable_restores_the_exact_registry_contents() {
+        let dir = tempfile::tempdir().expect("temporary registry");
+        let path = dir.path().join("installed.json");
+        super::set_plugin_enabled(&path, "test.plugin", "0.1.0", false)
+            .expect("save disabled state");
+        let before = std::fs::read(&path).expect("read registry");
+        let result = super::set_plugin_enabled_with(&path, "test.plugin", "0.1.0", true, || {
+            Err::<(), _>("activation failed")
+        })
+        .expect("registry transaction succeeds");
+        assert_eq!(result, Err("activation failed"));
+        assert_eq!(std::fs::read(&path).expect("read restored registry"), before);
+    }
+
+    #[test]
+    fn rollback_does_not_erase_a_concurrent_plugin_change() {
+        let dir = tempfile::tempdir().expect("temporary registry");
+        let path = dir.path().join("installed.json");
+        super::set_plugin_enabled(&path, "test.first", "0.1.0", false)
+            .expect("save initial choice");
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
+        let mut writer = None;
+        let result = super::set_plugin_enabled_with(&path, "test.first", "0.1.0", true, || {
+            let other_path = path.clone();
+            writer = Some(std::thread::spawn(move || {
+                started_sender.send(()).expect("notify start");
+                let result = super::set_plugin_enabled(&other_path, "test.second", "0.1.0", false);
+                done_sender.send(result).expect("notify completion");
+            }));
+            started_receiver.recv().expect("writer started");
+            assert!(done_receiver.recv_timeout(std::time::Duration::from_millis(100)).is_err());
+            Err::<(), _>("activation failed")
+        })
+        .expect("registry transaction succeeds");
+        assert_eq!(result, Err("activation failed"));
+        done_receiver.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("writer completed")
+            .expect("other choice saved");
+        writer.expect("writer spawned").join().expect("writer joined");
+        let states = super::installed_states(&path).expect("read states");
+        assert_eq!(states.get("test.first").map(String::as_str), Some(super::STATE_DISABLED_BY_USER));
+        assert_eq!(states.get("test.second").map(String::as_str), Some(super::STATE_DISABLED_BY_USER));
+    }
 
     /// Parses a plugin id that the manual says is valid; a refusal fails the test.
     fn plugin(text: &str) -> PluginId {

@@ -21,12 +21,12 @@
 use std::cell::RefCell;
 
 use ilium_plugin_sdk::host::{
-    Bucket, HostClock, HostFs, HostJobs, HostPanes, HostStorage, HostTimers,
+    Bucket, Entry, HostClock, HostFs, HostJobs, HostPanes, HostStorage, HostTimers,
 };
 use ilium_plugin_sdk::primitives::HostAgent;
 use ilium_plugin_sdk::types::{
     EpochMs, ErrorCode, Event, FreezePaneSpec, FsPath, Intent, MessageSpec, MessageTarget, NodeId,
-    Outcome, PluginId, PluginSide, ReplacePaneCommandSpec, RequestId, RequestRef, Signal,
+    Outcome, PluginError, PluginId, PluginSide, ReplacePaneCommandSpec, RequestId, RequestRef, Signal,
     SignalPaneSpec, Submission, TerminatePaneProcessSpec, TimerId, ToastSpec, Tone,
     UnfreezePaneSpec,
 };
@@ -299,11 +299,28 @@ pub fn begin(api: &mut dyn HostApi, pane: u64, automatic: bool, out: &mut Vec<Su
         return;
     }
     let now = HostClock::monotonic_millis(api);
-    let timer = HostTimers::set(api, POLL_MILLIS, Some(POLL_MILLIS)).ok();
+    let timer = match HostTimers::set(api, POLL_MILLIS, Some(POLL_MILLIS)) {
+        Ok(timer) => timer,
+        Err(error) => {
+            out.push(toast("compaction-recovery", Tone::Warning, &format!("Could not start compaction polling: {}", error.message)));
+            return;
+        }
+    };
+    let watchdog = format!("{WATCHDOG_PREFIX}{pane}");
+    let deadline = HostClock::now_unix_millis(api).saturating_add(WATCHDOG_MILLIS);
+    if let Err(error) = HostTimers::at(api, EpochMs(deadline), watchdog.clone()) {
+        HostTimers::cancel(api, timer);
+        out.push(toast("compaction-recovery", Tone::Warning, &format!("Could not arm compaction recovery: {}", error.message)));
+        return;
+    }
     let state = json!({ "pane": pane, "session_id": plan.session_id }).to_string();
-    let _ = HostStorage::put(api, Bucket::Session, state_key(pane), state.into_bytes());
-    let deadline = HostClock::now_unix_millis(api) + WATCHDOG_MILLIS;
-    let _ = HostTimers::at(api, EpochMs(deadline), format!("{WATCHDOG_PREFIX}{pane}"));
+    if let Err(error) = HostStorage::put(api, Bucket::Session, state_key(pane), state.into_bytes()) {
+        HostTimers::cancel(api, timer);
+        HostTimers::cancel_durable(api, watchdog);
+        out.push(toast("compaction-recovery", Tone::Warning, &format!("Could not save compaction recovery: {}", error.message)));
+        return;
+    }
+    let timer = Some(timer);
     let technique = settings.technique_for(&plan.signature);
     with_monitor(|monitor| monitor.record_attempt(pane, now));
     out.push(to_client(
@@ -484,9 +501,11 @@ fn fail(api: &mut dyn HostApi, message: &str, stopped: bool, out: &mut Vec<Submi
 }
 
 /// The pane left the run: the durable half is dropped.
-fn forget(api: &mut dyn HostApi, pane: u64) {
-    let _ = HostStorage::remove(api, Bucket::Session, state_key(pane));
-    let _ = HostStorage::remove(api, Bucket::Session, progress_key(pane));
+fn forget(api: &mut dyn HostApi, pane: u64) -> Result<(), PluginError> {
+    HostStorage::write_batch(api, Bucket::Session, vec![
+        Entry { key: state_key(pane), value: None },
+        Entry { key: progress_key(pane), value: None },
+    ])?;
     HostTimers::cancel_durable(api, format!("{WATCHDOG_PREFIX}{pane}"));
     stop_polling(api);
     RUNTIME.with(|cell| {
@@ -494,6 +513,16 @@ fn forget(api: &mut dyn HostApi, pane: u64) {
         runtime.run = None;
         runtime.terminate = None;
     });
+    Ok(())
+}
+
+fn retry_recovery(api: &mut dyn HostApi, pane: u64, error: &PluginError, out: &mut Vec<Submission>) {
+    let retry_at = HostClock::now_unix_millis(api).saturating_add(5_000);
+    let message = match HostTimers::at(api, EpochMs(retry_at), format!("{WATCHDOG_PREFIX}{pane}")) {
+        Ok(_) => format!("Compaction recovery will retry: {}", error.message),
+        Err(timer_error) => format!("Compaction recovery retry failed: {}", timer_error.message),
+    };
+    out.push(toast("compaction-recovery", Tone::Warning, &message));
 }
 
 /// The `cancel` message: a waiting run ends at once, a running job is asked to stop.
@@ -509,7 +538,10 @@ pub fn on_cancel(api: &mut dyn HostApi, payload: &[u8], out: &mut Vec<Submission
     match phase {
         Phase::Waiting => {
             // Nothing was stopped yet, so cancelling just ends the wait.
-            forget(api, pane);
+            if let Err(error) = forget(api, pane) {
+                retry_recovery(api, pane, &error, out);
+                return;
+            }
             out.push(to_client("finished", &json!({ "pane": pane, "ok": false })));
             out.push(toast(
                 "compaction-cancelled",
@@ -544,7 +576,10 @@ pub fn on_resume(api: &mut dyn HostApi, payload: &[u8], out: &mut Vec<Submission
     if !ready {
         return;
     }
-    forget(api, pane);
+    if let Err(error) = forget(api, pane) {
+        retry_recovery(api, pane, &error, out);
+        return;
+    }
     out.push(Submission::new(Intent::ReplacePaneCommand(
         ReplacePaneCommandSpec {
             pane: NodeId(pane),
@@ -577,8 +612,13 @@ fn abandon(api: &mut dyn HostApi, pane: u64, out: &mut Vec<Submission>) {
         Some((false, _, _)) => return,
         // After a restart only the durable state is left.
         None => {
-            if HostStorage::get(api, Bucket::Session, state_key(pane)).is_none() {
-                return;
+            match HostStorage::get(api, Bucket::Session, state_key(pane)) {
+                Ok(Some(_)) => {}
+                Ok(None) => return,
+                Err(error) => {
+                    retry_recovery(api, pane, &error, out);
+                    return;
+                }
             }
             (None, true)
         }
@@ -586,7 +626,10 @@ fn abandon(api: &mut dyn HostApi, pane: u64, out: &mut Vec<Submission>) {
     if let Some(job) = job {
         HostJobs::cancel(api, job);
     }
-    forget(api, pane);
+    if let Err(error) = forget(api, pane) {
+        retry_recovery(api, pane, &error, out);
+        return;
+    }
     if frozen {
         out.push(Submission::new(Intent::UnfreezePane(UnfreezePaneSpec {
             pane: NodeId(pane),
@@ -608,7 +651,7 @@ pub fn on_durable_timer(api: &mut dyn HostApi, name: &str, out: &mut Vec<Submiss
 
 /// Whether the user closed the privacy banner of the dialog for good.
 fn banner_dismissed(api: &mut dyn HostApi) -> bool {
-    HostStorage::get(api, Bucket::Global, BANNER_KEY.to_string()).is_some()
+    matches!(HostStorage::get(api, Bucket::Global, BANNER_KEY.to_string()), Ok(Some(_)))
 }
 
 /// The `dismiss-banner` message: the privacy banner never shows again.
@@ -723,6 +766,7 @@ pub fn on_job_progress(
         return;
     };
     let mut document = HostStorage::get(api, Bucket::Session, progress_key(pane))
+        .ok().flatten()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or_else(|| json!({ "percent": f64::from(percent) }));
     document["pane"] = json!(pane);
@@ -769,7 +813,10 @@ fn succeed(api: &mut dyn HostApi, result: &SessionJobOutput, out: &mut Vec<Submi
     else {
         return;
     };
-    forget(api, pane);
+    if let Err(error) = forget(api, pane) {
+        retry_recovery(api, pane, &error, out);
+        return;
+    }
     with_monitor(|monitor| monitor.record_success(pane));
     out.push(Submission::new(Intent::ReplacePaneCommand(
         ReplacePaneCommandSpec {
@@ -838,13 +885,15 @@ pub fn on_activity(
 }
 
 /// A pane or node is gone: its trigger state is forgotten, and a run on it ends.
-pub fn on_pane_gone(api: &mut dyn HostApi, node: NodeId) {
+pub fn on_pane_gone(api: &mut dyn HostApi, node: NodeId, out: &mut Vec<Submission>) {
     with_monitor(|monitor| monitor.forget(node.0));
     if with_run(|run| run.pane == node.0) == Some(true) {
         if let Some(Some(job)) = with_run(|run| run.job) {
             HostJobs::cancel(api, job);
         }
-        forget(api, node.0);
+        if let Err(error) = forget(api, node.0) {
+            retry_recovery(api, node.0, &error, out);
+        }
     }
 }
 
@@ -876,8 +925,8 @@ pub fn on_event(api: &mut dyn HostApi, event: &Event, out: &mut Vec<Submission>)
                 && change.previous != change.current;
             on_activity(api, change.node, finished, out);
         }
-        Event::PaneExited(exited) => on_pane_gone(api, exited.node),
-        Event::NodeRemoved(node) => on_pane_gone(api, *node),
+        Event::PaneExited(exited) => on_pane_gone(api, exited.node, out),
+        Event::NodeRemoved(node) => on_pane_gone(api, *node, out),
         _ => {}
     }
 }

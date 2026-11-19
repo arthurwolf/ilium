@@ -56,6 +56,7 @@ fn port_infer_times_out_slow_calls() {
     let pane = host.tree().add(shell_pane("slow shell"));
     host.tree().set_screen(pane, rows(&["$ sleep 100"]));
     let invocation = host.cli().invoke(&["recap", "--timeout-seconds", "1"], b"");
+    host.settle();
     assert_eq!(host.jobs().list().len(), 1);
     host.advance_clock(1_001);
     host.settle();
@@ -91,6 +92,7 @@ fn port_infer_concurrency_gate_bounds_parallel_calls() {
     open_gate(&mut host);
     many_shell_panes(&mut host, 6);
     host.cli().invoke(&["recap", "--max-concurrency", "2"], b"");
+    host.settle();
     assert_eq!(host.running_job_limit(), 2);
     assert!(
         host.jobs().list().len() <= 6,
@@ -108,6 +110,7 @@ fn port_infer_outstanding_calls_never_exceed_the_gate_after_timeouts_and_cancels
         &["recap", "--max-concurrency", "2", "--timeout-seconds", "1"],
         b"",
     );
+    host.settle();
     host.advance_clock(1_001);
     host.settle();
     assert!(host.running_job_limit() <= 2);
@@ -157,6 +160,7 @@ fn port_infer_call_is_still_running_just_before_its_timeout() {
     let pane = host.tree().add(shell_pane("slow shell"));
     host.tree().set_screen(pane, rows(&["$ sleep 100"]));
     host.cli().invoke(&["recap", "--timeout-seconds", "1"], b"");
+    host.settle();
     host.advance_clock(999);
     host.settle();
     assert_eq!(
@@ -185,6 +189,7 @@ fn port_infer_single_slot_gate_runs_one_call_at_a_time() {
     open_gate(&mut host);
     many_shell_panes(&mut host, 3);
     host.cli().invoke(&["recap", "--max-concurrency", "1"], b"");
+    host.settle();
     assert_eq!(host.running_job_limit(), 1);
 }
 
@@ -198,6 +203,7 @@ fn port_infer_timed_out_pane_is_reported_as_failed_not_pending() {
         &["recap", "--max-concurrency", "2", "--timeout-seconds", "1"],
         b"",
     );
+    host.settle();
     host.advance_clock(1_001);
     host.settle();
     let records = jsonl(&host.cli().refresh(&first).stdout());

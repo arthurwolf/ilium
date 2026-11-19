@@ -4825,6 +4825,41 @@ impl App {
             .then_some(source)
     }
 
+    fn plugin_terminal_screen(&self, pane_id: NodeId, max_rows: u32) -> Option<ilium_plugin_api::kernel::VisibleScreen> {
+        self.emitted_terminal_source(pane_id)
+            .map(|source| source.with_screen(|screen| {
+                let (_, columns) = screen.size();
+                let (cursor_row, cursor_column) = screen.cursor_position();
+                ilium_plugin_api::kernel::VisibleScreen {
+                    rows: screen.rows(0, columns).take(max_rows.min(10_000) as usize).collect(),
+                    columns,
+                    state: ilium_plugin_api::kernel::ScreenState {
+                        cursor_row, cursor_column, revision: source.output_sequence(),
+                    },
+                }
+            }))
+    }
+
+    fn plugin_terminal_selection(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<ilium_plugin_api::kernel::Selection> {
+        let selection = self.terminal_selection.as_ref()?;
+        let source = self.selection_terminal_source(pane_id)?;
+        source.with_screen(|screen| {
+            let text = crate::terminal_selection::text(screen, selection)?;
+            let (rows, columns) = screen.size();
+            let (first, last) = selection.normalized();
+            Some(ilium_plugin_api::kernel::Selection {
+                first_row: u32::from(first.row.min(rows.saturating_sub(1))),
+                first_column: first.column.min(columns.saturating_sub(1)),
+                last_row: u32::from(last.row.min(rows.saturating_sub(1))),
+                last_column: last.column.min(columns.saturating_sub(1)),
+                text,
+            })
+        })
+    }
+
     pub(crate) fn emitted_terminal_source(
         &self,
         pane_id: NodeId,
@@ -7802,6 +7837,10 @@ impl App {
         self.effective_animation_row_context()
     }
 
+    fn admit_plugin_message(&mut self, request: ClientRequest, reply: std::sync::mpsc::Sender<bool>) {
+        let _ = reply.send(self.queue_request(request));
+    }
+
     /// Carries out what the WebAssembly plugin host asked for since the last call: requests
     /// go to the server through the ordinary queue, a toast becomes the status line, and a
     /// changed view asks for a redraw. Returns whether to redraw.
@@ -7825,6 +7864,9 @@ impl App {
                 crate::plugin_host::host::Output::Request(request) => {
                     // A refused request already told the user; the plugin sees a timeout.
                     let _ = self.queue_request(request);
+                }
+                crate::plugin_host::host::Output::MessageRequest { request, reply } => {
+                    self.admit_plugin_message(request, reply);
                 }
                 crate::plugin_host::host::Output::Toast { plugin, toast_json } => {
                     let text = crate::plugin_host::effects::toast_text(&toast_json)
@@ -7894,6 +7936,12 @@ impl App {
                     request,
                     reply,
                 } => self.run_plugin_clipboard(plugin, request, reply),
+                crate::plugin_host::host::Output::TerminalSelection { pane, reply } => {
+                    let _ = reply.send(self.plugin_terminal_selection(NodeId(pane.0)));
+                }
+                crate::plugin_host::host::Output::TerminalScreen { pane, max_rows, reply } => {
+                    let _ = reply.send(self.plugin_terminal_screen(NodeId(pane.0), max_rows));
+                }
                 crate::plugin_host::host::Output::PickPath {
                     plugin,
                     spec,
@@ -11962,6 +12010,9 @@ impl App {
             ilium_ipc::ServerEvent::Error { message }
             | ilium_ipc::ServerEvent::PaneResizeRejected { message, .. } => {
                 Some(message.len().saturating_add(32).saturating_mul(2))
+            }
+            ilium_ipc::ServerEvent::Rejected(rejection) => {
+                Some(rejection.message.len().saturating_add(64).saturating_mul(2))
             }
             ilium_ipc::ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
                 let joined = reasons
@@ -17347,6 +17398,32 @@ mod tests {
     }
 
     #[test]
+    fn plugin_message_admission_reports_a_full_request_queue() {
+        let mut app = app();
+        let client = app.outbound_admission.as_ref().unwrap().clone();
+        let held: Vec<_> = (0..crate::ipc_preparation::request_limits().jobs)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+        let request = || ClientRequest::Plugin(ilium_ipc::plugin::PluginEnvelope {
+            plugin: "ilium.core.smart-copy".to_owned(),
+            seq: 1,
+            body: ilium_ipc::plugin::EnvelopeBody::Message(ilium_ipc::plugin::PluginMessage {
+                topic: "scan".to_owned(),
+                payload: Vec::new(),
+            }),
+        });
+        let (reply, answer) = std::sync::mpsc::channel();
+        app.admit_plugin_message(request(), reply);
+        assert!(!answer.recv().unwrap());
+        assert!(app.take_outbound_requests().is_empty());
+        drop(held);
+        let (reply, answer) = std::sync::mpsc::channel();
+        app.admit_plugin_message(request(), reply);
+        assert!(answer.recv().unwrap());
+        assert_eq!(app.take_outbound_requests().len(), 1);
+    }
+
+    #[test]
     fn terminal_keys_wait_for_outbound_capacity_in_original_order() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "keys").unwrap();
@@ -18098,6 +18175,53 @@ mod tests {
                     "new recovery must use the visible delivery audit, not silently consume NoLink");
             }
         }
+    }
+
+    #[test]
+    fn plugin_screen_reads_the_requested_live_pane() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "screens").unwrap();
+        let first = app.tree.add_pane(group, "one", PaneContentKind::Terminal).unwrap();
+        let second = app.tree.add_pane(group, "two", PaneContentKind::Terminal).unwrap();
+        let mut view = TerminalView::new(8, 80);
+        view.feed(b"first pane");
+        app.panes.insert(first, PaneRuntime::Terminal(Box::new(view)));
+        let screen = app.plugin_terminal_screen(first, 1).unwrap();
+        assert!(screen.rows[0].contains("first pane"));
+        assert_eq!(screen.rows.len(), 1);
+        assert_eq!(screen.columns, 80);
+        assert_eq!(screen.state.cursor_column, 10);
+        assert!(app.plugin_terminal_screen(first, 0).unwrap().rows.is_empty());
+        assert!(app.plugin_terminal_screen(second, 1).is_none());
+        app.panes.remove(&first);
+        assert!(app.plugin_terminal_screen(first, 1).is_none());
+    }
+
+    #[test]
+    fn plugin_selection_uses_the_owned_pane_and_captured_screen() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "selection").unwrap();
+        let pane = app.tree.add_pane(group, "one", PaneContentKind::Terminal).unwrap();
+        let other = app.tree.add_pane(group, "two", PaneContentKind::Terminal).unwrap();
+        let mut view = TerminalView::new(8, 80);
+        view.feed(b"hello world");
+        app.terminal_selection_source = Some((pane, view.painted_source()));
+        app.panes.insert(pane, PaneRuntime::Terminal(Box::new(view)));
+        app.terminal_selection = Some(crate::terminal_selection::TerminalSelection {
+            pane_id: pane,
+            anchor: crate::terminal_selection::SelectionPoint::new(0, 4),
+            cursor: crate::terminal_selection::SelectionPoint::new(0, 0),
+        });
+        let selected = app.plugin_terminal_selection(pane).expect("selection");
+        assert_eq!(selected.text, "hello");
+        assert_eq!((selected.first_column, selected.last_column), (0, 4));
+        assert!(app.plugin_terminal_selection(other).is_none());
+        app.terminal_selection.as_mut().unwrap().cursor =
+            crate::terminal_selection::SelectionPoint::new(u16::MAX, u16::MAX);
+        let clipped = app.plugin_terminal_selection(pane).expect("clipped selection");
+        assert_eq!((clipped.last_row, clipped.last_column), (7, 79));
+        app.panes.remove(&pane);
+        assert!(app.plugin_terminal_selection(pane).is_none());
     }
 
     #[test]

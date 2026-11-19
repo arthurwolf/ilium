@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Capability: agent-config.propose | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>62</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-plugin-to-plugin/">plugin to plugin</a></li>
+<li><a href="/pages/api-telemetry/">telemetry</a></li>
+<li><a href="/pages/api-self-limits/">self limits</a></li>
+<li><a href="/pages/api-self-describe/">self description</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+<li><a href="/pages/api-grant-refusal-and-changes/">Refusals and grant changes</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details open><summary>Capabilities<span>71</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-agent-config-propose/" aria-current="page">agent-config.propose</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>112</span></summary><ul>
+<li><a href="/pages/reference-documentation-versions/">Documentation versions</a></li>
+<li><a href="/pages/reference-documentation-lifecycle/">Documentation lifecycle</a></li>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-open-decisions/">Open security decisions</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+<li><a href="/pages/reference-power-and-battery/">Power, battery and thermal behaviour</a></li>
+<li><a href="/pages/reference-requirements-production/">Requirements for production operation</a></li>
+<li><a href="/pages/reference-abi-major-versions/">ABI major versions</a></li>
+<li><a href="/pages/reference-cli-completion/">Shell completion and man pages</a></li>
+<li><a href="/pages/reference-cli-network-and-privacy/">CLI network use and privacy</a></li>
+<li><a href="/pages/reference-cli-output-stability/">CLI output stability</a></li>
+<li><a href="/pages/reference-core-replacement-matrix/">Core replacement matrix</a></li>
+<li><a href="/pages/reference-documentation-site/">Reference, documentation site</a></li>
+<li><a href="/pages/reference-host-aggregate-limits/">Reference, host aggregate limits</a></li>
+<li><a href="/pages/reference-host-release-verification/">Host release verification</a></li>
+<li><a href="/pages/reference-host-soak-and-load-testing/">Soak and endurance testing</a></li>
+<li><a href="/pages/reference-minimum-system-requirements/">Minimum system requirements</a></li>
+<li><a href="/pages/reference-plugin-cli-dev-failure-modes/">Failure modes of the dev command</a></li>
+<li><a href="/pages/reference-plugin-debugging/">Debugging a running plugin</a></li>
+<li><a href="/pages/reference-plugin-test-harness/">Test harness contract for CI</a></li>
+<li><a href="/pages/reference-registry-key-compromise/">Registry key compromise</a></li>
+<li><a href="/pages/reference-release-key-compromise/">Release key compromise</a></li>
+<li><a href="/pages/reference-release-rollout/">Release rollout</a></li>
+<li><a href="/pages/reference-sdk-deprecation/">SDK deprecation</a></li>
+<li><a href="/pages/reference-toolchain-support-matrix/">Toolchain support matrix</a></li>
+<li><a href="/pages/reference-grant-expiry/">Grant expiry</a></li>
+<li><a href="/pages/reference-audit-grant-events/">Grant audit records</a></li>
+<li><a href="/pages/reference-grant-cli-unattended/">Unattended grants</a></li>
+<li><a href="/pages/reference-helper-orphan-and-server-death/">Helper orphans</a></li>
+<li><a href="/pages/reference-resource-limits-matrix/">Limits matrix</a></li>
+<li><a href="/pages/reference-config-export-import/">Config export/import</a></li>
+<li><a href="/pages/reference-language-resolution-and-coverage/">Language resolution</a></li>
+<li><a href="/pages/reference-conformance-claims/">Conformance claims</a></li>
+<li><a href="/pages/reference-requirements-production-completeness/">Production requirements (new pages)</a></li>
+</ul></details>
+<details><summary>Guides<span>42</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-backup-and-restore/">Backup and restore guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-supporting-two-host-minors/">Support two host minors</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+<li><a href="/pages/guide-admin-failure-runbook/">Administrator failure runbook</a></li>
+<li><a href="/pages/guide-backwards-compatibility-test-matrix/">Backwards-compatibility test matrix</a></li>
+<li><a href="/pages/guide-deprecating-plugin-features/">Deprecating plugin features</a></li>
+<li><a href="/pages/guide-example-plugins/">Example plugin catalogue</a></li>
+<li><a href="/pages/guide-operator-upgrades/">Upgrading Ilium and rolling back the host</a></li>
+<li><a href="/pages/guide-plugins-without-the-sdk/">Plugins without the SDK</a></li>
+<li><a href="/pages/guide-reproducible-builds/">Reproducible builds</a></li>
+<li><a href="/pages/guide-sdk-migration/">SDK migration</a></li>
+<li><a href="/pages/guide-writing-user-text/">Writing user-visible text</a></li>
+<li><a href="/pages/guide-pinning-the-sdk/">Pinning the SDK</a></li>
+<li><a href="/pages/guide-air-gapped-transfer/">Air-gapped bundles</a></li>
+<li><a href="/pages/guide-policy-compliance-reporting/">Policy compliance</a></li>
+<li><a href="/pages/guide-audit-collection/">Audit collection</a></li>
+<li><a href="/pages/guide-bad-release-recall-playbook/">Recall playbook</a></li>
+<li><a href="/pages/guide-bidirectional-text-and-control-characters/">Bidirectional text</a></li>
+<li><a href="/pages/guide-text-input-and-composition/">Text input and IME</a></li>
+<li><a href="/pages/guide-colour-depth-and-no-color/">Colour depth</a></li>
+<li><a href="/pages/guide-ci-test-report-formats/">CI report formats</a></li>
+<li><a href="/pages/guide-plugin-test-strategy/">Test strategy</a></li>
+</ul></details>
+<details><summary>For users<span>14</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+<li><a href="/pages/user-reporting-a-plugin/">Reporting a plugin</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Capabilities</b></p>
+<h1>Capability: agent-config.propose</h1>
+<h2 id="agent-configproposeagent">agent-config.propose:&lt;agent&gt;</h2>
+<p>The <code>agent-config.propose:&lt;agent&gt;</code> capability lets a plugin propose changes to the files in one coding agent's configuration folder, such as <code>~/.claude/settings.json</code> or <code>~/.codex/config.toml</code>. The plugin never writes those files. It sends the host a proposal: a title and a list of whole new file contents. The host shows the user the full diff in a kernel dialog, and applies only the files the user checks, all together or not at all.</p>
+<p>This is the only way a plugin changes agent configuration. A direct write grant, <code>fs.write:agent-config:&lt;agent&gt;</code>, is refused at install with <code>manifest.grant-scope</code> (<a href="/pages/reference-sandbox/#file-scopes">Sandbox reference</a>), because the agent command-line tools run hooks and commands from these files with the user's rights. A proposal keeps the user in the loop for every change.</p>
+<div class="note">
+<p>Grants are per side. A plugin that proposes from its server side needs the grant in <code>capabilities.server</code>; a client-side proposal needs it in <code>capabilities.client</code>. Scenes cannot propose.</p>
+</div>
+
+<p><strong>You will need:</strong></p>
+<ul>
+<li>A grant <code>agent-config.propose:&lt;agent&gt;</code> for each agent whose configuration the plugin changes, on the side that sends the proposal. The agents are <code>claude</code>, <code>codex</code>, <code>gemini</code> and <code>antigravity</code>.</li>
+<li>The read grant <code>fs.read:agent-config:&lt;agent&gt;</code> for the same agent on the same side, so the plugin can read the current file and its revision first. Without it the install fails with <code>manifest.grant-dependency</code>.</li>
+<li>An attached TUI client, because only the user answers a proposal.</li>
+</ul>
+<p>SDK paths: Rust <code>ilium_plugin_sdk::host::fs</code>, TypeScript <code>@ilium/plugin-sdk/host/fs</code>. Reads use <a href="/pages/capability-fs-read/">fs.read</a> and the revision tokens of <a href="/pages/api-fs-atomic-and-tail/">atomic writes and revisions</a>.</p>
+<h3 id="grant-syntax">Grant syntax</h3>
+<p>The argument is exactly one agent name. The manifest checks the grant when the package is installed.</p>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Valid</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent-config.propose:claude</code></td>
+<td>yes</td>
+<td>the Claude configuration folder, high risk</td>
+</tr>
+<tr>
+<td><code>agent-config.propose:codex</code></td>
+<td>yes</td>
+<td>the Codex configuration folder, high risk</td>
+</tr>
+<tr>
+<td><code>agent-config.propose:gemini</code>, <code>agent-config.propose:antigravity</code></td>
+<td>yes</td>
+<td>the Gemini CLI and Antigravity configuration roots, high risk</td>
+</tr>
+<tr>
+<td><code>agent-config.propose</code></td>
+<td>no</td>
+<td><code>manifest.grant-argument-missing</code>: needs one agent name</td>
+</tr>
+<tr>
+<td><code>agent-config.propose:*</code></td>
+<td>no</td>
+<td><code>manifest.grant-wildcard</code>: a manifest that changes two agents lists two grants</td>
+</tr>
+<tr>
+<td><code>agent-config.propose:cursor</code></td>
+<td>no</td>
+<td><code>manifest.grant-scope</code>: not a known agent scope</td>
+</tr>
+<tr>
+<td><code>fs.write:agent-config:claude</code></td>
+<td>no</td>
+<td><code>manifest.grant-scope</code>: direct writes to agent configuration are refused</td>
+</tr>
+</tbody>
+</table>
+<p>The grant is high risk (H) at every tier and available to T1, T2 and T3 packages. The risk comes from what the files do: an agent runs the hooks and commands its configuration names, so an accepted change can run code at the agent's next start. The per-proposal review is what makes the grant safe to give to any tier.</p>
+<h3 id="functions">Functions</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Rust (<code>fs::</code>)</th>
+<th>TypeScript</th>
+<th>Kind</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>propose-agent-config(agent, title, changes)</code></td>
+<td><code>propose_agent_config(&amp;str, &amp;str, Vec&lt;ConfigChange&gt;)</code></td>
+<td><code>proposeAgentConfig(agent, title, changes)</code></td>
+<td>async</td>
+<td><code>ProposalResult { applied, rejected, history }</code>, or an error</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-wit">// Excerpt of ilium:host/fs in reference-wit
+record config-change {
+  path: string,                     // relative to the agent's configuration folder
+  content: option&lt;list&lt;u8&gt;&gt;,        // the whole new file; none removes the file
+  revision: option&lt;revision-token&gt;, // from read-with-revision; none means the file must not exist yet
+  summary: string,                  // one line shown beside the file in the dialog
+}
+record proposal-result {
+  applied: list&lt;string&gt;,            // paths the user checked, now written
+  rejected: list&lt;string&gt;,           // paths the user left unchecked, unchanged
+  history: string,                  // path of the history entry in the plugin's data scope
+}
+
+propose-agent-config: func(agent: string, title: string, changes: list&lt;config-change&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+take-proposal: func(request: request-id) -&gt; option&lt;proposal-result&gt;;
+</code></pre>
+<p>A change carries the whole new file, not a patch. The host computes the diff itself from the file on disk, so the user always sees what will really be written. The size limits of a proposal (number of changes, total new content, title and summary length) are in <a href="/pages/reference-errors-and-limits/#error-codes-of-the-extended-functions">Errors and limits</a>.</p>
+<h3 id="how-a-proposal-is-handled">How a proposal is handled</h3>
+<ol>
+<li><strong>Checks at the call.</strong> The host checks the grant, the agent name, every path and the size limits. A path that leaves the configuration folder, names a credential file ([SEC-063]) or resolves into the deny set ([SEC-060]) refuses the whole proposal with <code>not-permitted</code> and reason <code>scope</code>; no dialog opens. Inside the agent's transcript folder (the folder of <code>agent-sessions:&lt;agent&gt;</code>) only a new file may be proposed: a change there with a <code>revision</code>, or one that removes a file, is refused the same way, so existing transcripts stay read only. Two changes to the same path, an empty list or a proposal over the limits return <code>invalid-argument</code>.</li>
+<li><strong>Revision check.</strong> For each change the host compares <code>revision</code> with the file on disk. A file that changed since the plugin read it, or that exists when <code>revision</code> is <code>none</code>, completes the proposal with <code>failed(conflict)</code> before the dialog opens.</li>
+<li><strong>Consent dialog.</strong> The kernel draws the dialog, modal over every plugin widget ([SEC-102]), with the protection against accidental approval of [SEC-103]. It names the plugin, the agent and the title, lists one row per file with its summary and its added and removed line counts, and shows the full diff of the selected file, scrolled one screen at a time; a new file is shown as its size, its line count and its lines. Every row starts unchecked, and the default focus is on <strong>Reject all</strong>. The prompt counts as a consent prompt under [SEC-105]: one pending proposal per plugin, the same hourly cap, and the same answer deadline.</li>
+<li><strong>Apply.</strong> When the user presses Enter with at least one row checked, the host checks every revision again. It then copies the previous content of each checked file into the history entry, writes each new file to a temporary sibling and renames it over the target. If any step fails, the host restores every file it already replaced from the history entry, and the proposal completes with <code>failed(io)</code>. The user therefore gets all checked files or none.</li>
+<li><strong>Completion.</strong> <code>request-completed</code> reports <code>ok</code>, and <code>take-proposal</code> returns the applied and rejected paths and the history path.</li>
+</ol>
+<p>Nothing about a proposal is stored as a standing consent. The next proposal is shown in full again, even when it is identical, and the user's answer is never written to <code>consents.json</code>.</p>
+<h3 id="history-and-revert">History and revert</h3>
+<p>The history entry is the file <code>agent-config-history/&lt;agent&gt;/&lt;request-id&gt;.json</code> in the plugin's own <code>data</code> scope. The host writes it before it replaces any file. It holds, for each applied path, the previous content, or <code>null</code> when the file did not exist before. It counts against the plugin's <code>disk_mib</code> limit; when the limit leaves no room for it, the proposal completes with <code>failed(quota-exceeded)</code> and no file changes.</p>
+<p>A revert is an ordinary proposal: the plugin reads the history entry, reads the current revisions, and proposes the old contents (or <code>content: none</code> for a file that the proposal created). The user sees the revert diff and accepts it like any other change. The host never reverts a file on its own. Uninstalling with <code>--purge</code> deletes the <code>data</code> scope and with it the revert history; the configuration files keep their current content.</p>
+<h3 id="completion">Completion</h3>
+<table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ok</code></td>
+<td>The checked files were written. <code>take-proposal</code> lists them in <code>applied</code> and the unchecked ones in <code>rejected</code>.</td>
+</tr>
+<tr>
+<td><code>failed(not-permitted)</code></td>
+<td>The user pressed <strong>Reject all</strong>, pressed Enter with no row checked, or closed the dialog. The message starts with <code>declined:</code>.</td>
+</tr>
+<tr>
+<td><code>failed(timed-out)</code></td>
+<td>The user did not answer within the [SEC-105] deadline. The dialog closes and nothing is written.</td>
+</tr>
+<tr>
+<td><code>failed(conflict)</code></td>
+<td>A file changed after the plugin read it, found before the dialog or just before the apply. Nothing is written.</td>
+</tr>
+<tr>
+<td><code>failed(quota-exceeded)</code></td>
+<td>The history entry does not fit in <code>disk_mib</code>. Nothing is written.</td>
+</tr>
+<tr>
+<td><code>failed(io)</code></td>
+<td>A disk error during the apply. Every file already replaced is restored.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>The plugin stopped, the grant was revoked or the host shut down while the dialog was open. The dialog closes and nothing is written.</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<pre class="term">╭─<span class="t-hi"> Change agent configuration </span>───────────────────────────────────────────╮
+│ Agent setup (ilium.core.agent-setup) proposes 2 changes to the         │
+│ Claude configuration. Nothing is changed until you apply.              │
+│                                                                        │
+│ [x] CLAUDE.md, add the Ilium instruction block <span class="t-dim">……………………………………………</span> +4 −0 │
+│ [ ] settings.json, add the notification hook <span class="t-dim">…………………………………………………</span> +6 −1 │
+│                                                                        │
+│ <span class="t-hi">CLAUDE.md (file 1 of 2)</span>                                                │
+│   # Notes for agents                                                   │
+│ <span class="t-ok">+ &lt;!-- ilium:begin chatroom v3 --&gt;</span>                                     │
+│ <span class="t-ok">+ Talk to the other agents with `ilium chat send`.</span>                     │
+│ <span class="t-ok">+ &lt;!-- ilium:end chatroom --&gt;</span>                                          │
+│ <span class="t-ok">+</span>                                                                      │
+│                                                                        │
+│ <span class="t-dim">Space toggle · Tab next file · Enter apply checked · Esc reject all</span>    │
+╰────────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Illustrative. The kernel's proposal dialog after the user checked the first file. Rows start unchecked; Enter applies only the checked files, and Esc rejects the whole proposal.</figcaption>
+</figure>
+
+<h3 id="errors">Errors</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Where</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-permitted</code></td>
+<td>call</td>
+<td>No grant, the grant was declined (reason <code>declined</code>), or a path is outside the scope, a credential file or in the deny set (reason <code>scope</code>).</td>
+</tr>
+<tr>
+<td><code>invalid-argument</code></td>
+<td>call</td>
+<td>A bad path, an empty change list, two changes to one path, or a proposal over the size limits.</td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td>call</td>
+<td>A proposal or another consent prompt of this plugin is already pending ([SEC-105]); <code>retry-after-ms</code> is set.</td>
+</tr>
+<tr>
+<td><code>rate-limited</code></td>
+<td>call</td>
+<td>The plugin reached the hourly prompt cap of [SEC-105]; <code>retry-after-ms</code> is set.</td>
+</tr>
+<tr>
+<td><code>revoked</code></td>
+<td>call</td>
+<td>The grant was revoked while the call was running.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code></td>
+<td>completion</td>
+<td>The user rejected every change; the message starts with <code>declined:</code>.</td>
+</tr>
+<tr>
+<td><code>timed-out</code></td>
+<td>completion</td>
+<td>No answer within the [SEC-105] deadline.</td>
+</tr>
+<tr>
+<td><code>conflict</code></td>
+<td>completion</td>
+<td>A revision no longer matches the file.</td>
+</tr>
+<tr>
+<td><code>quota-exceeded</code></td>
+<td>completion</td>
+<td>The history entry does not fit in <code>disk_mib</code>.</td>
+</tr>
+<tr>
+<td><code>io</code></td>
+<td>completion</td>
+<td>A disk error during the apply; replaced files are restored.</td>
+</tr>
+</tbody>
+</table>
+<p>All of these are existing codes; the proposal adds none.</p>
+<h3 id="risk-review-and-logging">Risk, review and logging</h3>
+<ul>
+<li>The grant is H. A bundled T1 plugin is first activated without it and asks at first start ([SEC-111]). A T2 or T3 package shows it in the review dialog as an unchecked <code>HIGH</code> row with the wording <code>Proposes changes to the &lt;agent&gt; configuration</code>.</li>
+<li>Holding the grant never writes a file by itself. Every proposal opens its own dialog, and only the user's Enter applies it.</li>
+<li>Each applied file writes one <code>write-outside-data</code> record to the <a href="/pages/reference-audit-log/">audit log</a>, with the plugin id as actor, the grant string and the target <code>&lt;agent&gt;/&lt;path&gt;</code>. The plugin log gets one info line per applied file and one line per rejected or failed proposal.</li>
+<li>Revoking the grant in Settings &gt; Plugins, or with <code>ilium plugin grants &lt;id&gt; --revoke &lt;grant&gt;</code>, closes an open dialog and completes the proposal as <code>cancelled</code>.</li>
+</ul>
+<h3 id="when-the-grant-is-declined">When the grant is declined</h3>
+<p>A declined grant links the proposal import to a stub that returns <code>not-permitted</code> with reason <code>declined</code> at once, and no dialog opens. The plugin keeps running and can still read the configuration with its read grant, for example to show what it would change. A call whose capability the manifest never requested traps the instance, because that is a plugin bug.</p>
+<h3 id="examples">Examples</h3>
+<p>Both examples assume a server-side grant:</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;com.example.agent-notes&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;fs.read:agent-config:claude&quot;, &quot;agent-config.propose:claude&quot;, &quot;fs.read:agent-config:codex&quot;, &quot;agent-config.propose:codex&quot;] }
+}
+</code></pre>
+<p><strong>Example 1: propose an instruction block (Rust).</strong> The plugin reads <code>CLAUDE.md</code> with its revision and proposes the file with the block added. A missing file is proposed as a new file with <code>revision: None</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::fs::{self, ConfigChange};
+
+const BEGIN: &amp;str = &quot;&lt;!-- ilium:begin chatroom v3 --&gt;&quot;;
+const BLOCK: &amp;str = &quot;&lt;!-- ilium:begin chatroom v3 --&gt;\nTalk to the other agents with `ilium chat send`.\n&lt;!-- ilium:end chatroom --&gt;\n&quot;;
+
+// Proposes the block. Nothing is written until the user checks the file and presses Enter.
+async fn propose_block() -&gt; Result&lt;Vec&lt;String&gt;, PluginError&gt; {
+    let path = FsPath { scope: &quot;agent-config:claude&quot;.into(), path: &quot;CLAUDE.md&quot;.into() };
+    let (current, revision) = match fs::read_with_revision(&amp;path).await {
+        Ok(read) =&gt; (String::from_utf8_lossy(&amp;read.bytes).into_owned(), Some(read.revision)),
+        Err(error) if error.code == ErrorCode::NotFound =&gt; (String::new(), None),
+        Err(error) =&gt; return Err(error),
+    };
+    if current.contains(BEGIN) {
+        return Ok(Vec::new()); // already set up, nothing to propose
+    }
+    let change = ConfigChange {
+        path: &quot;CLAUDE.md&quot;.into(),
+        content: Some(format!(&quot;{current}\n{BLOCK}&quot;).into_bytes()),
+        revision,
+        summary: &quot;add the Ilium instruction block&quot;.into(),
+    };
+    let result = fs::propose_agent_config(&quot;claude&quot;, &quot;Ilium instructions&quot;, vec![change]).await?;
+    Ok(result.applied)
+}
+</code></pre>
+<p><strong>Example 2: propose an auto-compact limit and handle the answer (TypeScript).</strong> A rejection and a changed file are normal results; the plugin reports them and does not retry by itself.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, PluginError } from '@ilium/plugin-sdk';
+import { readWithRevision, proposeAgentConfig } from '@ilium/plugin-sdk/host/fs';
+
+const KEY = 'model_auto_compact_token_limit';
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
+// Sets the top-level key, or adds it before the first table of the file.
+function withLimit(toml: string, limit: number): string {
+  const line = `${KEY} = ${limit}`;
+  const pattern = new RegExp(`^${KEY}\\s*=.*$`, 'm');
+  return pattern.test(toml) ? toml.replace(pattern, line) : `${line}\n${toml}`;
+}
+
+async function proposeLimit(limit: number): Promise&lt;'applied' | 'declined' | 'changed' | 'no-answer'&gt; {
+  const path = { scope: 'agent-config:codex', path: 'config.toml' };
+  const current = await readWithRevision(path);
+  const next = withLimit(decoder.decode(current.bytes), limit);
+  try {
+    await proposeAgentConfig('codex', 'Auto-compact threshold', [
+      { path: 'config.toml', content: encoder.encode(next), revision: current.revision, summary: `set ${KEY} to ${limit}` },
+    ]);
+    return 'applied';
+  } catch (error) {
+    if (!(error instanceof PluginError)) throw error;
+    if (error.code === 'not-permitted' &amp;&amp; error.message.startsWith('declined: ')) return 'declined';
+    if (error.code === 'conflict') return 'changed';
+    if (error.code === 'timed-out') return 'no-answer';
+    throw error;
+  }
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {
+    proposeLimit(180000).then(
+      (answer) =&gt; console.info(`auto-compact proposal: ${answer}`),
+      (error: unknown) =&gt; console.error('auto-compact proposal failed', error),
+    );
+  },
+  onEvents: () =&gt; [],
+});
+</code></pre>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The dialog above opens in the client that most recently had input. After the answer, the plugin log shows what was applied:</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs com.example.agent-notes
+<span class="t-dim">2026-10-19 09:14:02</span> <span class="t-ok">info</span>  propose agent-config:claude "Ilium instructions" 1 change
+<span class="t-dim">2026-10-19 09:14:31</span> <span class="t-ok">info</span>  applied agent-config:claude CLAUDE.md 412 bytes
+<span class="t-dim">2026-10-19 09:20:05</span> <span class="t-ok">info</span>  propose agent-config:codex "Auto-compact threshold" 1 change
+<span class="t-dim">2026-10-19 09:20:12</span> <span class="t-warn">warn</span>  proposal declined by the user, nothing written
+</pre>
+<figcaption>Illustrative, not generated. One accepted and one rejected proposal.</figcaption>
+</figure>
+
+<h3 id="who-requests-it">Who requests it</h3>
+<p>First-party plugins from <a href="/pages/reference-feature-traceability/">feature traceability</a>:</p>
+<ul>
+<li>37 Configure agent (Agent setup plugin): proposes edits to agent configuration files such as <code>settings.json</code> and <code>config.toml</code>; the user approves each one in the dialog.</li>
+<li>63 Agent setup: proposes the Ilium instruction blocks and hooks in the files inside each agent's configuration folder. Instruction files in the project folder are written with <code>fs.write:project</code>.</li>
+<li>82 Compaction optimiser (Compaction plugin): <strong>Apply</strong> proposes the recommended auto-compact threshold, and <strong>Revert</strong> proposes the previous value from the history entry. Both open the dialog.</li>
+</ul>
+<p>Requirement ids for this page: [CAP-886] to [CAP-891]. See the <a href="/pages/reference-requirements/">requirements index</a>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/capability-fs-read/">fs.read</a> for reading the configuration and its revision.</li>
+<li><a href="/pages/capability-fs-write/">fs.write</a> for the scopes a plugin may write directly.</li>
+<li><a href="/pages/api-fs-atomic-and-tail/">Atomic writes and revisions</a> for revision tokens.</li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a> for the dialog rules and the prompt limits.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the codes and the proposal size limits.</li>
+</ul>
+<h3 id="security">Security</h3>
+<p>The authoritative scope table is in <a href="/pages/reference-sandbox/">Sandbox reference</a>. Credential files stay excluded from every proposal ([SEC-063]), and nothing reaches the deny set ([SEC-060]).</p>
+<h2 id="requirement-statements">Requirement statements</h2>
+<ul>
+<li><strong>[CAP-886]</strong> <code>agent-config.propose:&lt;agent&gt;</code> MUST name one agent: the bare form MUST fail with manifest.grant-argument-missing, <code>*</code> with manifest.grant-wildcard and an unknown agent with manifest.grant-scope. It MUST be high risk at every tier and MUST fail with manifest.grant-dependency without <code>fs.read:agent-config:&lt;agent&gt;</code> on the same side.</li>
+<li><strong>[CAP-887]</strong> A proposal MUST NOT change any file before the user answers. The host MUST show the full diff of every change in a kernel dialog with every row unchecked, MUST write only the checked files, and MUST apply them all or none: when one replacement fails, every replaced file MUST be restored and the proposal MUST complete with failed(io).</li>
+<li><strong>[CAP-888]</strong> A change whose path leaves the agent's configuration folder, names a credential file ([SEC-063]), resolves into the deny set ([SEC-060]) or replaces or removes an existing file in the agent's transcript folder MUST refuse the whole proposal with not-permitted and reason <code>scope</code> and MUST NOT open a dialog. An empty list, two changes to one path or a proposal over the size limits MUST return invalid-argument.</li>
+<li><strong>[CAP-889]</strong> When a change's revision no longer matches the file, checked before the dialog opens and again just before the apply, the proposal MUST complete with failed(conflict) and MUST NOT change any file.</li>
+<li><strong>[CAP-890]</strong> A proposal MUST count as a consent prompt of [SEC-105]: no answer within the deadline MUST complete as timed-out, a second proposal while one is pending MUST return busy with retry-after-ms, and the prompt cap MUST return rate-limited. Reject all, Enter with nothing checked or closing the dialog MUST complete with failed(not-permitted) whose message starts with <code>declined:</code>. The answer MUST NOT be stored in consents.json.</li>
+<li><strong>[CAP-891]</strong> Before it replaces a file the host MUST write the previous content into the history entry <code>agent-config-history/&lt;agent&gt;/&lt;request-id&gt;.json</code> in the plugin's <code>data</code> scope, MUST write one audit <code>write-outside-data</code> record per applied file, and <code>take-proposal</code> MUST list the applied and the rejected paths.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-settings-write-kernel/"><small>Previous</small>Capability: settings.write-kernel:&lt;kernel-tab-id&gt;</a><a class="next" href="/pages/agent-docs/"><small>Next</small>Providing the docs to agents</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#agent-configproposeagent">agent-config.propose:&lt;agent&gt;</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#functions">Functions</a></li><li class="l3"><a href="#how-a-proposal-is-handled">How a proposal is handled</a></li><li class="l3"><a href="#history-and-revert">History and revert</a></li><li class="l3"><a href="#completion">Completion</a></li><li class="l3"><a href="#errors">Errors</a></li><li class="l3"><a href="#risk-review-and-logging">Risk, review and logging</a></li><li class="l3"><a href="#when-the-grant-is-declined">When the grant is declined</a></li><li class="l3"><a href="#examples">Examples</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li><li class="l2"><a href="#requirement-statements">Requirement statements</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

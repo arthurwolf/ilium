@@ -243,6 +243,7 @@ fn f_112_a_fact_source_failure_never_stops_the_recap() {
     );
     host.fail_service("example.broken/facts");
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     assert_eq!(host.jobs().list().len(), 1);
 }
 
@@ -256,6 +257,7 @@ fn f_112_fact_source_answers_are_added_to_the_evidence_with_the_entry_title() {
     host.set_extension_entries("ilium.core.recap/fact-sources", vec![json!({"id": "branch-ticket", "title": "Branch ticket", "service": "example.tickets/for-pane"}).to_string()]);
     host.set_service_reply("example.tickets/for-pane", "TICKET-42".to_string());
     host.cli().invoke(&["recap"], b"");
+    host.settle();
     let job = host.jobs().list().pop().expect("a job");
     assert!(String::from_utf8(job.input)
         .expect("UTF-8")
@@ -274,6 +276,7 @@ fn f_112_before_recap_hook_reply_replaces_the_text_of_the_record() {
         ilium_plugin_sdk::exports::HookReply::Replace(json!({"text": "Redacted text"}).to_string()),
     );
     let invocation = host.cli().invoke(&["recap", "--length", "short"], b"");
+    host.settle();
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,
@@ -299,6 +302,7 @@ fn f_112_before_recap_runs_once_per_length_with_pane_kind_and_text() {
     let pane = host.tree().add(shell_pane("s"));
     host.tree().set_screen(pane, vec!["$ ls".to_string()]);
     let invocation = host.cli().invoke(&["recap"], b"");
+    host.settle();
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,
@@ -333,6 +337,7 @@ fn f_112_a_failing_before_recap_hook_keeps_the_original_text() {
     host.tree().set_screen(pane, vec!["$ ls".to_string()]);
     host.fail_hook("ilium.core.recap/before-recap");
     let invocation = host.cli().invoke(&["recap", "--length", "short"], b"");
+    host.settle();
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,

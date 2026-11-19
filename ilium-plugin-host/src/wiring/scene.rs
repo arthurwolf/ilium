@@ -209,6 +209,7 @@ impl SceneImportServices {
             ids: self.ids.clone(),
             session: self.session.clone(),
             clock_origin: self.clock_origin,
+            job_requests: None,
         };
         let env = ImportEnv::for_instance(&context);
         let book = JobBook::new();

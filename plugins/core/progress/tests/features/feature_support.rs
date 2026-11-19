@@ -202,6 +202,7 @@ pub fn progress_with_stderr(host: &mut FakeHost, pane: u64, args: &[&str]) -> (R
     let mut full = vec!["progress"];
     full.extend_from_slice(args);
     let invocation = host.cli().invoke(&full, b"");
+    host.settle();
     let stderr = invocation.stderr();
     let run = Run {
         stdout: invocation.stdout(),

@@ -385,10 +385,8 @@ fn port_app_reopening_after_close_submits_a_fresh_open_view() {
 #[test]
 fn port_app_the_manifest_lists_the_open_command_id() {
     let manifest = manifest_value();
-    assert!(
-        manifest["contributes"]["commands"]
-            .to_string()
-            .contains(OPEN_COMMAND),
-        "the manifest declares {OPEN_COMMAND}"
-    );
+    let commands = manifest["contributes"]["commands"].as_array().expect("commands");
+    assert!(commands.iter().any(|command| {
+        command["id"].as_str().is_some_and(|id| format!("{}/{}", manifest["id"].as_str().unwrap_or_default(), id) == OPEN_COMMAND)
+    }), "the manifest declares {OPEN_COMMAND}");
 }

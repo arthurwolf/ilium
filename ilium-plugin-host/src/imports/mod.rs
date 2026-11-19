@@ -30,6 +30,7 @@ pub mod inference;
 pub mod inference_backend;
 pub mod intents_host;
 pub mod jobs;
+pub mod job_requests;
 pub mod journal;
 pub mod kernel_settings;
 pub mod keymap;

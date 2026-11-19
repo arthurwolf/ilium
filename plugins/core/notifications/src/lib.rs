@@ -22,7 +22,7 @@ use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, AgentActivity, AgentActivityEvent, Area, Intent, MarkAttentionSpec,
-    NodeId, NotifySpec, UiAction, UiTree, Urgency, ViewTarget,
+    NodeId, NotifySpec, ToastSpec, Tone, UiAction, UiTree, Urgency, ViewTarget,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
 use rules::{AgentState, AlertSettings, PaneLabel, TaskOutcomeCoalescer, TaskOutcomeKind};
@@ -67,7 +67,7 @@ impl Lifecycle for NotificationsServer {
         self.reload_settings();
         self.session = session_name();
         let mut api = host();
-        self.muted = HostStorage::get(&mut *api, Bucket::Global, MUTED_KEY.to_string())
+        self.muted = HostStorage::get(&mut *api, Bucket::Global, MUTED_KEY.to_string())?
             .is_some_and(|bytes| bytes == b"1");
         Ok(())
     }
@@ -106,7 +106,7 @@ impl Handler for NotificationsServer {
                 Event::TopicPublished(topic) if topic.topic == PROGRESS_TOPIC => {
                     self.on_task_report(&topic.payload_json, &mut submissions);
                 }
-                Event::UiAction(action) => self.on_ui_action(&action),
+                Event::UiAction(action) => self.on_ui_action(&action, &mut submissions),
                 _ => {}
             }
         }
@@ -307,26 +307,36 @@ impl NotificationsServer {
     }
 
     /// The mute toggle: `ui-action` `toggled` with a flag on [`MUTE_TOGGLE_KEY`].
-    fn on_ui_action(&mut self, action: &UiAction) {
+    fn on_ui_action(&mut self, action: &UiAction, out: &mut Vec<Submission>) {
         if action.kind != ActionKind::Toggled || action.key != MUTE_TOGGLE_KEY {
             return;
         }
         let Some(ActionValue::Flag(muted)) = action.value else {
             return;
         };
-        self.muted = muted;
         let mut api = host();
         let byte: &[u8] = if muted { b"1" } else { b"0" };
-        if let Err(error) = HostStorage::put(
+        match HostStorage::put(
             &mut *api,
             Bucket::Global,
             MUTED_KEY.to_string(),
             byte.to_vec(),
         ) {
-            ilium_plugin_sdk::log::log(
-                Level::Warn,
-                &format!("the mute flag could not be stored: {}", error.message),
-            );
+            Ok(()) => self.muted = muted,
+            Err(error) => {
+                ilium_plugin_sdk::log::log(
+                    Level::Warn,
+                    &format!("the mute flag could not be stored: {}", error.message),
+                );
+                out.push(Submission::new(Intent::Toast(ToastSpec {
+                    id: Some("notification-mute-save-failed".to_string()),
+                    tone: Tone::Warning,
+                    title: "Mute not saved; previous setting remains active".to_string(),
+                    body: None,
+                    actions: Vec::new(),
+                    duration_ms: None,
+                })));
+            }
         }
     }
 }

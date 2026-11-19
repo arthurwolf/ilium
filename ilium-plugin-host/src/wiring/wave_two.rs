@@ -323,6 +323,7 @@ mod tests {
             ids: RequestIds::new(),
             session: SessionCounters::new(),
             clock_origin: Instant::now(),
+            job_requests: None,
         }
     }
 

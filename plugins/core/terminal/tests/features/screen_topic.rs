@@ -2,7 +2,7 @@
 //! when visible rows change, at most 10 per second per pane, a change inside the quiet window kept
 //! and published when it ends (page "Extension points", Topics).
 
-use ilium_plugin_sdk::types::{Event, NodeId, ScreenChangedEvent, TimerId};
+use ilium_plugin_sdk::types::{Event, NodeId, ScreenChangedEvent};
 use serde_json::Value;
 
 use crate::common::server_host;
@@ -113,12 +113,32 @@ fn feature_013_a_change_inside_the_quiet_window_is_published_when_the_timer_fire
     let timers = host.active_timers();
     assert_eq!(timers.len(), 1, "one flush timer is armed");
     host.advance_clock(100);
-    host.deliver(vec![Event::TimerFired(TimerId(u64::from(timers[0].0)))]);
     let topics = published(&host);
     assert_eq!(topics.len(), 2);
     assert_eq!(topics[1].1["first-row"], 1);
     assert_eq!(topics[1].1["last-row"], 2);
     assert_eq!(topics[1].1["revision"], 2);
+}
+
+#[test]
+fn the_earliest_pane_deadline_is_delivered_without_another_screen_event() {
+    let mut host = server_host();
+    host.deliver(vec![changed(7, 0, 0, 1)]);
+    host.advance_clock(30);
+    host.deliver(vec![changed(8, 0, 0, 1)]);
+    host.advance_clock(5);
+    host.deliver(vec![changed(8, 1, 1, 2)]);
+    host.advance_clock(5);
+    host.deliver(vec![changed(7, 2, 2, 2)]);
+    host.advance_clock(59);
+    host.settle();
+    assert_eq!(published(&host).len(), 2, "neither deadline has arrived");
+    host.advance_clock(1);
+    host.settle();
+    let topics = published(&host);
+    assert_eq!(topics.len(), 3, "the earlier deadline must be delivered");
+    assert_eq!(topics[2].1["pane"], 7);
+    assert_eq!(topics[2].1["revision"], 2);
 }
 
 /// REQ: F-013
@@ -135,8 +155,9 @@ fn feature_013_deferred_rows_are_merged_into_one_publication() {
         1,
         "one timer serves both deferrals"
     );
-    host.advance_clock(100);
+    host.advance_clock(50);
     host.deliver(vec![changed(7, 6, 6, 4)]);
+    host.advance_clock(10);
     let topics = published(&host);
     assert_eq!(topics.len(), 2);
     assert_eq!(topics[1].1["first-row"], 0);

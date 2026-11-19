@@ -401,7 +401,7 @@ mod tests {
             .unwrap();
         assert!(poller_requests(&mut ledger, "btc_usd", 1, now + 61_000).is_err());
         assert_eq!(
-            ledger.read("coinbase-BTC-USD").unwrap(),
+            ledger.read("coinbase-BTC-USD").unwrap().unwrap(),
             b"invalid fixture ledger"
         );
     }

@@ -13,7 +13,7 @@ use ilium_plugin_sdk::host::{
 use ilium_plugin_sdk::primitives::HostAgent;
 use ilium_plugin_sdk::types::{
     Alignment, Area, Event, GrabId, Intent, InvokeCommandSpec, MessageSpec, MessageTarget,
-    NodeFlags, NodeId, OpenViewSpec, ParagraphSpec, PluginId, PluginSide, RichSpan,
+    NodeFlags, NodeId, OpenViewSpec, ParagraphSpec, PluginError, PluginId, PluginSide, RichSpan,
     SetStatusSegmentSpec, Span, SpanTarget, Style, Submission, TimerId, ToastSpec, Tone, UiNode,
     UiTree, ViewTarget, Widget,
 };
@@ -155,17 +155,18 @@ fn scan_panes(api: &mut dyn HostApi) -> Vec<LivePane> {
 
 impl Client {
     /// Reads the settings and the stored queue and starts the one-second tick.
-    pub fn activate(&mut self) {
+    pub fn activate(&mut self) -> Result<(), PluginError> {
         let mut handle = host();
         let api: &mut dyn HostApi = &mut *handle;
         self.state.apply_settings(&HostSettings::get_json(api));
         self.state.focused = HostPanes::focused(api);
-        if let Some(stored) = HostStorage::get(api, Bucket::Session, STORAGE_KEY.to_string())
+        if let Some(stored) = HostStorage::get(api, Bucket::Session, STORAGE_KEY.to_string())?
             .and_then(|bytes| serde_json::from_slice::<PersistedQueue>(&bytes).ok())
         {
             self.state.set_pending_restore(stored);
         }
         self.timer = HostTimers::set(api, TICK_MILLIS, Some(TICK_MILLIS)).ok();
+        Ok(())
     }
 
     fn now(api: &mut dyn HostApi) -> u64 {

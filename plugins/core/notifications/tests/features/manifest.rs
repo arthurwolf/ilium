@@ -77,6 +77,7 @@ fn manifest_050_server_grants_are_the_alert_grants_the_extension_grants_the_tab_
         [
             "sound.play",
             "notify.desktop",
+            "notify.toast",
             "agent.read",
             "tree.read",
             "tree.attention",

@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=05da3da95edc993fde6a9dddb6747cb846cf613f28397de02930c1d628aa60ef
+// @generated from wit/ sha256=976c3be3327744a0fb3cc2f5c2ac33d0e073dc5d0ce37d0bd208f9eed1b900b1
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.
@@ -9560,7 +9560,10 @@ pub mod imports {
         pub fn get(
             a0: m::host::storage::Bucket,
             a1: ::std::string::String,
-        ) -> ::core::option::Option<::std::vec::Vec<u8>> {
+        ) -> ::core::result::Result<
+            ::core::option::Option<::std::vec::Vec<u8>>,
+            m::types::errors::PluginError,
+        > {
             let w0: b::ilium::host::storage::Bucket = IntoWit::into_wit(a0);
             let w1: ::std::string::String = IntoWit::into_wit(a1);
             let out = b::ilium::host::storage::get(w0, &w1);
@@ -9592,7 +9595,10 @@ pub mod imports {
         pub fn keys(
             a0: m::host::storage::Bucket,
             a1: ::std::string::String,
-        ) -> ::std::vec::Vec<::std::string::String> {
+        ) -> ::core::result::Result<
+            ::std::vec::Vec<::std::string::String>,
+            m::types::errors::PluginError,
+        > {
             let w0: b::ilium::host::storage::Bucket = IntoWit::into_wit(a0);
             let w1: ::std::string::String = IntoWit::into_wit(a1);
             let out = b::ilium::host::storage::keys(w0, &w1);
@@ -9606,6 +9612,21 @@ pub mod imports {
             let w0: b::ilium::host::storage::Bucket = IntoWit::into_wit(a0);
             let w1: ::std::vec::Vec<b::ilium::host::storage::Entry> = IntoWit::into_wit(a1);
             let out = b::ilium::host::storage::write_batch(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn compare_exchange(
+            a0: m::host::storage::Bucket,
+            a1: ::std::string::String,
+            a2: ::core::option::Option<::std::vec::Vec<u8>>,
+            a3: ::core::option::Option<::std::vec::Vec<u8>>,
+        ) -> ::core::result::Result<bool, m::types::errors::PluginError> {
+            let w0: b::ilium::host::storage::Bucket = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::core::option::Option<::std::vec::Vec<u8>> = IntoWit::into_wit(a2);
+            let w3: ::core::option::Option<::std::vec::Vec<u8>> = IntoWit::into_wit(a3);
+            let out =
+                b::ilium::host::storage::compare_exchange(w0, &w1, w2.as_deref(), w3.as_deref());
             IntoMirror::into_mirror(out)
         }
 
@@ -10894,7 +10915,8 @@ pub mod imports {
             a0: m::types::ids::PluginId,
             a1: bool,
             a2: ::std::string::String,
-        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
             let w0: b::ilium::types::ids::PluginId = IntoWit::into_wit(a0);
             let w1: bool = IntoWit::into_wit(a1);
             let w2: ::std::string::String = IntoWit::into_wit(a2);
@@ -11928,7 +11950,7 @@ macro_rules! __ilium_wasm_host_timers {
 macro_rules! __ilium_wasm_host_storage {
     (on $host:ident) => {
         impl $crate::generated::host::storage::HostStorage for $host {
-            fn get(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::option::Option<::std::vec::Vec<u8>> {
+            fn get(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<::core::option::Option<::std::vec::Vec<u8>>, $crate::generated::types::errors::PluginError> {
                 $crate::wasm::imports::storage::get(a0, a1)
             }
             fn put(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String, a2: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
@@ -11937,11 +11959,14 @@ macro_rules! __ilium_wasm_host_storage {
             fn remove(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
                 $crate::wasm::imports::storage::remove(a0, a1)
             }
-            fn keys(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::std::vec::Vec<::std::string::String> {
+            fn keys(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<::std::vec::Vec<::std::string::String>, $crate::generated::types::errors::PluginError> {
                 $crate::wasm::imports::storage::keys(a0, a1)
             }
             fn write_batch(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::vec::Vec<$crate::generated::host::storage::Entry>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
                 $crate::wasm::imports::storage::write_batch(a0, a1)
+            }
+            fn compare_exchange(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String, a2: ::core::option::Option<::std::vec::Vec<u8>>, a3: ::core::option::Option<::std::vec::Vec<u8>>) -> ::core::result::Result<bool, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::storage::compare_exchange(a0, a1, a2, a3)
             }
             fn lease(&mut self, a0: ::std::string::String, a1: u32) -> bool {
                 $crate::wasm::imports::storage::lease(a0, a1)
@@ -11950,7 +11975,7 @@ macro_rules! __ilium_wasm_host_storage {
     };
     (off $host:ident) => {
         impl $crate::generated::host::storage::HostStorage for $host {
-            fn get(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::option::Option<::std::vec::Vec<u8>> {
+            fn get(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<::core::option::Option<::std::vec::Vec<u8>>, $crate::generated::types::errors::PluginError> {
                 <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::get(&mut $crate::wasm::detached(), a0, a1)
             }
             fn put(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String, a2: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
@@ -11959,11 +11984,14 @@ macro_rules! __ilium_wasm_host_storage {
             fn remove(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
                 <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::remove(&mut $crate::wasm::detached(), a0, a1)
             }
-            fn keys(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::std::vec::Vec<::std::string::String> {
+            fn keys(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String) -> ::core::result::Result<::std::vec::Vec<::std::string::String>, $crate::generated::types::errors::PluginError> {
                 <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::keys(&mut $crate::wasm::detached(), a0, a1)
             }
             fn write_batch(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::vec::Vec<$crate::generated::host::storage::Entry>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
                 <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::write_batch(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn compare_exchange(&mut self, a0: $crate::generated::host::storage::Bucket, a1: ::std::string::String, a2: ::core::option::Option<::std::vec::Vec<u8>>, a3: ::core::option::Option<::std::vec::Vec<u8>>) -> ::core::result::Result<bool, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::compare_exchange(&mut $crate::wasm::detached(), a0, a1, a2, a3)
             }
             fn lease(&mut self, a0: ::std::string::String, a1: u32) -> bool {
                 <$crate::HostHandle as $crate::generated::host::storage::HostStorage>::lease(&mut $crate::wasm::detached(), a0, a1)
@@ -13293,7 +13321,7 @@ macro_rules! __ilium_wasm_host_plugins {
             fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::plugins::PluginInfo> {
                 $crate::wasm::imports::plugins::list()
             }
-            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
                 $crate::wasm::imports::plugins::set_enabled(a0, a1, a2)
             }
         }
@@ -13303,7 +13331,7 @@ macro_rules! __ilium_wasm_host_plugins {
             fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::plugins::PluginInfo> {
                 <$crate::HostHandle as $crate::generated::host::plugins::HostPlugins>::list(&mut $crate::wasm::detached())
             }
-            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
                 <$crate::HostHandle as $crate::generated::host::plugins::HostPlugins>::set_enabled(&mut $crate::wasm::detached(), a0, a1, a2)
             }
         }

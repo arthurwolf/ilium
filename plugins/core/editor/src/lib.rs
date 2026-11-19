@@ -1,8 +1,8 @@
 //! Core plugin `ilium.core.editor` (manual page core-plugin-editor.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The server validates settings writes; the client provides editor buffers, tokenization and
+//! the line-action dialog. Editor pane rendering and live buffer synchronization are still hosted
+//! by the client application.
 
 pub mod agent_dialog;
 pub mod agent_from_line;
@@ -28,7 +28,7 @@ use ilium_plugin_sdk::generated::types::{
     OpenViewSpec, PointerButton, PointerKind, TextEdit, ToastSpec, Tone, UiAction,
 };
 use ilium_plugin_sdk::host;
-use ilium_plugin_sdk::host::{EntryKind, HostFs};
+use ilium_plugin_sdk::host::{EntryKind, HostFs, HostKernelSettings};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, TokenProvider, Views};
@@ -74,15 +74,41 @@ impl ServiceProvider for EditorServer {
             Err(_) => return error("invalid-argument", "the payload is not JSON"),
         };
         let field = |name: &str| payload.get(name).and_then(serde_json::Value::as_str);
-        match (field("tab"), field("key"), field("value")) {
-            (Some(KERNEL_TAB), Some(_), Some(_)) => ServiceReply::Done("{}".to_string()),
-            (Some(_), Some(_), Some(_)) => {
-                error("invalid-argument", "tab is not owned by this plugin")
-            }
-            _ => error(
-                "invalid-argument",
-                "tab, key and value are required strings",
-            ),
+        let (Some(tab), Some(key), Some(value)) = (field("tab"), field("key"), field("value"))
+        else {
+            return error("invalid-argument", "tab, key and value are required strings");
+        };
+        if tab != KERNEL_TAB {
+            return error("invalid-argument", "tab is not owned by this plugin");
+        }
+        let value = match key {
+            "line_display" => match value.trim().to_ascii_lowercase().as_str() {
+                "clip" => serde_json::json!("clip"),
+                "wrap" => serde_json::json!("wrap"),
+                _ => return error("invalid-argument", "line_display must be clip or wrap"),
+            },
+            "show_line_numbers"
+            | "show_minimap"
+            | "autosave_enabled"
+            | "markdown_rendered_by_default" => match value.parse::<bool>() {
+                Ok(value) => serde_json::json!(value),
+                Err(_) => return error("invalid-argument", "setting must be true or false"),
+            },
+            "autosave_delay_ms" => match value.parse::<u16>() {
+                Ok(value) if (250..=5000).contains(&value) => serde_json::json!(value),
+                _ => return error("invalid-argument", "autosave delay must be 250 to 5000 ms"),
+            },
+            _ => return error("invalid-argument", "unknown editor setting"),
+        };
+        let mut api = host();
+        match HostKernelSettings::write(
+            &mut *api,
+            KERNEL_TAB.to_owned(),
+            key.to_owned(),
+            value.to_string(),
+        ) {
+            Ok(()) => ServiceReply::Done("{}".to_owned()),
+            Err(failure) => error(failure.code.as_str(), &failure.message),
         }
     }
 }

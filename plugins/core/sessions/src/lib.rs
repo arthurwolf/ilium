@@ -1,14 +1,13 @@
 //! Core plugin `ilium.core.sessions` (manual page core-plugin-sessions.md).
 //!
 //! The server side freezes restored panes until every one of them reports `running`, then thaws
-//! them together (sample "Freeze panes during a restore"). Resuming agent sessions, the graceful
-//! stop and the attach-aware poll need the SDK `host()` calls (agent session, pane list, timers),
-//! which the SDK lane has not implemented yet.
+//! them together, with a timeout for each pane (sample "Freeze panes during a restore"). The
+//! application still needs a restore-specific pause interface and startup lifecycle delivery.
 
 pub mod recovery;
 pub mod session_recovery;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::{
@@ -18,9 +17,12 @@ use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::{UiTree, ViewTarget};
 use ilium_plugin_sdk::types::{
     ActionKind, Activation, InvokeCommandSpec, NodeId, OpenViewSpec, PaneLifecycleState,
-    PluginError,
+    PluginError, TimerId,
 };
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
+use ilium_plugin_sdk::host::{HostClock, HostLog, HostTimers, Level};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
+
+const RESTORE_TIMEOUT_MILLIS: u32 = 30_000;
 
 /// Restored panes that were frozen and the ones that still have to report `running`.
 #[derive(Debug, Default)]
@@ -29,6 +31,8 @@ struct RestoreWait {
     frozen: Vec<NodeId>,
     /// Frozen panes that have not reported `running` yet.
     waiting: BTreeSet<u64>,
+    deadlines: BTreeMap<u64, u64>,
+    timer: Option<TimerId>,
 }
 
 impl RestoreWait {
@@ -36,6 +40,18 @@ impl RestoreWait {
         if self.frozen.contains(&pane) {
             return None;
         }
+        let mut api = host();
+        if self.timer.is_none() {
+            match HostTimers::set(&mut *api, RESTORE_TIMEOUT_MILLIS, None) {
+                Ok(timer) => self.timer = Some(timer),
+                Err(error) => {
+                    HostLog::log(&mut *api, Level::Warn, format!("Cannot freeze restored pane {}: timeout failed: {}", pane.0, error.message));
+                    return None;
+                }
+            }
+        }
+        let deadline = HostClock::monotonic_millis(&mut *api).saturating_add(u64::from(RESTORE_TIMEOUT_MILLIS));
+        self.deadlines.insert(pane.0, deadline);
         self.frozen.push(pane);
         self.waiting.insert(pane.0);
         Some(Submission::keyed(
@@ -46,8 +62,61 @@ impl RestoreWait {
 
     /// Records a `running` report; returns the thaw submissions once every frozen pane runs.
     fn running(&mut self, pane: NodeId) -> Vec<Submission> {
-        if !self.waiting.remove(&pane.0) || !self.waiting.is_empty() {
+        if !self.waiting.remove(&pane.0) {
             return Vec::new();
+        }
+        self.deadlines.remove(&pane.0);
+        self.thaw_ready()
+    }
+
+    fn exited(&mut self, pane: NodeId) -> Vec<Submission> {
+        if !self.frozen.contains(&pane) {
+            return Vec::new();
+        }
+        self.waiting.remove(&pane.0);
+        self.deadlines.remove(&pane.0);
+        self.frozen.retain(|frozen| *frozen != pane);
+        self.thaw_ready()
+    }
+
+    fn timeout(&mut self, timer: TimerId) -> Vec<Submission> {
+        if self.timer != Some(timer) {
+            return Vec::new();
+        }
+        self.timer = None;
+        let mut api = host();
+        let now = HostClock::monotonic_millis(&mut *api);
+        let expired: Vec<u64> = self.deadlines.iter().filter_map(|(pane, due)| (*due <= now).then_some(*pane)).collect();
+        let mut out = Vec::new();
+        for pane in expired {
+            self.deadlines.remove(&pane);
+            self.waiting.remove(&pane);
+            self.frozen.retain(|frozen| frozen.0 != pane);
+            HostLog::log(&mut *api, Level::Warn, format!("Restored pane {pane} did not start within 30 seconds; releasing it"));
+            out.push(Submission::keyed(Intent::UnfreezePane(UnfreezePaneSpec { pane: NodeId(pane) }), format!("thaw-{pane}")));
+        }
+        if let Some(next) = self.deadlines.values().min() {
+            let delay = next.saturating_sub(now).clamp(50, u64::from(u32::MAX)) as u32;
+            match HostTimers::set(&mut *api, delay, None) {
+                Ok(next_timer) => self.timer = Some(next_timer),
+                Err(error) => {
+                    HostLog::log(&mut *api, Level::Warn, format!("Cannot rearm restore timeout: {}; releasing restored panes", error.message));
+                    self.waiting.clear();
+                    self.deadlines.clear();
+                }
+            }
+        }
+        drop(api);
+        out.extend(self.thaw_ready());
+        out
+    }
+
+    fn thaw_ready(&mut self) -> Vec<Submission> {
+        if !self.waiting.is_empty() {
+            return Vec::new();
+        }
+        if let Some(timer) = self.timer.take() {
+            HostTimers::cancel(&mut *host(), timer);
         }
         std::mem::take(&mut self.frozen)
             .into_iter()
@@ -90,6 +159,13 @@ impl Handler for SessionsServer {
                 {
                     submissions.extend(self.restore.running(change.pane));
                 }
+                Event::PaneLifecycleChanged(change)
+                    if change.state == PaneLifecycleState::Exited =>
+                {
+                    submissions.extend(self.restore.exited(change.pane));
+                }
+                Event::NodeRemoved(pane) => submissions.extend(self.restore.exited(pane)),
+                Event::TimerFired(timer) => submissions.extend(self.restore.timeout(timer)),
                 _ => {}
             }
         }

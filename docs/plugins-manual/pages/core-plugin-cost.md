@@ -2022,10 +2022,11 @@ fn save_day(day: u32, cents: u64) -> Result<(), PluginError> {
 
 fn load_days() -> Vec<(f64, f64)> {
     storage::keys(Bucket::Project, "day/")
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|key| {
             let day: f64 = key.strip_prefix("day/")?.parse().ok()?;
-            let bytes = storage::get(Bucket::Project, &key)?;
+            let bytes = storage::get(Bucket::Project, &key).ok()??;
             let cents = u64::from_le_bytes(<[u8; 8]>::try_from(bytes).ok()?);
             Some((day, cents as f64 / 100.0))
         })

@@ -266,11 +266,11 @@ fn port_search_ui_few_results_draw_no_scrollbar() {
         text.lines()
             .skip(2)
             .take(8)
-            .filter_map(|line| line.chars().nth(38))
+            .filter_map(|line| line.chars().nth(39))
             .collect()
     };
     assert!(
-        right_column(&with_one).iter().all(|symbol| *symbol == ' '),
+        right_column(&with_one).iter().all(|symbol| *symbol == '│'),
         "{with_one}"
     );
     assert!(

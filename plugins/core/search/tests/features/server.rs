@@ -291,6 +291,112 @@ fn search_009_job_runner_scan_files_accepts_an_empty_path_list() {
     assert!(runner.run("scan-files".to_string(), Vec::new()).is_ok());
 }
 
+#[test]
+fn scan_files_keeps_encoded_output_within_the_host_limit() {
+    let mut host = activated_server();
+    let escaped = vec![b'\\'; 4 * 1024 * 1024];
+    write_project_file(&mut host, "first.txt", &escaped);
+    write_project_file(&mut host, "second.txt", &escaped);
+    let output = host
+        .run_job("scan-files", b"first.txt\nsecond.txt")
+        .expect("the scan job completes");
+    assert!(output.len() <= 16 * 1024 * 1024, "{} bytes", output.len());
+    let result: Value = serde_json::from_slice(&output).expect("valid scan result");
+    assert!(
+        result["unread"].as_array().is_some_and(|paths| {
+            paths.iter().any(|path| path.as_str() == Some("second.txt"))
+        }),
+        "a file that cannot fit must remain available for fallback"
+    );
+}
+
+#[test]
+fn scan_files_bounds_the_unread_path_list_and_requests_fallback() {
+    let mut host = activated_server();
+    // Files can disappear after the directory scan; each path remains valid but unreadable.
+    let path = format!("{}missing", "segment/".repeat(100));
+    let listing = vec![path; 16_000].join("\n");
+    let output = host.run_job("scan-files", listing.as_bytes()).expect("scan job completes");
+    assert!(output.len() <= 16 * 1024 * 1024);
+    let result: Value = serde_json::from_slice(&output).expect("valid scan result");
+    assert_eq!(result["fallback"], true);
+}
+
+#[test]
+fn scan_fallback_reloads_the_original_paths_and_returns_matches() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "note.md", b"a needle remains searchable");
+    host.deliver(vec![query_event(1, 1, "needle")]);
+    host.settle();
+    let jobs = host.jobs().list();
+    assert_eq!(jobs.len(), 1);
+    host.jobs().finish(jobs[0].request, Ok(br#"{"fallback":true}"#.to_vec()));
+    host.settle();
+    let hits: Vec<Value> = result_messages(&host.submitted())
+        .into_iter()
+        .flat_map(|(_, payload)| payload["hits"].as_array().cloned().unwrap_or_default())
+        .collect();
+    assert_eq!(file_hits(&hits).len(), 1, "{hits:?}");
+}
+
+#[test]
+fn scan_fallback_continues_past_the_inline_read_budget() {
+    let mut host = activated_server();
+    write_project_file(&mut host, "first.txt", &vec![b'a'; 8 * 1024 * 1024]);
+    write_project_file(&mut host, "later.txt", b"needle in the later file");
+    host.deliver(vec![query_event(1, 1, "needle")]);
+    host.settle();
+    let initial = host.jobs().list();
+    assert_eq!(initial.len(), 1);
+    host.jobs().finish(initial[0].request, Ok(br#"{"fallback":true}"#.to_vec()));
+    host.settle();
+    let mut handled = 1;
+    for _ in 0..5 {
+        let jobs = host.jobs().list();
+        if handled == jobs.len() { break; }
+        for job in &jobs[handled..] {
+            let mut runner = ilium_plugin_core_search::SearchServer;
+            host.jobs().finish(job.request, runner.run(job.kind.clone(), job.input.clone()));
+        }
+        handled = jobs.len();
+        host.settle();
+    }
+    let hits: Vec<Value> = result_messages(&host.submitted())
+        .into_iter()
+        .flat_map(|(_, payload)| payload["hits"].as_array().cloned().unwrap_or_default())
+        .collect();
+    assert_eq!(file_hits(&hits).len(), 1, "{hits:?}");
+}
+
+#[test]
+fn scan_continuation_includes_earlier_files_for_a_query_that_joins_late() {
+    let mut host = activated_server();
+    let mut first = vec![b'a'; 8 * 1024 * 1024];
+    first[..6].copy_from_slice(b"needle");
+    write_project_file(&mut host, "first.txt", &first);
+    write_project_file(&mut host, "later.txt", b"needle later");
+    host.deliver(vec![query_event(1, 1, "needle")]);
+    host.settle();
+    let initial = host.jobs().list();
+    assert_eq!(initial.len(), 1);
+    host.jobs().finish(initial[0].request, Ok(br#"{"fallback":true}"#.to_vec()));
+    host.settle();
+    host.deliver(vec![query_event(2, 1, "needle")]);
+    host.settle();
+    let jobs = host.jobs().list();
+    assert_eq!(jobs.len(), 2);
+    let mut runner = ilium_plugin_core_search::SearchServer;
+    host.jobs().finish(jobs[1].request, runner.run(jobs[1].kind.clone(), jobs[1].input.clone()));
+    host.settle();
+    let answers = result_messages(&host.submitted());
+    for client in [1, 2] {
+        let (_, answer) = answers.iter().find(|(target, _)| *target == Some(client))
+            .expect("both clients receive an answer");
+        let hits = answer["hits"].as_array().expect("hits");
+        assert_eq!(file_hits(hits).len(), 2, "{hits:?}");
+    }
+}
+
 /// REQ: F-009, PORT:ilium-client/src/search_workers.rs::blocked_shared_cpu_does_not_block_producer_and_cancel_keeps_one_receipt
 #[test]
 fn port_search_workers_a_second_query_while_a_scan_runs_returns_at_once_and_leaves_one_job() {

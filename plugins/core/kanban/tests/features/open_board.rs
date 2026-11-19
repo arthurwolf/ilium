@@ -5,12 +5,38 @@
 
 use ilium_plugin_sdk::types::{
     BufferId, BufferRef, CommandContext, CommandInvokedEvent, CommandOrigin, Event, FsPath, Intent,
-    NodeId, Outcome, Submission, ViewTarget,
+    ErrorCode, NodeId, Outcome, PaneInfo, PluginError, PrimitiveKind, Submission, ViewTarget,
 };
 
 use crate::common::{client_host_with, rows_of, BOARD_KIND, BOARD_PATH, SAMPLE_BOARD};
 
 const COMMAND: &str = "ilium.core.kanban.create-board-from-markdown";
+
+#[test]
+fn restored_board_reports_unreadable_binding_without_changing_it() {
+    use ilium_plugin_sdk::host::Bucket;
+
+    let mut host = client_host_with(Some(SAMPLE_BOARD));
+    let binding = br#"{"kind":"markdown","path":"docs/plan.md"}"#;
+    host.storage_mut().put(Bucket::Project, "board/41", binding);
+    host.storage_mut().set_read_error(Some(PluginError::new(
+        ErrorCode::Internal,
+        "storage unavailable",
+    )));
+    let submissions = host.deliver(vec![Event::PaneCreated(PaneInfo {
+        node: NodeId(41),
+        content_kind: BOARD_KIND.to_owned(),
+        primitive: PrimitiveKind::Basic,
+        columns: 80,
+        rows: 24,
+        focused: true,
+        title: "plan.md".to_owned(),
+        is_restored: true,
+    })]);
+    assert!(submissions.iter().any(|item| matches!(&item.intent, Intent::Toast(_))),
+        "a failed binding read must be visible");
+    assert_eq!(host.storage().get(Bucket::Project, "board/41"), Some(binding.to_vec()));
+}
 
 fn open_editor(
     host: &mut ilium_plugin_sdk::testing::FakeHost,

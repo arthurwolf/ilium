@@ -86,7 +86,7 @@ pub struct PluginCliRequest {
 // ---------------------------------------------------------------------------------------------
 
 /// The plugin protocol version carried by [`PluginHello`] (HST-106).
-pub const PLUGIN_PROTOCOL_VERSION: u16 = 2;
+pub const PLUGIN_PROTOCOL_VERSION: u16 = 3;
 
 /// Largest encoded [`ContributionDelta`] the server sends (HST-109).
 pub const MAX_DELTA_BYTES: usize = 4 * 1024 * 1024;
@@ -315,17 +315,36 @@ pub enum ControlBody {
         /// The changed settings keys.
         keys: Vec<String>,
     },
+    /// Direct answer to a `SetEnabled` request. Broadcast state updates remain independent.
+    SetEnabledResult {
+        /// Sequence number of the client request being answered.
+        request_seq: u64,
+        /// The plugin id.
+        plugin: String,
+        /// The resulting state, or `refused:<code>` when the change was not confirmed.
+        state: String,
+    },
 }
 
 /// The handshake record a client sends on attach (HST-103).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginHello {
     /// The plugin protocol version (`PLUGIN_PROTOCOL_VERSION`).
     pub plugin_protocol: u16,
-    /// The contract version, for example `0.1.0`.
+    /// The contract identifier, for example `ilium:plugin@0.1.0`.
     pub contract: String,
     /// The plugins the client has installed.
     pub installed: Vec<InstalledPlugin>,
+}
+
+impl Default for PluginHello {
+    fn default() -> Self {
+        Self {
+            plugin_protocol: PLUGIN_PROTOCOL_VERSION,
+            contract: "ilium:plugin@0.1.0".to_owned(),
+            installed: Vec::new(),
+        }
+    }
 }
 
 /// One installed plugin named in [`PluginHello`] (HST-103).

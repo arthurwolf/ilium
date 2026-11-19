@@ -63,11 +63,22 @@ impl App {
         arguments_json: String,
         origin: CommandOrigin,
     ) {
+        self.invoke_plugin_command_for_pane(command, arguments_json, origin, None);
+    }
+
+    /// Runs a command against the pane that originated an interaction, if specified.
+    pub(crate) fn invoke_plugin_command_for_pane(
+        &mut self,
+        command: &str,
+        arguments_json: String,
+        origin: CommandOrigin,
+        pane: Option<ilium_core::NodeId>,
+    ) {
         let screen = self.popup_screen();
         let posted = self
             .wasm_plugins
             .as_ref()
-            .is_some_and(|plugins| plugins.invoke_command(command, arguments_json, origin, screen));
+            .is_some_and(|plugins| plugins.invoke_command(command, arguments_json, origin, screen, pane));
         if !posted {
             let owner = command.split_once('/').map_or(command, |(owner, _)| owner);
             self.status_message = Some(format!(

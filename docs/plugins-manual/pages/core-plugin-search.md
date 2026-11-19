@@ -56,7 +56,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "server": {
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0",
-    "exports": ["job-runner"]
+    "exports": ["job-runner", "service-provider"]
   },
   "client": {
     "entry": "client.wasm",
@@ -64,7 +64,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "exports": ["views"]
   },
   "capabilities": {
-    "server": ["inference.embed", "tree.read", "terminal.read-screen",
+    "server": ["inference.embed", "tree.read", "agent.read", "terminal.read-screen",
                "fs.read:project", "jobs.run"],
     "client": ["ui.panels"]
   },
@@ -96,7 +96,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0",
     "exports": [
-      "job-runner"
+      "job-runner",
+      "service-provider"
     ]
   },
   "client": {
@@ -110,6 +111,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "inference.embed",
       "tree.read",
+      "agent.read",
       "terminal.read-screen",
       "fs.read:project",
       "jobs.run",

@@ -450,6 +450,7 @@ fn progress_b15_outside_a_pane_the_request_fails_with_pane_identity_unavailable(
     let (mut host, _pane) = host_with_pane();
     set_pane_env(&mut host, None);
     let invocation = host.cli().invoke(&["progress", "status"], b"");
+    host.settle();
     let stdout = invocation.stdout();
     assert_ne!(invocation.exit_code(), Some(0));
     let record = record_of(&stdout, "progress_request_failed");

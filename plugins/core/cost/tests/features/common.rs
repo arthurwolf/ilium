@@ -6,12 +6,11 @@
 use std::path::PathBuf;
 
 use ilium_plugin_core_cost::{CostClient, CostServer};
-use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::primitives::{TranscriptTurn, TurnRole};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
     AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, Event, Intent,
-    NodeClass, NodeId, PluginId, SetDecorationSpec, Submission,
+    NodeClass, NodeId, SetDecorationSpec, Submission,
 };
 use serde_json::Value;
 
@@ -240,27 +239,6 @@ pub fn latest_cost_decoration(
     cost_decorations(&submitted[already_seen..])
         .into_iter()
         .rfind(|spec| spec.node == NodeId(pane))
-}
-
-/// Calls the usage service the way the host does: through the `service-provider` export.
-pub fn call_usage(method: &str, payload_json: &str) -> ServiceReply {
-    use ilium_plugin_sdk::ServiceProvider;
-    let mut server = CostServer;
-    server.handle(ServiceCall {
-        call: 1,
-        service: USAGE_SERVICE.to_string(),
-        method: method.to_string(),
-        payload_json: payload_json.to_string(),
-        caller: PluginId("ilium.core.fleet".to_string()),
-    })
-}
-
-/// The JSON of a `ServiceReply::Done`; panics (inside the test) for any other reply.
-pub fn done_json(reply: ServiceReply) -> Value {
-    match reply {
-        ServiceReply::Done(text) => serde_json::from_str(&text).expect("reply is JSON"),
-        ServiceReply::Deferred => panic!("the usage service answers at once with Done"),
-    }
 }
 
 // ---------------------------------------------------------------------------------------------

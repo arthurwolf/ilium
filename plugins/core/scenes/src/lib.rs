@@ -5,9 +5,7 @@
 //! tone into the Braille field of the frame surface; colour, palette, dithering and display
 //! stay with the shared look of the host.
 //!
-//! `dithered-waves` is ported from the former built-in scene and draws for real (module
-//! `dithered_waves`). The other ids of the catalogue (`waves`, `clock`) are
-//! still the tests-first skeleton: they follow the palette and draw nothing yet.
+//! Scene-specific rendering lives in this component; shared appearance stays in the host.
 
 pub mod atlantic_dusk;
 pub mod box_machine;
@@ -31,6 +29,7 @@ pub mod machine_screen;
 pub mod night_lights;
 pub mod pi_digits;
 pub mod pipes;
+mod procedural;
 pub mod quiet;
 pub mod registry;
 pub mod scenes2;
@@ -90,6 +89,8 @@ pub struct ScenesScene {
 enum Drawing {
     /// Skeleton scenes: the frame is left blank.
     Blank,
+    Waves,
+    Clock,
     /// The `dithered-waves` scene.
     DitheredWaves(Box<DitheredWaves>),
     /// A scene of the shared scene kit (`registry::create`).
@@ -155,6 +156,11 @@ impl ScenesScene {
 
     /// The drawing of scene `scene_id` for `spec`.
     fn build_drawing(scene_id: &str, spec: &Value, palette_rgb: &[u32]) -> Drawing {
+        match scene_id {
+            "waves" => return Drawing::Waves,
+            "clock" => return Drawing::Clock,
+            _ => {}
+        }
         if scene_id == DITHERED_WAVES_ID {
             return Drawing::DitheredWaves(Box::new(DitheredWaves::from_spec(spec)));
         }
@@ -187,6 +193,8 @@ impl ScenesScene {
         let width = field.width();
         let height = field.height();
         match &mut self.drawing {
+            Drawing::Waves => procedural::waves(field, frame.time_millis),
+            Drawing::Clock => procedural::clock(field, frame.now_unix_millis),
             Drawing::DitheredWaves(waves) => {
                 waves.render(width, height, frame.time_millis, &mut field.pixels);
             }
@@ -476,6 +484,15 @@ mod spec_tests {
         unique.sort();
         unique.dedup();
         assert_eq!(unique.len(), ids.len(), "scene ids are unique");
+    }
+
+    #[test]
+    fn every_manifest_scene_has_a_renderer() {
+        for scene in scene_entries(&manifest_value()) {
+            let id = scene["id"].as_str().expect("scene has an id");
+            let drawing = super::ScenesScene::build_drawing(id, &json!({}), &[]);
+            assert!(!matches!(drawing, super::Drawing::Blank), "{id} has no renderer");
+        }
     }
 
     /// REQ: COR-010

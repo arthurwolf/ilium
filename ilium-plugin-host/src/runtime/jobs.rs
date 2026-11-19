@@ -110,6 +110,7 @@ impl HostRuntime {
             ids: self.ids.clone(),
             session: self.session.clone(),
             clock_origin: self.clock_origin,
+            job_requests: Some(crate::imports::job_requests::JobRequests::new(Arc::clone(&job.cancel))),
         };
         let env = ImportEnv::for_instance(&context);
         let job_imports = |set: &mut ImportSet| {

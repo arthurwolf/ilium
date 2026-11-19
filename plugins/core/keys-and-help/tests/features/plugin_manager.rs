@@ -2,6 +2,7 @@
 //! Plugins panel shows a switch for each, and a switch calls `plugins.set_enabled`.
 
 use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::Widget;
 use ilium_plugin_sdk::types::events::{CommandContext, CommandInvokedEvent, CommandOrigin};
 
 use crate::common::*;
@@ -62,15 +63,58 @@ fn manager_010_each_row_shows_a_switch_in_its_current_state() {
     let (fleet_row, _) = screen.find("Fleet").expect("Fleet");
     let (notes_row, _) = screen.find("Notes").expect("Notes");
     assert!(
-        screen.row(fleet_row).contains("on"),
+        screen.row(fleet_row).contains("[x]"),
         "{}",
         screen.row(fleet_row)
     );
     assert!(
-        screen.row(notes_row).contains("off"),
+        screen.row(notes_row).contains("[ ]"),
         "{}",
         screen.row(notes_row)
     );
+}
+
+#[test]
+fn manager_switch_click_changes_the_selected_plugin() {
+    let mut host = manager_host();
+    show_plugins(&mut host, CommandOrigin::Palette);
+    host.settle();
+    let screen = host.render(plugins_panel(), 80, 12);
+    let (row, column) = screen.find("Fleet").expect("Fleet");
+    assert!(host.click(plugins_panel(), column, row));
+    host.settle();
+    assert_eq!(host.plugins().set_enabled_calls(), vec![("ilium.core.fleet".to_owned(), false)]);
+}
+
+#[test]
+fn manager_places_catalogue_in_a_scroll_view() {
+    let mut host = manager_host();
+    show_plugins(&mut host, CommandOrigin::Palette);
+    host.settle();
+    host.render(plugins_panel(), 80, 4);
+    let tree = host.last_tree(plugins_panel());
+    assert!(tree.nodes.iter().any(|node| matches!(node.widget, Widget::ScrollView(_))));
+}
+
+#[test]
+fn manager_keeps_the_previous_state_until_the_change_completes() {
+    let mut host = manager_host();
+    show_plugins(&mut host, CommandOrigin::Palette);
+    host.settle();
+    host.send_action(
+        plugins_panel(),
+        "ilium.core.fleet",
+        ActionKind::Toggled,
+        ActionValue::Flag(false),
+    );
+    let screen = host.render(plugins_panel(), 80, 12);
+    let (row, _) = screen.find("Fleet").expect("Fleet");
+    assert!(screen.row(row).contains("[x]"), "the last confirmed state stays visible");
+    assert!(screen.text().contains("Changing"), "the pending change is visible");
+    host.settle();
+    let screen = host.render(plugins_panel(), 80, 12);
+    let (row, _) = screen.find("Fleet").expect("Fleet");
+    assert!(screen.row(row).contains("[ ]"));
 }
 
 /// REQ: F-010
@@ -126,7 +170,7 @@ fn manager_010_the_row_shows_the_new_state_after_the_toggle() {
     host.settle();
     let screen = host.render(plugins_panel(), 80, 12);
     let (row, _) = screen.find("Notes").expect("Notes");
-    assert!(screen.row(row).contains("on"));
+    assert!(screen.row(row).contains("[x]"));
 }
 
 /// REQ: F-010
@@ -149,7 +193,7 @@ fn manager_010_a_refused_toggle_keeps_the_old_state_and_shows_the_error_message(
     host.settle();
     let screen = host.render(plugins_panel(), 80, 12);
     let (row, _) = screen.find("Notes").expect("Notes");
-    assert!(screen.row(row).contains("off"));
+    assert!(screen.row(row).contains("[ ]"));
     assert!(screen.text().contains("disabled-by-policy"));
 }
 
@@ -168,10 +212,10 @@ fn manager_010_a_toggle_without_the_plugins_manage_grant_is_not_permitted() {
     );
     host.settle();
     assert!(host.plugins().set_enabled_calls().is_empty());
-    assert!(host
-        .failures()
-        .iter()
-        .any(|failure| failure.code == "not-permitted"));
+    let screen = host.render(plugins_panel(), 80, 12);
+    let (row, _) = screen.find("Fleet").expect("Fleet remains visible");
+    assert!(screen.row(row).contains("[x]"));
+    assert!(screen.text().contains("the plugins.manage grant is missing"));
 }
 
 /// REQ: F-010

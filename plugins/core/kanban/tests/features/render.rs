@@ -214,6 +214,25 @@ fn render_024_card_preview_on_shows_the_notes_of_a_card() {
     assert!(screen.contains("Notes line one"), "{screen}");
 }
 
+#[test]
+fn kernel_settings_change_updates_the_open_board() {
+    use ilium_plugin_sdk::generated::types::events::KernelSettingsEvent;
+    use ilium_plugin_sdk::types::Event;
+
+    let text = "# Board\n\n## To do\n- Write docs\n  Notes line one\n";
+    let (mut host, node) = board_host(text);
+    assert!(draw(&mut host, node, 80, 20).text().contains("Notes line one"));
+    host.kernel_settings()
+        .set("kanban-board", "card_preview", serde_json::json!(false))
+        .expect("setting is writable");
+    host.deliver_one(Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "kanban-board".to_string(),
+        keys: vec!["card_preview".to_string()],
+    }));
+    let screen = draw(&mut host, node, 80, 20).text();
+    assert!(!screen.contains("Notes line one"), "{screen}");
+}
+
 /// REQ: F-024
 #[test]
 fn render_024_golden_board_at_48_columns() {

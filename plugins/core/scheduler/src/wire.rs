@@ -235,6 +235,14 @@ pub fn decode_stored(bytes: &[u8]) -> Stored {
     stored
 }
 
+/// Reject partial or malformed state instead of silently overwriting entries that were skipped.
+pub fn decode_stored_checked(bytes: &[u8]) -> Option<Stored> {
+    let original: Value = serde_json::from_slice(bytes).ok()?;
+    let stored = decode_stored(bytes);
+    let normalized: Value = serde_json::from_slice(&encode_stored(&stored)).ok()?;
+    (original == normalized).then_some(stored)
+}
+
 /// The state pushed to the panels: `{"schedules": [{pane, at, text, send_enter}],
 /// "queues": [{pane, length}]}`.
 pub fn state_payload(stored: &Stored) -> Vec<u8> {

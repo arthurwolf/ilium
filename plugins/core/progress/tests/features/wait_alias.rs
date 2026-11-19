@@ -87,10 +87,12 @@ fn f_108_wait_outside_a_pane_fails_like_progress_wait() {
     set_pane_env(&mut host, None);
     let alias = {
         let invocation = host.cli().invoke(&["wait"], b"");
+        host.settle();
         (invocation.stdout(), invocation.exit_code())
     };
     let full = {
         let invocation = host.cli().invoke(&["progress", "wait"], b"");
+        host.settle();
         (invocation.stdout(), invocation.exit_code())
     };
     assert_eq!(alias, full);

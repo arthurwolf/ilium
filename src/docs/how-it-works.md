@@ -73,7 +73,7 @@ Full details: [Session recovery](session-recovery.md).
 
 ## Background animations
 
-Ambient animations are drawn by scene engines hosted in the client. Built-in scenes run as Rust code; packaged TypeScript animations are bundled as JavaScript and executed by V8 in a confined helper process (Bubblewrap and cgroup-v2 limits on Linux). The helper is the `ilium-animation-helper` executable and the packages are `.iliumanim` files. See [Animations](animations.md).
+Ambient animations are drawn by scene engines hosted in the client. Some scenes run as built-in Rust code; plugin scenes run as WebAssembly components. Both use the shared appearance and display controls. See [Animations](animations.md).
 
 ## Diagnostics and logs
 
@@ -97,7 +97,8 @@ Ilium is a Cargo workspace with one crate per architectural layer. The layering 
 | `ilium-agent-session` | Verifies agent session transcripts and identities. |
 | `ilium-agent-debug` | Schema and retention policy for per-pane agent debug history. |
 | `ilium-ambient` | Ambient animation scene engines (no terminal types). |
-| `ilium-animation-js` | V8 runtime and sandboxed helper for JavaScript `.iliumanim` packages. |
+| `ilium-plugin-host` | Loads and runs plugin components and mediates access to host services. |
+| `ilium-plugin-bundle` | Builds and embeds the core WebAssembly plugin components. |
 | `ilium-gpu` | Optional GPU backend for ambient scenes (compiled only with the `gpu` feature). |
 | `ilium-wikipedia` | Wikipedia data adapter for the Wikipedia animation. |
 | `ilium-git` | Git adapter for worktrees and repository probes. |

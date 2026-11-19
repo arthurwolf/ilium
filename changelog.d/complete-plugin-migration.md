@@ -1,0 +1,30 @@
+### Fixed
+- Include the core WebAssembly plugin components in normal builds, and reject a plugin state change before saving it when the plugin failed to load.
+- Restore the saved plugin state when a runtime enable or disable change is refused.
+- Declare the optional exports provided by the bundled plugin components in their manifests.
+- Reject a missing declared plugin component instead of advertising its commands, and persist valid Kanban settings writes while reporting refusals.
+- Save validated editor settings through the shared settings interface and report rejected writes.
+- Preserve scheduler state and prevent queued or scheduled input delivery when saving fails.
+- Report plugin storage read and listing failures instead of treating them as missing data.
+- Coordinate scene provider request limits across sessions with conditional persistent storage updates.
+- Keep the previous notification mute setting and show a warning when saving a change fails.
+- Refuse unsafe session conversions when recovery cannot be armed, and retry recovery after storage failures.
+- Refuse remote compaction when recovery cannot be armed, and retry recovery when stored state cannot be read or removed.
+- Keep encoded search scan results within the host output limit, continue omitted paths, and identify agent panes using the required capability.
+- Show plugin state and toggle failures in the plugin manager panel.
+- Correlate plugin enable and disable replies so the command-line tool waits for the requested operation.
+- Refuse pane creation for plugins that are unavailable or failed to load.
+- Retry failed and stopped plugins when they are explicitly re-enabled.
+- Release the Smart Copy picker when its scan and ranking both produce no candidates.
+- Reject stale Smart Copy scan replies for a newer picker in the same client and preserve multiline candidate text.
+- Report a refused Smart Copy scan and release its waiting picker instead of silently waiting.
+- Send plugin replies to their intended client and include contributed Smart Copy recognisers in scans.
+- Keep one Smart Copy recogniser's matches from exhausting another recogniser's scan allowance.
+- Refuse unidentified Smart Copy scan requests and recognize more valid paths, hashes and distinct candidates.
+- Copy the selected text from the target terminal pane when the Smart Copy selection action is invoked.
+- Resolve Smart Copy model suggestions against captured screen words instead of copying model-authored text.
+- Let permitted client plugins read the acknowledged terminal screen and selection of the requested pane.
+- Deliver native plugin menu requests to their providers and model clipboard permission, validation and failures in the plugin test harness.
+- Route slow-call completion and errors to the job that made the request.
+- Render the bundled Waves and Clock scenes, including animated waves and a clock with sharp hour labels.
+- Correct the architecture and source-build guides for the WebAssembly plugin bundle and current binaries.

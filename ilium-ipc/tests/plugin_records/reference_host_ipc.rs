@@ -323,11 +323,10 @@ proptest! {
 
 /// REQ: HST-106
 #[test]
-fn hst_106_protocol_constant_is_u16_equal_to_two() {
-    // Version 2 appends `EnvelopeBody::ForwardedIntent` and the CLI control records; the manual
-    // text still says 1 and must be updated (reported by the kernel-routing stream).
+fn hst_106_protocol_constant_is_u16_equal_to_three() {
+    // Version 3 adds a correlated plugin enable/disable reply.
     let constant: u16 = PLUGIN_PROTOCOL_VERSION;
-    assert_eq!(constant, 2);
+    assert_eq!(constant, 3);
 }
 
 /// REQ: HST-106
@@ -437,7 +436,12 @@ fn control_enable_and_state_records_round_trip_at_appended_indices() {
         plugin: "ilium.core.voice".into(),
         state: "disabled".into(),
     };
-    for (body, index) in [(enable, 4u32), (state, 5u32)] {
+    let result = ControlBody::SetEnabledResult {
+        request_seq: 71_903,
+        plugin: "ilium.core.voice".into(),
+        state: "disabled".into(),
+    };
+    for (body, index) in [(enable, 4u32), (state, 5u32), (result, 11u32)] {
         let bytes = bincode::serialize(&body).expect("encode");
         assert_eq!(&bytes[..4], &index.to_le_bytes());
         let decoded: ControlBody = bincode::deserialize(&bytes).expect("decode");

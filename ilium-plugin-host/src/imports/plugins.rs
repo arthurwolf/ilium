@@ -4,7 +4,7 @@
 
 use ilium_plugin_api::generated::host::plugins::{HostPlugins, PluginInfo};
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use ilium_plugin_api::generated::types::ids::PluginId;
+use ilium_plugin_api::generated::types::ids::{PluginId, RequestId};
 
 /// Host side of the `plugins` interface.
 #[derive(Debug)]
@@ -21,7 +21,7 @@ impl HostPlugins for PluginsImport {
         plugin: PluginId,
         _enabled: bool,
         scope: String,
-    ) -> Result<(), PluginError> {
+    ) -> Result<RequestId, PluginError> {
         if !matches!(scope.as_str(), "global" | "project" | "session") {
             return Err(PluginError::new(
                 ErrorCode::InvalidArgument,
@@ -47,9 +47,9 @@ mod tests {
     }
 
     /// Asserts that a call returned an error with the given code, failing with the actual result otherwise.
-    fn assert_error_code(result: Result<(), PluginError>, expected: ErrorCode) {
+    fn assert_error_code(result: Result<super::RequestId, PluginError>, expected: ErrorCode) {
         match result {
-            Ok(()) => panic!("expected error code {expected:?}, but the call returned Ok"),
+            Ok(_) => panic!("expected error code {expected:?}, but the call returned Ok"),
             Err(error) => assert_eq!(error.code, expected),
         }
     }
@@ -82,7 +82,7 @@ mod tests {
     fn set_enabled_true_on_enabled_plugin_returns_ok_and_changes_nothing() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.notes"), true, "global".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 
     /// REQ: LIF-019
@@ -90,7 +90,7 @@ mod tests {
     fn set_enabled_false_on_disabled_plugin_returns_ok_and_changes_nothing() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.notes"), false, "global".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 
     /// REQ: LIF-163
@@ -98,7 +98,7 @@ mod tests {
     fn set_enabled_global_scope_returns_ok() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.notes"), false, "global".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 
     /// REQ: LIF-161
@@ -106,7 +106,7 @@ mod tests {
     fn set_enabled_project_scope_returns_ok() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.notes"), false, "project".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 
     /// REQ: LIF-161
@@ -114,7 +114,7 @@ mod tests {
     fn set_enabled_session_scope_returns_ok() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.notes"), false, "session".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 
     /// REQ: LIF-161
@@ -194,6 +194,6 @@ mod tests {
     fn set_enabled_true_on_failed_plugin_clears_failed_flag_and_returns_ok() {
         let mut host = PluginsImport;
         let result = host.set_enabled(plugin_id("com.example.failed"), true, "global".to_string());
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
     }
 }
