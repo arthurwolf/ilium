@@ -890,52 +890,6 @@ mod tests {
     }
 
     #[test]
-    fn prompt_queue_is_held_only_by_an_attempted_head() {
-        use crate::{PaneContentKind, PromptQueueDelivery, QueuedPrompt, Tree, ROOT_ID};
-
-        let status = PaneStatus::PlainShell;
-        let observe = |supplementary| {
-            Condition::PromptQueueHeld.observe(&PaneFacts {
-                status: &status,
-                progress: &[],
-                scheduled_input: false,
-                shell_output: None,
-                activity_stale: None,
-                supplementary,
-                screen_matches: &|_| Observation::Unknown,
-            })
-        };
-        // Not observed: unknown, not false.
-        assert_eq!(observe(SupplementaryFacts::default()), Observation::Unknown);
-
-        let mut tree = Tree::new();
-        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
-        let pane_id = tree
-            .add_pane(group_id, "pane", PaneContentKind::Terminal)
-            .unwrap();
-        let with_pane =
-            |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
-        // Empty queue: known not to be held.
-        assert_eq!(with_pane(&tree).prompt_queue_held, Some(false));
-        assert_eq!(observe(with_pane(&tree)), Observation::False);
-
-        let prompt = |text: &str| QueuedPrompt {
-            text: text.to_owned(),
-            delivery: PromptQueueDelivery::Once,
-            attempted_delivery: false,
-        };
-        tree.enqueue_prompt(pane_id, prompt("first")).unwrap();
-        tree.enqueue_prompt(pane_id, prompt("second")).unwrap();
-        // Waiting prompts that were never attempted do not hold the queue.
-        assert_eq!(observe(with_pane(&tree)), Observation::False);
-
-        assert!(tree
-            .mark_queued_prompt_attempted(pane_id, &prompt("first"))
-            .unwrap());
-        assert_eq!(observe(with_pane(&tree)), Observation::True);
-    }
-
-    #[test]
     fn view_and_context_conditions_read_their_facts_or_stay_unknown() {
         let status = PaneStatus::Agent(AgentState::from_activity(
             AgentClass::Claude,

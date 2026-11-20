@@ -521,6 +521,7 @@ impl PaintedTreeRows {
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Custom,
             layout_slots: None,
             blocking_error_display: Default::default(),
+            plugin_toolbar_captions: Vec::new(),
             values: Vec::new(),
             cost_option: Default::default(),
             selected_node: None,

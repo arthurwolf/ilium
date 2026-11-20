@@ -3365,6 +3365,7 @@ dependencies = [
 name = "ilium-plugin-core-attention"
 version = "0.1.1"
 dependencies = [
+ "ilium-core",
  "ilium-plugin-sdk",
  "proptest",
  "serde",

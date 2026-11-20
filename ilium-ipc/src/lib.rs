@@ -45,7 +45,7 @@ pub use protocol::{
     MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneSignal, PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
-    ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent,
     StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy,
     WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
     WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,

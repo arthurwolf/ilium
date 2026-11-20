@@ -4276,12 +4276,10 @@ impl App {
                 } else {
                     viewport
                 };
-                // Keep enabled metadata slots allocated even while empty. A
-                // prompt or progress transition must not resize a running TUI.
-                let viewport = if self.ui_settings.last_prompt_enabled {
+                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
                     // In a physically clipped pane, leave room for the progress
                     // gauge and a detail row as well as the terminal itself.
-                    let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+                    let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
                         2.min(viewport.content_area.height.saturating_sub(2))
                     } else {
                         0
@@ -4295,7 +4293,7 @@ impl App {
                             .height
                             .saturating_sub(1 + minimum_progress_rows),
                     );
-                    let mut reserved = viewport.with_last_prompt_reserved(
+                    viewport.with_last_prompt_reserved(
                         prompt_rows,
                         // Footer rows plus its frame rule stay available.
                         if minimum_progress_rows > 0 {
@@ -4304,12 +4302,7 @@ impl App {
                             0
                         },
                         self.ui_settings.section_frames_enabled,
-                    );
-                    if !self.shows_last_prompt_banner(viewport.pane_id) {
-                        reserved.last_prompt_area = None;
-                        reserved.last_prompt_bottom_rule = None;
-                    }
-                    reserved
+                    )
                 } else {
                     viewport
                 };
@@ -4319,12 +4312,7 @@ impl App {
                             self.ui_settings.progress_max_lines.into(),
                         ),
                         self.ui_settings.section_frames_enabled,
-                    );
-                    if !self.shows_progress_footer(viewport.pane_id) {
-                        reserved.progress_area = None;
-                        reserved.progress_rule = None;
-                    }
-                    reserved
+                    )
                 } else {
                     viewport
                 };

@@ -80,11 +80,9 @@ fn create_process_quota() -> QuotaGroup {
             input_bytes: CONVERSION_INPUT_BYTES + 784 * MIB,
             // General result capacity grew for ambient replacement overlap;
             // retain both codec directions' dedicated 128 MiB headroom too.
-            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB + 2 * MIB,
-            worker_threads: PROCESS_WORKER_THREADS
-                + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
-            // Shared ceiling for selected charged owners; retiring native
-            // helpers must retain and compete for their original debit.
+            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
+            worker_threads: PROCESS_WORKER_THREADS,
+            // Shared ceiling for selected charged owners.
             // This is a declaration ceiling, not measured process RSS.
             worker_bytes: PROCESS_WORKER_BYTES,
         },

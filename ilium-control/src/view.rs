@@ -65,7 +65,7 @@ pub fn pane_state_name(status: &PaneStatus) -> &'static str {
     match status {
         PaneStatus::PlainShell => "shell",
         PaneStatus::Editor { .. } => "editor",
-        PaneStatus::Board => "board",
+        PaneStatus::Plugin { .. } => "plugin",
         PaneStatus::Agent(agent) => turn_name(agent.turn, agent.completion_unread),
         PaneStatus::AgentUnavailable(_) => "agent_unavailable",
     }
@@ -76,6 +76,7 @@ fn status_view(status: &PaneStatus) -> Value {
     match status {
         PaneStatus::PlainShell => json!({"kind": "shell"}),
         PaneStatus::Editor { dirty } => json!({"kind": "editor", "dirty": dirty}),
+        PaneStatus::Plugin { dirty } => json!({"kind": "plugin", "dirty": dirty}),
         PaneStatus::Plugin { dirty } => json!({"kind": "plugin", "dirty": dirty}),
         PaneStatus::Agent(agent) => json!({
             "kind": "agent",

@@ -1132,15 +1132,6 @@ pub enum ClientRequest {
     },
 }
 
-/// Which client path produced a stored recap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RecapTrigger {
-    /// Short recap that rode in the project restructure call.
-    Batch,
-    /// Dedicated per-pane call (refresh click or recap popover) with both lengths.
-    Manual,
-}
-
 impl ClientRequest {
     /// Stable, payload-free request name for process diagnostics. Keeping this
     /// exhaustive means every future IPC feature must make an explicit logging

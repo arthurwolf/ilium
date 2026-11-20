@@ -62,8 +62,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
     let pending_toolbar_changed = app.tick_pending_toolbar_actions(now)
-        | app.tick_pending_menu_actions(now)
-        | app.tick_conversion_replacement(now);
+        | app.tick_pending_menu_actions(now);
     let animation_hover_changed = app.tick_animation_hover(now);
     let location_picker_changed = app.tick_location_picker();
     app.drain_pending_staged_keystrokes(now);

@@ -65,7 +65,7 @@ fn countdown_waits_for_persistent_removal_before_sending() {
         channel: wire::SCHEDULE_CHANNEL.to_owned(),
         payload: request.to_payload(),
     })]);
-    let before = host
+    let saved_state = host
         .storage()
         .get(ilium_plugin_sdk::host::Bucket::Project, "state")
         .expect("the schedule was saved");
@@ -81,7 +81,7 @@ fn countdown_waits_for_persistent_removal_before_sending() {
         .all(|submission| !matches!(&submission.intent, Intent::SendInput(_))));
     assert_eq!(
         host.storage().get(ilium_plugin_sdk::host::Bucket::Project, "state"),
-        Some(before)
+        Some(saved_state)
     );
     assert!(submissions.iter().any(|submission| matches!(&submission.intent, Intent::Toast(_))));
     let retry_at = host
