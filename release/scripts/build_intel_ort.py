@@ -54,7 +54,7 @@ def verify_source_hash(archive, expected):
 
 
 def request_bytes(url):
-    headers = {"User-Agent": "ilium-native-release-provenance/1", "Accept": "application/vnd.github+json"}
+    headers = {"User-Agent": "ilium-native-release-provenance/1", "Accept": "application/vnd.github+json" if url.startswith("https://api.github.com/") else "*/*"}
     # Anonymous api.github.com calls from shared runner addresses are rate
     # limited; the workflow token raises that limit and goes to that host only.
     token = os.environ.get("GITHUB_TOKEN")
