@@ -33,6 +33,11 @@ def fixture_input_arguments(root):
 
 
 class ProcessOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        # The fixtures describe an x86_64 guest on an x86_64 host whatever machine runs them.
+        host = patch.object(vm_smoke.platform, 'machine', return_value='x86_64')
+        host.start()
+        self.addCleanup(host.stop)
     def test_guest_shutdown_timeout_still_reaps_only_owned_child(self):
         process = Mock()
         process.poll.return_value = None
@@ -186,7 +191,7 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
                 arguments += ['--formats', formats]  # Pass caller spelling without fixture normalization.
             if accelerator is not None:  # Exercise both hosted-runner and hardware-accelerated launch modes.
                 arguments += ['--accelerator', accelerator]  # Keep the requested emulator mode explicit.
-            with patch.object(vm_smoke, 'ARM64_VARIABLES', firmware), patch.object(vm_smoke, 'verified_image', return_value='fixture-hash'), patch.object(vm_smoke, 'run', side_effect=run), patch.object(vm_smoke, 'ssh', side_effect=ssh), patch.object(vm_smoke.time, 'sleep'), patch.object(vm_smoke.subprocess, 'Popen', return_value=process), patch.object(vm_smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})), redirect_stdout(io.StringIO()):  # Mock every native or network boundary.
+            with patch.object(vm_smoke.platform, 'machine', return_value='x86_64'), patch.object(vm_smoke, 'ARM64_VARIABLES', firmware), patch.object(vm_smoke, 'verified_image', return_value='fixture-hash'), patch.object(vm_smoke, 'run', side_effect=run), patch.object(vm_smoke, 'ssh', side_effect=ssh), patch.object(vm_smoke.time, 'sleep'), patch.object(vm_smoke.subprocess, 'Popen', return_value=process), patch.object(vm_smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})), redirect_stdout(io.StringIO()):  # Mock every native or network boundary.
                 result = vm_smoke.main(arguments)  # Execute the production main path and real owned-child teardown.
                 self.last_qemu_command = [str(part) for part in vm_smoke.subprocess.Popen.call_args.args[0]]  # Retain the actual mocked guest process argv.
             self.last_user_data = (root / 'work/user-data').read_text(encoding='utf-8')  # Inspect the actual cloud-init input handed to cloud-localds.
