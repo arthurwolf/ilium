@@ -692,8 +692,8 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
             "resource editor did not open: {}",
             tui.screen_text()
         );
-        if tui.screen_text().contains("[e Edit]") {
-            click(&tui, "[e Edit]", 0);
+        if tui.screen_text().contains("[Edit]") {
+            click(&tui, "[Edit]", 0);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
