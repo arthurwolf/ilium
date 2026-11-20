@@ -7021,8 +7021,9 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         "expected folder picker, got: {:?}",
         tui.screen_text()
     );
+    // The title can be drawn a frame before the bottom action row.
     assert!(
-        tui.screen_text().contains("Add Folder"),
+        wait_until(|| tui.screen_text().contains("Add Folder"), WAIT_TIMEOUT).await,
         "expected explicit folder-creation action, got: {:?}",
         tui.screen_text()
     );
