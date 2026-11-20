@@ -5,3 +5,6 @@
 
 ### Changed
 - ONNX Runtime 1.24.2 build inputs now come from the project's own `ort-mirror-1.24.2` release because the upstream repository's downloads were removed. Runtime archives are re-assembled from the official NuGet package (Linux and Windows library hashes unchanged, macOS arm64 uses the NuGet build) and the source archive is the Software Heritage copy of the pinned commit, verified against its tree hash.
+
+### Fixed
+- The macOS package smoke test and image cleanup now retry a busy plain `hdiutil detach` (up to six attempts, never forced) instead of failing on a short-lived volume hold.

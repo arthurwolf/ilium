@@ -340,12 +340,21 @@ def owned_images(runner: command_runner, owned_roots: tuple[Path, ...]) -> list[
     return result  # Let cleanup select whole disks from proven image records.
 #
 def detach_owned_images(runner: command_runner, owned_roots: tuple[Path, ...]) -> None:  # Handle hdiutil interruption without blanket detachment.
-    for image in owned_images(runner, owned_roots):  # Reconcile even a creation command that failed before returning metadata.
-        entities = image.get('system-entities')  # Inspect devices belonging to this exact owned image.
-        require(isinstance(entities, list), 'owned image has no device inventory; retain work')  # Preserve uncertainty rather than guess a device.
-        devices = {entry.get('dev-entry') for entry in entities if isinstance(entry, dict) and isinstance(entry.get('dev-entry'), str) and re.fullmatch(r'/dev/disk[0-9]+', entry['dev-entry'])}  # Select a whole owned disk only.
-        require(len(devices) == 1, 'owned image has ambiguous device identity; retain work')  # Refuse broad or partial cleanup.
-        runner.run('hdiutil-detach', ['/usr/bin/hdiutil', 'detach', devices.pop()], timeout=60, cleanup=True)  # Detach normally without force.
+    for attempt in range(6):  # A just-finished installer or indexer can hold the volume briefly; retry the plain detach, never force it.
+        images = owned_images(runner, owned_roots)  # Reconcile even a creation command that failed before returning metadata.
+        if not images:  # Every owned image is already gone.
+            return  # Cleanup is complete.
+        if attempt:  # Give the transient holder time to exit before another plain detach.
+            time.sleep(5)  # Bounded wait; six attempts at most.
+        for image in images:  # Detach only images proven to belong to this invocation.
+            entities = image.get('system-entities')  # Inspect devices belonging to this exact owned image.
+            require(isinstance(entities, list), 'owned image has no device inventory; retain work')  # Preserve uncertainty rather than guess a device.
+            devices = {entry.get('dev-entry') for entry in entities if isinstance(entry, dict) and isinstance(entry.get('dev-entry'), str) and re.fullmatch(r'/dev/disk[0-9]+', entry['dev-entry'])}  # Select whole-disk devices.
+            require(len(devices) == 1, 'owned image has ambiguous device identity; retain work')  # Refuse broad or partial cleanup.
+            try:  # A busy volume fails this attempt only.
+                runner.run('hdiutil-detach', ['/usr/bin/hdiutil', 'detach', devices.pop()], timeout=60, cleanup=True)  # Detach normally without force.
+            except release_tool.ReleaseError:  # Retry after the pause above; the final check below still fails if it never detaches.
+                pass  # Evidence of every attempt stays in the command logs.
     require(not owned_images(runner, owned_roots), 'owned disk images remain attached; retain work')  # Treat incomplete cleanup as a failure.
 #
 def fresh_path(path: Path) -> Path:  # Check supplied destinations before resolving aliases.

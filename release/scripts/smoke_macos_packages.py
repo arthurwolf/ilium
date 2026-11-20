@@ -854,7 +854,14 @@ def attach_image(runner: packages.command_runner, image: Path, mount: Path, read
 def detach_image(runner: packages.command_runner, handle: dict[str, str], owners: tuple[Path, ...]) -> None:  # Detach owned image.
     matches = [item for item in packages.owned_images(runner, owners) if Path(item['image-path']).resolve() == Path(handle['image']).resolve()]  # Recheck attachment custody.
     require(len(matches) == 1 and any(entry.get('dev-entry') == handle['device'] for entry in matches[0].get('system-entities', []) if isinstance(entry, dict)), 'image device ownership changed')  # Reject reused devices.
-    run_command(runner, 'image-detach', ['/usr/bin/hdiutil', 'detach', handle['device']], timeout=60, cleanup=True)  # Detach without force.
+    for attempt in range(6):  # A just-finished installer or indexer can hold the volume briefly; retry the plain detach, never force it.
+        try:  # A busy volume fails this attempt only.
+            run_command(runner, 'image-detach', ['/usr/bin/hdiutil', 'detach', handle['device']], timeout=60, cleanup=True)  # Detach without force.
+        except release_tool.ReleaseError:  # Check the mount below; the final requirements still fail if it stays attached.
+            pass  # Evidence of every attempt stays in the command logs.
+        if not Path(handle['mount']).is_mount():  # Done as soon as the volume is gone.
+            break  # No further attempts.
+        time.sleep(5)  # Bounded wait; six attempts at most.
     require(not Path(handle['mount']).is_mount(), 'owned image mount remains active')  # Require actual unmount.
     require(not any(Path(item['image-path']).resolve() == Path(handle['image']).resolve() for item in packages.owned_images(runner, owners)), 'owned image remains attached')  # Require complete detach.
 #

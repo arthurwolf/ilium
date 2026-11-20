@@ -21,6 +21,7 @@ import tempfile  # Own temporary fixtures.
 import tomllib  # Read source versions.
 from types import SimpleNamespace  # Supply CLI namespaces.
 import unittest  # Integrate unittest discovery.
+import unittest.mock  # Patch sleeping in retry tests.
 from unittest import mock  # Mock native boundaries.
 from unittest.mock import patch  # Isolate OS observations.
 import xml.etree.ElementTree as xml_tree  # Inspect native XML.
@@ -377,11 +378,19 @@ class macos_ownership_tests(unittest.TestCase): # Custody.
         before, after = self.document([image, foreign]), self.document([foreign]) # Reconcile.
         info = ('hdiutil-info', ['/usr/bin/hdiutil', 'info', '-plist'], 30, True) # Query.
         detach = ('hdiutil-detach', ['/usr/bin/hdiutil', 'detach', '/dev/disk17'], 60, True) # Whole disk.
-        for final, fails in ((after, False), (before, True)): # Reconcile.
-            runner = ownership_image_runner([before, final]) # Isolate.
-            with self.reject(release_error) if fails else contextlib.nullcontext(): # Guard.
-                packages.detach_owned_images(runner, (owned,)) # Exercise.
-            self.eq(runner.calls, [info, detach, info]) # Exact calls.
+        runner = ownership_image_runner([before, after]) # Detaches on the first attempt.
+        packages.detach_owned_images(runner, (owned,)) # Exercise.
+        self.eq(runner.calls, [info, detach, info]) # Exact calls.
+        runner = ownership_image_runner([before, before, after]) # Busy once, then gone.
+        with unittest.mock.patch.object(packages.time, 'sleep') as sleep: # No real wait.
+            packages.detach_owned_images(runner, (owned,)) # Exercise.
+        self.eq(runner.calls, [info, detach, info, detach, info]) # One retry.
+        self.eq(sleep.call_count, 1) # Single pause.
+        runner = ownership_image_runner([before] * 7) # Never detaches.
+        with unittest.mock.patch.object(packages.time, 'sleep') as sleep, self.reject(release_error): # No real wait.
+            packages.detach_owned_images(runner, (owned,)) # Exercise.
+        self.eq([call[0] for call in runner.calls], ['hdiutil-info', 'hdiutil-detach'] * 6 + ['hdiutil-info']) # Bounded attempts.
+        self.eq(sleep.call_count, 5) # Pauses between attempts.
     def test_invalid(self): # Malformed.
         _base, owned, _sibling = self.f() # Owned.
         path = owned / 'a' # Image.
