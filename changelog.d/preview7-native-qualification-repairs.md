@@ -8,3 +8,4 @@
 
 ### Fixed
 - The macOS package smoke test and image cleanup now retry a busy plain `hdiutil detach` (up to six attempts, never forced) instead of failing on a short-lived volume hold.
+- Native Linux ARM64 qualification now limits Cargo to two parallel build jobs, because the hosted runner kept losing contact with GitHub while linking several debug test binaries at once; the macOS shutdown smoke test now prints the client's final screen when the client exits with an error.

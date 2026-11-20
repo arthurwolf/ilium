@@ -316,7 +316,12 @@ def configure_workspace_test_environment(environment, target, work, cargo_target
     # multiply it or inherit a runner's unbounded host defaults.
     # Hosted runners have 2 to 4 cores; 16 parallel MSVC link steps exhaust
     # memory there (LNK1102), so never exceed the host's CPU count.
-    environment.update(CARGO_BUILD_JOBS=str(min(16, os.cpu_count() or 2)), CMAKE_BUILD_PARALLEL_LEVEL='1',
+    jobs = min(16, os.cpu_count() or 2)
+    if target['rust_target'] == 'aarch64-unknown-linux-gnu':
+        # The hosted ARM64 runner repeatedly lost contact with GitHub while linking
+        # several debug test binaries at once; two jobs keep its memory bounded.
+        jobs = min(jobs, 2)
+    environment.update(CARGO_BUILD_JOBS=str(jobs), CMAKE_BUILD_PARALLEL_LEVEL='1',
                        NUM_JOBS='1', MAKEFLAGS='-j1', OMP_NUM_THREADS='1',
                        RAYON_NUM_THREADS='1', RUST_TEST_THREADS='1')
     executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'

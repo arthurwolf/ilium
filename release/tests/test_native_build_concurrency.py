@@ -22,6 +22,13 @@ class NativeBuildConcurrencyTests(unittest.TestCase):
                 configured = pipeline.configure_workspace_test_environment(
                     environment, target, work, work / 'target')
                 self.assertEqual(configured['CARGO_BUILD_JOBS'], str(min(16, os.cpu_count() or 2)))
+                if operating_system == 'linux':
+                    arm_target = {'os': 'linux', 'rust_target': 'aarch64-unknown-linux-gnu'}
+                    with tempfile.TemporaryDirectory() as arm_temporary:
+                        arm_work = Path(arm_temporary)
+                        arm = pipeline.configure_workspace_test_environment(
+                            {'CARGO_BUILD_JOBS': '128'}, arm_target, arm_work, arm_work / 'target')
+                    self.assertEqual(arm['CARGO_BUILD_JOBS'], str(min(2, os.cpu_count() or 2)))
                 for name in ('CMAKE_BUILD_PARALLEL_LEVEL', 'NUM_JOBS',
                              'OMP_NUM_THREADS', 'RAYON_NUM_THREADS'):
                     self.assertEqual(configured[name], '1', name)

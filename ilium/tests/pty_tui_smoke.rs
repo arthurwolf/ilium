@@ -9006,8 +9006,9 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
                         ..
                     })
                 ),
-                "client returned a shutdown or input-retirement error: {:?}",
-                tui.child_exit()
+                "client returned a shutdown or input-retirement error: {:?}; final screen: {:?}",
+                tui.child_exit(),
+                tui.screen_text()
             );
         } else {
             // Windows: the process status of a ConPTY child is not a reliable
