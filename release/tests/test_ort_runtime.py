@@ -69,10 +69,10 @@ class OrtRuntimeTests(unittest.TestCase):
             asset = adapter.validate_register(register, source, target)
             self.assertTrue(asset['url'].startswith('https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/'))
             self.assertTrue(asset['selected'])
-        self.assertEqual(register['assets']['aarch64-apple-darwin']['sha256'], '0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde')
-        self.assertEqual(register['assets']['x86_64-pc-windows-msvc']['sha256'], '8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0')
-        self.assertEqual(register['assets']['x86_64-unknown-linux-gnu']['sha256'], '43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6')
-        self.assertEqual(register['assets']['aarch64-unknown-linux-gnu']['sha256'], '6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e')
+        self.assertEqual(register['assets']['aarch64-apple-darwin']['sha256'], '84720bea739da2f6d5240bea39557c158a87208b79c8bf4fa29c2bd036515606')
+        self.assertEqual(register['assets']['x86_64-pc-windows-msvc']['sha256'], 'd3453c98367d72e19dcf3ab4d08406de4331bb198142ae9c7c54d79a8236652e')
+        self.assertEqual(register['assets']['x86_64-unknown-linux-gnu']['sha256'], 'ac79eef22182e1af7454f272c9a81c2a63cf5b5ab62d84af8065df21510e5a9d')
+        self.assertEqual(register['assets']['aarch64-unknown-linux-gnu']['sha256'], '11158b417cd87d607112c2419131f3da1a3cd7404b2074bfd20642333c86b50e')
 
     def test_selected_regular_assets_and_explicit_dynamic_environment(self):
         for target in adapter.TARGETS:
