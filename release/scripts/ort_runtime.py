@@ -65,7 +65,7 @@ def validate_register(register, source, target):
     require(asset.get('github_digest') == 'sha256:' + asset.get('sha256', ''), 'Shared asset hash differs from recorded GitHub digest')
     require(type(asset.get('asset_id')) is int and asset['asset_id'] > 0, 'Official shared asset ID missing')
     require(asset.get('format') in ('zip', 'tar.gz') and re.fullmatch('[0-9a-f]{64}', asset.get('sha256', '')), 'Shared archive format/hash policy invalid')
-    require(asset.get('url') == 'https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/' + asset.get('name', ''), 'Shared asset is not from the official pinned release')
+    require(asset.get('url') == 'https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/' + asset.get('name', ''), 'Shared asset is not from the pinned mirror release')
     require(type(asset.get('bytes')) is int and 0 < asset['bytes'] <= MAX_ARCHIVE, 'Shared archive exceeds bounded size')
     members, selected = asset.get('members'), asset.get('selected')
     require(isinstance(members, dict) and 0 < len(members) <= MAX_MEMBERS and isinstance(selected, dict) and selected and set(selected) <= set(members), 'Shared member policy incomplete')

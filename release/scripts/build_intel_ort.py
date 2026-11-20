@@ -26,8 +26,9 @@ from audit_native import atomic_write
 VERSION = "1.24.2"
 TAG = "v1.24.2"
 COMMIT = "058787ceead760166e3c50a0a4cba8a833a6f53f"
-SOURCE_URL = f"https://codeload.github.com/microsoft/onnxruntime/tar.gz/{COMMIT}"
-TAG_URL = f"https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/{TAG}"
+SOURCE_URL = "https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/onnxruntime-source-058787ce.tar.gz"
+GIT_DIRECTORY = "e42d56bb417bdecf5e1f4f27a75ce01709acb302"
+TAG_URL = f"https://archive.softwareheritage.org/api/1/revision/{COMMIT}/"
 
 
 def require(condition, message):
@@ -63,7 +64,7 @@ def request_bytes(url):
         request = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
-                require(response.url.startswith(("https://api.github.com/", "https://codeload.github.com/")), "source acquisition redirected outside pinned official hosts")
+                require(response.url.startswith(("https://api.github.com/", "https://archive.softwareheritage.org/", "https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/", "https://release-assets.githubusercontent.com/", "https://objects.githubusercontent.com/")), "source acquisition redirected outside pinned hosts")
                 return response.read()
         except urllib.error.HTTPError as error:
             if error.code not in (403, 429, 500, 502, 503, 504) or attempt == 3:
@@ -72,6 +73,10 @@ def request_bytes(url):
 
 
 def verify_tag_commit(reference, tag_object=None):
+    if "object" not in reference:
+        # Software Heritage revision record: the commit id and its tree are the identity.
+        require(reference.get("id") == COMMIT and reference.get("directory") == GIT_DIRECTORY, "archived revision does not match the pinned commit and tree")
+        return COMMIT
     value = reference.get("object", {})
     if value.get("type") == "tag":
         require(tag_object is not None and tag_object.get("sha") == value.get("sha"), "annotated tag object is missing or mismatched")

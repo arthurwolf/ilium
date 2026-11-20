@@ -39,8 +39,8 @@ class NativeAuditTests(unittest.TestCase):
         }
         return {
             "schema": 1, "state": "built-not-qualified", "source_register_sha256": "c" * 64,
-            "source_register": {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": commit, "source_url": f"https://codeload.github.com/microsoft/onnxruntime/tar.gz/{commit}", "reviewed_by": "fixture reviewer", "source_sha256": "a" * 64},
-            "tag_resolution": {"reference_url": "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2", "reference": {"ref": "refs/tags/v1.24.2", "object": {"type": "commit", "sha": commit}}},
+            "source_register": {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": commit, "source_url": "https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/onnxruntime-source-058787ce.tar.gz", "reviewed_by": "fixture reviewer", "source_sha256": "a" * 64},
+            "tag_resolution": {"reference_url": "https://archive.softwareheritage.org/api/1/revision/058787ceead760166e3c50a0a4cba8a833a6f53f/", "reference": {"id": commit, "directory": "e42d56bb417bdecf5e1f4f27a75ce01709acb302"}},
             "runner_identity": "macos-15-intel",
             "native_identity": {"system": "Darwin", "machine": "x86_64", "release": "24.5.0", "version": "Darwin Kernel Version 24.5.0: synthetic fixture"},
             "toolchain": {**{name: {"command": command, "stdout": output, "stderr": ""} for name, (command, output) in toolchains.items()}, "python": "3.11.7 (synthetic fixture)"},
@@ -63,9 +63,9 @@ class NativeAuditTests(unittest.TestCase):
         ort_command = [source, "--config", "Release", "--build_shared_lib", "--enable_msvc_static_runtime", "--cmake_generator", "Visual Studio 17 2022", "--msvc_toolset", "14.40.33807", "--parallel", "4", "--skip_submodule_sync", "--build_dir", str(build)]
         return {
             "schema": 1, "state": "built-not-qualified", "publication_allowed": False,
-            "source_register": {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": commit, "source_url": f"https://codeload.github.com/microsoft/onnxruntime/tar.gz/{commit}", "reviewed_by": "fixture reviewer", "source_sha256": "a" * 64},
+            "source_register": {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": commit, "source_url": "https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/onnxruntime-source-058787ce.tar.gz", "reviewed_by": "fixture reviewer", "source_sha256": "a" * 64},
             "source_register_sha256": "b" * 64,
-            "tag_resolution": {"reference_url": "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2", "reference": {"ref": "refs/tags/v1.24.2", "object": {"type": "commit", "sha": commit}}, "tag_object": None},
+            "tag_resolution": {"reference_url": "https://archive.softwareheritage.org/api/1/revision/058787ceead760166e3c50a0a4cba8a833a6f53f/", "reference": {"id": commit, "directory": "e42d56bb417bdecf5e1f4f27a75ce01709acb302"}, "tag_object": None},
             "native_identity": {"system": "Windows", "machine": "AMD64", "release": "10", "version": "Windows fixture"},
             "runner_identity": "windows-2025",
             "toolchain": {
@@ -428,7 +428,7 @@ class NativeAuditTests(unittest.TestCase):
             with self.subTest(system=system, machine=machine):
                 with self.assertRaises(ValueError):
                     build.require_intel_host(system, machine)
-        register = {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": "058787ceead760166e3c50a0a4cba8a833a6f53f", "source_url": "https://codeload.github.com/microsoft/onnxruntime/tar.gz/058787ceead760166e3c50a0a4cba8a833a6f53f", "source_sha256": "a" * 64, "reviewed_by": "fixture reviewer"}
+        register = {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": "058787ceead760166e3c50a0a4cba8a833a6f53f", "source_url": "https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/onnxruntime-source-058787ce.tar.gz", "source_sha256": "a" * 64, "reviewed_by": "fixture reviewer"}
         build.validate_source_register(register)
         for changes in ({"commit": "0" * 40}, {"tag": "v1.24.1"}, {"source_sha256": ""}, {"state": "blocked"}, {"reviewed_by": ""}, {"source_url": "https://evil.invalid/source.tar.gz"}):
             with self.subTest(changes=changes):
@@ -459,8 +459,8 @@ class NativeAuditTests(unittest.TestCase):
                 build.verify_source_hash(archive, "0" * 64)
             build.verify_source_hash(archive, hashlib.sha256(archive.read_bytes()).hexdigest())
         with self.assertRaises(ValueError):
-            build.verify_tag_commit({"object": {"type": "commit", "sha": "0" * 40}})
-        self.assertEqual(build.verify_tag_commit({"object": {"type": "commit", "sha": "058787ceead760166e3c50a0a4cba8a833a6f53f"}}), "058787ceead760166e3c50a0a4cba8a833a6f53f")
+            build.verify_tag_commit({"id": "0" * 40, "directory": "e42d56bb417bdecf5e1f4f27a75ce01709acb302"})
+        self.assertEqual(build.verify_tag_commit({"id": "058787ceead760166e3c50a0a4cba8a833a6f53f", "directory": "e42d56bb417bdecf5e1f4f27a75ce01709acb302"}), "058787ceead760166e3c50a0a4cba8a833a6f53f")
 
     @unittest.skipIf(sys.platform == 'win32', 'macOS vmmap/Intel audit logic with POSIX fixture paths; it only runs on macOS targets')
     def test_intel_build_uses_shared_runtime_and_avoids_archive_git_mutation(self):

@@ -67,7 +67,7 @@ class OrtRuntimeTests(unittest.TestCase):
         source = json.loads((ROOT / 'release/ort-source.json').read_text())
         for target in adapter.TARGETS:
             asset = adapter.validate_register(register, source, target)
-            self.assertTrue(asset['url'].startswith('https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/'))
+            self.assertTrue(asset['url'].startswith('https://github.com/arthurwolf/ilium/releases/download/ort-mirror-1.24.2/'))
             self.assertTrue(asset['selected'])
         self.assertEqual(register['assets']['aarch64-apple-darwin']['sha256'], '0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde')
         self.assertEqual(register['assets']['x86_64-pc-windows-msvc']['sha256'], '8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0')
