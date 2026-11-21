@@ -46,7 +46,7 @@ Direct downloads:
 
 Verify every package using [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/SHA256SUMS) of `v0.1.1-preview.7`, which lists all 23 files. Details: [Installation](src/docs/installation.md).
 
-The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
+The same 23 files plus `SHA256SUMS` are also published as one public OCI artifact, `ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7`. Retrieve it anonymously with [ORAS](https://oras.land/docs/installation/) (`oras pull ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7`), then check it with `sha256sum -c SHA256SUMS`.
 
 Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package.
 
