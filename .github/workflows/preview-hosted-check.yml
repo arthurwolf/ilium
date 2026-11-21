@@ -1,0 +1,64 @@
+# Runs the exact README one-liners against the live production site in disposable
+# hosted runners, and checks the served script bytes against the committed ones.
+name: Hosted preview installer check
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/v0.1.1-preview.7]
+    paths: [.github/workflows/preview-hosted-check.yml]
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  posix:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Served install.sh equals the committed script, then run the README command
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh -o "$RUNNER_TEMP/served.sh"
+          cmp "$RUNNER_TEMP/served.sh" release/install.sh
+          export HOME="$RUNNER_TEMP/hosted-home"; mkdir -p "$HOME"
+          curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
+          "$HOME/.local/bin/ilium" --version
+          "$HOME/.local/bin/ilium-server" --version
+          test "$("$HOME/.local/bin/ilium" --version | cut -d' ' -f1)" = ilium
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Served install.ps1 equals the committed script, then run the README command
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "PowerShell $($PSVersionTable.PSVersion)"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $served = Join-Path $env:RUNNER_TEMP 'served.ps1'
+          Invoke-WebRequest -Uri https://ilium-setup.pages.dev/install.ps1 -OutFile $served -UseBasicParsing
+          if ((Get-FileHash $served -Algorithm SHA256).Hash -ne (Get-FileHash release/install.ps1 -Algorithm SHA256).Hash) { throw 'served install.ps1 differs from the committed script' }
+          irm https://ilium-setup.pages.dev/install.ps1 | iex
+          $root = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ilium'
+          foreach ($name in 'ilium', 'ilium-server') {
+            $out = & (Join-Path $root "bin/$name.cmd") --version 2>&1
+            "$name -> $out"
+            if ($LASTEXITCODE -ne 0 -or "$out" -notlike "$name 0.1.1-*") { throw "$name did not run" }
+          }

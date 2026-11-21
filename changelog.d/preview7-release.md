@@ -12,3 +12,4 @@
 - The preview Pages baseline check now probes the expected-absent routes with the pipeline User-Agent, because Cloudflare answered the bare default Python agent with HTTP 403 instead of the 404 the check needs.
 - The preview Pages deployment lookups now request 25 deployments per page, the most the Cloudflare API accepts, instead of 100, which it rejected with HTTP 400.
 - Every HTTPS read-back in the preview Pages workflow (served bytes, headers and the exact custom 404) now sends the pipeline User-Agent, so Cloudflare no longer answers it with error 1010.
+- Added a hosted installer check workflow that runs the exact README one-liners against the live ilium-setup.pages.dev site on Linux, macOS, Windows PowerShell 5.1 and PowerShell 7, and compares the served scripts byte for byte with the committed ones.
