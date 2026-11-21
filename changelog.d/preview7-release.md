@@ -10,3 +10,4 @@
 - The README now documents the published `ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7` OCI bundle and how to pull and verify it.
 - The macOS Apple Silicon installer pin now names the preview.5 archive that the complete preview carries (its bytes differ from preview.4), so the installer pins match the published checksums.
 - The preview Pages baseline check now probes the expected-absent routes with the pipeline User-Agent, because Cloudflare answered the bare default Python agent with HTTP 403 instead of the 404 the check needs.
+- The preview Pages deployment lookups now request 25 deployments per page, the most the Cloudflare API accepts, instead of 100, which it rejected with HTTP 400.

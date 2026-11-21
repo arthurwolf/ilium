@@ -397,7 +397,7 @@ def owned_deployment(directory, branch, commit, log):
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         failure = str(error)[:500]
     prefix, _project = pipeline.pages_project()
-    records = pipeline.cloudflare(prefix + '/deployments?per_page=100')
+    records = pipeline.cloudflare(prefix + '/deployments?per_page=25')
     matches = [record for record in records
                if record.get('deployment_trigger', {}).get('metadata', {}).get('commit_message') == marker
                and record.get('deployment_trigger', {}).get('metadata', {}).get('commit_hash') == commit
@@ -494,7 +494,7 @@ def recover(arguments):
     elif current_id == old_id and live == previous['routes']:
         state = 'baseline-still-live-at-readback'
     else:
-        records = pipeline.cloudflare(prefix + '/deployments?per_page=100')
+        records = pipeline.cloudflare(prefix + '/deployments?per_page=25')
         owned = [record for record in records if record.get('id') == current_id
                  and record.get('deployment_trigger', {}).get('metadata', {}).get('commit_message') == intent['owner_marker']]
         state = ('owned-promotion-live-needs-exclusive-recovery' if len(owned) == 1
