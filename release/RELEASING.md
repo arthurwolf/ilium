@@ -714,3 +714,7 @@ After an interrupted attempt, use a fresh payload directory with the same
 retained intent and qualification evidence so the existing tag can be checked.
 Record the native run, release commit, package digest and public readback before
 advertising the bundle.
+
+### Publication record (v0.1.1-preview.7)
+
+Qualified on commit `d82936b7065fbfaa3e036297f2db486effafaeae` (native run 44837486279: macOS Intel, Linux ARM64 and Windows installer check). The immutable prerelease carries the seventeen preview.6 files byte for byte plus `ilium-macos-x86_64.tar.gz` (from the `native-x86_64-apple-darwin` artifact), `.zip`, `.pkg` and `.dmg` (from `macos-packages-x86_64`), and `ilium-linux-aarch64.rpm` and `.snap` (from `linux-packages-aarch64`). Each new file was compared with its native build receipt before upload; the seventeen carried lines of the new `SHA256SUMS` equal preview.6's. It was created as a draft prerelease (not latest) targeting the qualified commit, uploaded in full, then published, and all 23 public downloads were compared with the published `SHA256SUMS`. The ARM64 deb, AppImage and Flatpak rebuilt in that run are qualification evidence only; the carried preview.6 files are the published ones. `release/linux-preview-pins.json` gained the macOS Intel archive pin and `release/install.sh` was regenerated with `release_tool.py generate-preview-pins` from the published `SHA256SUMS` of 0.1.1-linux.3, 0.1.1-preview.4 and 0.1.1-preview.7.

@@ -11,6 +11,10 @@
     "ilium-macos-aarch64.tar.gz": {
       "version": "0.1.1-preview.4",
       "sha256": "80a83891cd6c60b87960956ef08d6cdd76bb82c04742db99e6735b2a66f85c03"
+    },
+    "ilium-macos-x86_64.tar.gz": {
+      "version": "0.1.1-preview.7",
+      "sha256": "b74dab738edc8778f0ce579ec495f86ffb1450f3b93d3af57ee9d8603f1123a1"
     }
   }
 }

@@ -2,9 +2,9 @@
 
 This page describes Ilium's installation routes: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-Preview [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) carries the ten Linux files of v0.1.1-linux.3 unchanged and adds the four macOS Apple Silicon formats (tar.gz, ZIP, PKG, DMG; native macOS-15 evidence, unsigned, not notarized). Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one SHA256SUMS covering all ten files. The public downloads have been checked against their checksums. Preview [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) carries those fourteen files unchanged and adds the Windows x86_64 setup EXE, MSI and ZIP (native windows-2025 evidence, unsigned), with one SHA256SUMS over all seventeen files. These prereleases are not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Preview [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) is the complete preview bundle: Linux x86_64 (six formats), Linux ARM64 (six formats), macOS Apple Silicon (four formats), macOS Intel (four formats) and Windows x86_64 (three formats), 23 files in one immutable prerelease with one SHA256SUMS. It carries the seventeen files of v0.1.1-preview.6 unchanged (they keep their original embedded versions) and adds macOS Intel tar.gz, ZIP, PKG and DMG and Linux ARM64 rpm and Snap, which were built natively on GitHub Actions runners and installed and run there. The public downloads have been checked against SHA256SUMS. The prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending. Earlier previews (v0.1.1-linux.3 and v0.1.1-preview.4 to .6) stay published and unchanged.
 
-**Not yet available for this preview:** hosted installers, two of six Linux ARM64 formats (rpm, Snap), macOS Intel. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
+**Limits of this preview:** none of the packages is signed or notarized, animation add-on packages are disabled on macOS and Windows, and Linux ARM64 tar.gz, deb, AppImage and Flatpak were verified in an emulated guest. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
 
 ## Contents
 
@@ -28,9 +28,9 @@ Linux is the primary platform. macOS and Windows support is implemented, with di
 
 | Platform | Architectures | Package formats |
 | --- | --- | --- |
-| Linux | x86_64 (Intel/AMD); aarch64 (ARM64): tar.gz, deb, AppImage, Flatpak verified in an emulated guest (emulated QEMU guest, not native hardware); rpm, Snap **coming soon** | tar.gz, deb, rpm, AppImage, Snap, Flatpak |
-| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; Apple Silicon: all four available in v0.1.1-preview.5; Intel **not yet available** |
-| Windows | x86_64 (native AMD64) | setup exe, msi, zip; all three available in v0.1.1-preview.6 (unsigned) |
+| Linux | x86_64 (Intel/AMD); aarch64 (ARM64) | tar.gz, deb, rpm, AppImage, Snap, Flatpak on both; ARM64 rpm and Snap verified natively on an ARM64 runner, the other ARM64 formats in an emulated QEMU guest |
+| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; all four available for both Apple Silicon and Intel in v0.1.1-preview.7 (unsigned, not notarized) |
+| Windows | x86_64 (native AMD64) | setup exe, msi, zip; all three available in v0.1.1-preview.7 (carried from v0.1.1-preview.6; unsigned) |
 
 Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora and openSUSE environments). Flatpak uses its declared platform runtime. All packages are unsigned: check the asset digest on the release page.
 
@@ -43,11 +43,11 @@ Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the t
 
 ## Option 1: hosted installer
 
-**Hosted installers are not yet available for this preview.** The commands below describe a future full release and do not install v0.1.1-linux.3.
+The hosted installers install this preview.
 
 The installers pick your architecture, download the matching archive, verify it against the release checksums, and install it for your user without administrator rights.
 
-On Linux the shell installer supports both x86_64 and ARM64 (aarch64) and verifies each against its own pinned SHA-256; the ARM64 archive was verified in an emulated guest only, not on native ARM64 hardware.
+The shell installer supports Linux and macOS on x86_64 and ARM64 (aarch64) and verifies each archive against its own pinned SHA-256.
 
 Linux and macOS:
 
@@ -136,7 +136,7 @@ It installs to `/usr/lib/ilium` and links `ilium` into `/usr/bin`. The package d
 
 ### rpm package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.rpm) · aarch64 **(coming soon)**.
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.rpm) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.rpm) (installed and run in Fedora 41 and openSUSE Leap 15.6 aarch64 containers on a native ARM64 runner).
 
 1. Verify the checksum.
 2. Fedora: `sudo dnf install ./ilium-linux-x86_64.rpm`. openSUSE: `sudo zypper install ./ilium-linux-x86_64.rpm`.
@@ -155,7 +155,7 @@ The AppImage needs FUSE. The first run copies Ilium to `~/.local/share/ilium/app
 
 ### Snap package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.snap) · aarch64 **(coming soon)**.
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.snap) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.snap) (installed and run on the host of a native ARM64 runner).
 
 1. Verify the checksum.
 2. `sudo snap install --dangerous --classic ilium-linux-x86_64.snap`
@@ -177,7 +177,7 @@ The Linux release gate requires receipt-bound installed-file checks, client, ser
 
 ## macOS packages
 
-**Preview: Apple Silicon, four formats.** [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) provides [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg). All were built, linted, tested and audited natively on a GitHub Actions `macos-15` (Apple Silicon) runner, and the ZIP, PKG and DMG were installed there and passed the installed-package test (versions, session lifecycle, removal). They hold the same binaries as the tar.gz. They are **unsigned and not notarized**, so Gatekeeper warns.
+**Preview: Apple Silicon and Intel, four formats each.** Apple Silicon: [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) provides [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg). All were built, linted, tested and audited natively on a GitHub Actions `macos-15` (Apple Silicon) runner, and the ZIP, PKG and DMG were installed there and passed the installed-package test (versions, session lifecycle, removal). They hold the same binaries as the tar.gz. They are **unsigned and not notarized**, so Gatekeeper warns.
 
 **Native animations are disabled on macOS.** The animation sandbox (Seatbelt) is not qualified, so the product refuses animation add-ons with "macOS animation helper Seatbelt/resource isolation is not qualified; unverified packages are disabled". The macOS test asserts that refusal.
 
@@ -188,12 +188,14 @@ If macOS blocks a download or the extracted binaries, right-click and choose Ope
 3. tar.gz: extract with `tar -xzf` into a new directory; ZIP: unzip into a new directory; DMG: open it and copy the folder out; PKG: see below.
 4. Add the package directory to `PATH`.
 
-The hosted installer selects your architecture and uses the same layout as Linux (it still pins the v0.1.1-preview.4 macOS tar.gz).
+**Intel (x86_64), v0.1.1-preview.7:** [`ilium-macos-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.dmg), embedded version 0.1.1-preview.7. They were built, tested and audited natively on a GitHub Actions `macos-15-intel` runner; the ZIP, PKG and DMG were installed, run and removed there. The same animation and signing limits apply.
+
+The hosted installer selects your architecture and uses the same layout as Linux.
 
 | Mac | tar.gz | ZIP | Installer PKG | Disk image DMG |
 | --- | --- | --- | --- | --- |
 | Apple Silicon | Available | Available | Available | Available |
-| Intel | Not yet available | Not yet available | Not yet available | Not yet available |
+| Intel | Available | Available | Available | Available |
 
 The PKG needs administrator approval and installs into `/usr/local/lib/ilium/<version>/<arch>`. Add that directory to `PATH`; the package does not change your shell configuration. You can keep separate versions and choose the one your shell uses.
 
@@ -242,7 +244,7 @@ Open a new terminal in your project and run `ilium`. First-run setup walks throu
 
 | Installation | How to upgrade |
 | --- | --- |
-| Hosted installer (not yet available for this preview) | Run the installer again; it installs the new version beside the old and switches the `current` pointer. |
+| Hosted installer | Run the installer again; it installs the new version beside the old and switches the `current` pointer. |
 | deb / rpm | Install the newer package with the same command. |
 | AppImage | Replace the downloaded image; remove old caches under `${XDG_DATA_HOME:-$HOME/.local/share}/ilium/appimage` if wanted. |
 | Snap / Flatpak | Install the newer file with the same command. |
