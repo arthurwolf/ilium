@@ -120,7 +120,7 @@ case "$kernel/$architecture" in
 esac
 # END GENERATED POSIX TARGETS
 # BEGIN GENERATED PREVIEW PINS
-preview_pins='ilium-linux-aarch64.tar.gz=0.1.1-linux.3:1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd ilium-linux-x86_64.tar.gz=0.1.1-linux.3:102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a ilium-macos-aarch64.tar.gz=0.1.1-preview.4:80a83891cd6c60b87960956ef08d6cdd76bb82c04742db99e6735b2a66f85c03 ilium-macos-x86_64.tar.gz=0.1.1-preview.7:b74dab738edc8778f0ce579ec495f86ffb1450f3b93d3af57ee9d8603f1123a1'
+preview_pins='ilium-linux-aarch64.tar.gz=0.1.1-linux.3:1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd ilium-linux-x86_64.tar.gz=0.1.1-linux.3:102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a ilium-macos-aarch64.tar.gz=0.1.1-preview.5:66b4a3002e57b2730d932a59e03db2def150838d4bb5d4c3bba7de3cffe21f83 ilium-macos-x86_64.tar.gz=0.1.1-preview.7:b74dab738edc8778f0ce579ec495f86ffb1450f3b93d3af57ee9d8603f1123a1'
 # END GENERATED PREVIEW PINS
 if [ "$target_os" = linux ]; then
     libc_identity=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail "Linux release requires glibc; musl or unverified libc is unsupported"

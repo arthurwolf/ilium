@@ -8,3 +8,4 @@
 - Installers now validate carried preview archives against their original embedded versions and exact published checksums when a newer preview release includes those unchanged files.
 - The preview Pages and GHCR workflows no longer rewrite tracked Python bytecode files in their checkout, which made the qualification checks reject the checkout as modified.
 - The README now documents the published `ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7` OCI bundle and how to pull and verify it.
+- The macOS Apple Silicon installer pin now names the preview.5 archive that the complete preview carries (its bytes differ from preview.4), so the installer pins match the published checksums.

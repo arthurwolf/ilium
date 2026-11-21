@@ -29,7 +29,7 @@ class PreviewPagesTests(unittest.TestCase):
         self.targets = release_tool.load_targets(self.root / 'release/targets.toml')
         pins = {'ilium-linux-x86_64.tar.gz': {'version': '0.1.1-linux.3', 'sha256': 'a' * 64},
                 'ilium-linux-aarch64.tar.gz': {'version': '0.1.1-linux.3', 'sha256': 'b' * 64},
-                'ilium-macos-aarch64.tar.gz': {'version': '0.1.1-preview.4', 'sha256': 'c' * 64}}
+                'ilium-macos-aarch64.tar.gz': {'version': '0.1.1-preview.5', 'sha256': 'c' * 64}}
         (self.root / 'release/linux-preview-pins.json').write_text(json.dumps({'archives': pins}))
         posix = release_tool.posix_table(self.targets)
         block = release_tool.preview_pins_block({name: (pin['version'], pin['sha256'])
