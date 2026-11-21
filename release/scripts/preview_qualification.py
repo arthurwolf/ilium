@@ -187,13 +187,17 @@ def verify_run(run_id, source_sha, current_sha, *, github=pipeline.github, root=
     require(os.environ.get('GITHUB_REPOSITORY', REPOSITORY) == REPOSITORY
             and os.environ.get('GITHUB_REF', 'refs/heads/' + BRANCH) == 'refs/heads/' + BRANCH,
             'Pages qualification must run on the owning release branch')
+    # A rerun of failed jobs after a hosted-runner loss is still one run on one commit: the
+    # latest-attempt job and step checks (result_jobs) and the same-run artifact checks below
+    # prove every required lane passed, so the attempt number only has to be a real attempt.
     workflow = github('actions/workflows/release.yml')
     run = github('actions/runs/' + run_id)
     require(workflow.get('path') == '.github/workflows/release.yml'
             and run.get('workflow_id') == workflow.get('id')
             and run.get('head_repository', {}).get('full_name') == REPOSITORY
             and run.get('head_branch') == BRANCH and run.get('event') == 'workflow_dispatch'
-            and run.get('run_attempt') == 1 and run.get('status') == 'completed'
+            and isinstance(run.get('run_attempt'), int) and run['run_attempt'] >= 1
+            and run.get('status') == 'completed'
             and run.get('conclusion') == 'success' and run.get('head_sha') == source_sha,
             'native qualification run identity, source or success differs')
     release = github('releases/tags/' + TAG)

@@ -19,7 +19,8 @@ class QualificationTests(unittest.TestCase):
 
     def provider(self, *, failed_step=None, missing_artifact=None, release_commit=None,
                  expired_artifact=None, duplicate_artifact=None,
-                 foreign_artifact=None, missing_artifact_id=None, run_status='success'):
+                 foreign_artifact=None, missing_artifact_id=None, run_status='success',
+                 run_attempt=1):
         markers = qualification.REQUIRED_STEPS
         jobs = [{'id': index + 1, 'run_id': 123, 'head_sha': self.source_sha,
                  'status': 'completed', 'conclusion': 'success',
@@ -42,7 +43,7 @@ class QualificationTests(unittest.TestCase):
             'actions/workflows/release.yml': {'id': 7, 'path': '.github/workflows/release.yml'},
             'actions/runs/123': {'workflow_id': 7, 'head_repository': {'full_name': 'arthurwolf/ilium'},
                                  'head_branch': qualification.BRANCH, 'event': 'workflow_dispatch',
-                                 'run_attempt': 1, 'status': 'completed', 'conclusion': run_status,
+                                 'run_attempt': run_attempt, 'status': 'completed', 'conclusion': run_status,
                                  'head_sha': self.source_sha},
             'releases/tags/' + qualification.TAG: {'tag_name': qualification.TAG,
                                                     'prerelease': True, 'draft': False,
@@ -73,9 +74,16 @@ class QualificationTests(unittest.TestCase):
             {'missing_artifact_id': 'native-aarch64-unknown-linux-gnu'},
             {'release_commit': 'c' * 40},
             {'run_status': 'failure'},
+            {'run_attempt': 0},
+            {'run_attempt': None},
+            {'run_attempt': 2, 'failed_step': qualification.REQUIRED_STEPS[3]},
         ):
             with self.subTest(changed=changed), self.assertRaises(release_tool.ReleaseError):
                 self.verify(self.provider(**changed))
+
+    def test_rerun_attempt_with_every_required_lane_green_is_accepted(self):
+        result = self.verify(self.provider(run_attempt=2))
+        self.assertEqual(result['qualified_source_sha'], self.source_sha)
 
     def test_postqualification_diff_is_exact_allowlist_and_rejects_deletion(self):
         def git(*args, root):
