@@ -17,6 +17,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 import uuid
 
 import pages
@@ -24,6 +26,30 @@ import release_tool
 import release_pipeline as pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _missing_response_with_agent(url):
+    """Probe an expected-absent route like the other requests do, with the pipeline's User-Agent.
+
+    Cloudflare answers the bare default urllib agent with 403, which would hide the
+    authoritative 404 this check needs.
+    """
+    request = urllib.request.Request(url, headers={'User-Agent': 'ilium-release-pipeline'})
+    try:
+        with urllib.request.build_opener(pipeline.HTTPSOnly()).open(request, timeout=30):
+            raise release_tool.ReleaseError('expected absent endpoint is publicly available')
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            error.close()
+            raise pipeline.HTTPFailure(error.code) from None
+        content = error.read(2_000_001)
+        require(len(content) <= 2_000_000, 'oversized missing-resource response')
+        headers = error.headers
+        error.close()
+        return content, headers
+
+
+pipeline.missing_response = _missing_response_with_agent
 HEX = re.compile(r'[0-9a-f]{64}\Z')
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 VERSION = re.compile(r'0\.1\.1-preview\.[0-9]+\Z')
