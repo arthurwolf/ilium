@@ -46,8 +46,26 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - name: Served install.ps1 equals the committed script, then run the README command
-        shell: ${{ matrix.shell }}
+      - name: "Windows PowerShell 5.1: served install.ps1 equals the committed script, then run the README command"
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "PowerShell $($PSVersionTable.PSVersion)"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $served = Join-Path $env:RUNNER_TEMP 'served.ps1'
+          Invoke-WebRequest -Uri https://ilium-setup.pages.dev/install.ps1 -OutFile $served -UseBasicParsing
+          if ((Get-FileHash $served -Algorithm SHA256).Hash -ne (Get-FileHash release/install.ps1 -Algorithm SHA256).Hash) { throw 'served install.ps1 differs from the committed script' }
+          irm https://ilium-setup.pages.dev/install.ps1 | iex
+          $root = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ilium'
+          foreach ($name in 'ilium', 'ilium-server') {
+            $out = & (Join-Path $root "bin/$name.cmd") --version 2>&1
+            "$name -> $out"
+            if ($LASTEXITCODE -ne 0 -or "$out" -notlike "$name 0.1.1-*") { throw "$name did not run" }
+          }
+      - name: "PowerShell 7: served install.ps1 equals the committed script, then run the README command"
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           "PowerShell $($PSVersionTable.PSVersion)"
