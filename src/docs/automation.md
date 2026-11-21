@@ -463,9 +463,9 @@ Ilium ships two short instruction blocks for agents: **Chatroom** (when and how 
 
 | Scope | Files |
 | --- | --- |
-| Global (Claude) | `~/.claude/CLAUDE.md`, or the custom path chosen for that feature in Settings |
-| Global (Codex) | `~/.codex/AGENTS.md` |
-| Each open project | `CLAUDE.md` and `AGENTS.md` in the project root, only when you install there from the Setup tab |
+| Global (Claude) | Progress in `~/.claude/CLAUDE.md`, or the configured path |
+| Global (Codex) | Progress in `~/.codex/AGENTS.md` |
+| Project with a chatroom | Chatroom guidance in `CLAUDE.md` and in `AGENTS.md` if that file already exists |
 
 Edits are **marker-delimited blocks**, so only text between Ilium's own markers is ever replaced or removed:
 
@@ -477,7 +477,7 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 
 The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=13 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
-Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
+Ilium installs and refreshes the global Progress block when a client attaches or projects open. Chatroom guidance follows the room: creating or repairing a room installs it in the project, and removing the room removes its managed block. Automatic setup removes old global Chatroom blocks and stale project blocks where no room exists. It does not create a project `AGENTS.md`, because doing so can stop Codex from reading that project's `CLAUDE.md`. Write your own instructions outside the markers.
 
 ### The Setup tab
 
@@ -491,9 +491,9 @@ Settings, **Setup** lists every target per feature with a status badge:
 | Instruction detected | Matching text that Ilium did not write. |
 | Not set up | No block yet. |
 
-Per feature there is a **Global file** row (the file Ilium treats as the global Claude target; **Enter** changes it, **R** restores `~/.claude/CLAUDE.md`), a **Global** row for each global file, and a **Project** row for every open project. Press Enter on a target to refresh it now. Setup is not an on/off switch: removing a mandatory block would leave newly started agents uninformed. To remove a block, delete the text between its markers yourself.
+Progress has a **Global file** row (the file Ilium treats as the global Claude target; **Enter** changes it, **R** restores `~/.claude/CLAUDE.md`) and a **Global** row. Both features have a **Project** row for every open project. Press Enter on a target to refresh it now. Automatic setup restores the global Progress block and project Chatroom blocks when their room exists.
 
-The path you type may start with `~/`, be absolute, or be relative to the session's project directory. The choice is stored under `[agent_setup]` as `chatroom_global_file` and `progress_global_file`.
+The Progress path may start with `~/`, be absolute, or be relative to the session's project directory. The choice is stored under `[agent_setup]` as `progress_global_file`. A legacy `chatroom_global_file` is used to locate and remove the old managed global block.
 
 ---
 

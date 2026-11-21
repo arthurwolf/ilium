@@ -341,6 +341,28 @@ async fn actor(
         label,
     }))
 }
+async fn request_actor(
+    state: &ServerState,
+    pane_id: Option<NodeId>,
+    external_name: Option<&str>,
+    path: &std::path::Path,
+) -> Result<ResourceActor, ResourceError> {
+    if let Some(name) = external_name {
+        if pane_id.is_some()
+            || name.trim() != name
+            || name.is_empty()
+            || name.len() > 200
+            || name.chars().any(char::is_control)
+        {
+            return Err(err(
+                "invalid_identity",
+                "External name must be 1..200 printable bytes with no surrounding whitespace",
+            ));
+        }
+        return Ok(ResourceActor::External(AgentIdentity::external(name)));
+    }
+    actor(state, pane_id, path).await
+}
 fn process_from_invocation(id: &InvocationId) -> Option<ResourceProcessIdentity> {
     let mut parts = id.0.split(':');
     Some(ResourceProcessIdentity {
@@ -390,7 +412,9 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
     let mut eligibility = io(state, move || {
         let mut result = BTreeMap::new();
         for claim in &process_claims.value {
-            let status = if let Some(proof) = process_from_invocation(&claim.invocation_id) {
+            let status = if claim.is_external() {
+                InvocationEligibility::Live
+            } else if let Some(proof) = process_from_invocation(&claim.invocation_id) {
                 match resource_process_is_live(&proof) {
                     Ok(false) => InvocationEligibility::Dead,
                     Err(_) => InvocationEligibility::Unknown,
@@ -425,7 +449,9 @@ async fn evidence(state: &ServerState, catalog: &Catalog) -> Result<Eligibility,
     })
     .await?;
     for agent in claims.value.iter().filter(|agent| {
-        agent.runtime_generation != service(state).map(|s| s.incarnation.as_str()).unwrap_or("")
+        !agent.is_external()
+            && agent.runtime_generation
+                != service(state).map(|s| s.incarnation.as_str()).unwrap_or("")
     }) {
         if eligibility.get(&agent.invocation_id) == Some(&InvocationEligibility::Dead) {
             continue;
@@ -646,6 +672,97 @@ async fn local_invocations(
     }
     Ok(ResourceMemory::from_parts(live, storage))
 }
+
+/// Locate historical participant panes independently of invocation ownership.
+/// The old daemon's endpoint identifies the session, while the project, pane
+/// number and recorded title guard against a reused or foreign pane number.
+/// This is navigation evidence only and must never authorize a queue mutation.
+async fn navigable_reservations(
+    state: &ServerState,
+    catalog: &ResourceCatalog,
+) -> Result<ResourceMemory<Vec<ReservationId>>, ResourceError> {
+    let bytes = catalog
+        .resources
+        .values()
+        .flat_map(|record| &record.reservations)
+        .filter(|claim| claim.state.active())
+        .fold(4096usize, |total, claim| {
+            total
+                .saturating_add(claim.agent.retained_bytes().saturating_mul(2))
+                .saturating_add(claim.id.retained_bytes())
+        });
+    let storage =
+        memory::reserve_after_contention(state, bytes, "Resource navigation projection").await?;
+    let tree = state.tree.read().await;
+    let candidates: Vec<_> = catalog
+        .resources
+        .values()
+        .flat_map(|record| &record.reservations)
+        .filter(|claim| claim.state.active() && claim.agent.session_id == state.session_name)
+        .filter(|claim| {
+            let Some(node) = tree.get(claim.agent.pane_id).filter(|node| node.is_pane()) else {
+                return false;
+            };
+            if node.name.chars().take(120).collect::<String>() != claim.agent.label {
+                return false;
+            }
+            let Some(path) = tree
+                .project_ancestor(claim.agent.pane_id)
+                .and_then(|id| tree.get(id))
+                .and_then(|node| node.project_path())
+            else {
+                return false;
+            };
+            catalog.links.iter().any(|link| {
+                link.project_id == claim.agent.project_id
+                    && std::path::Path::new(&link.project_path) == path
+            })
+        })
+        .map(|claim| (claim.id.clone(), claim.agent.runtime_generation.clone()))
+        .collect();
+    drop(tree);
+    if candidates.is_empty() {
+        return Ok(ResourceMemory::from_parts(Vec::new(), storage));
+    }
+    let registry = service(state)?
+        .path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| err("paths", "Catalog directory absent"))?;
+    let current_generation = service(state)?.incarnation.clone();
+    let socket = state.socket_path.clone();
+    let result = io(state, move || {
+        use std::io::Read;
+        let _candidate_storage = storage;
+        let mut endpoints = BTreeMap::new();
+        let mut navigable = Vec::new();
+        for (reservation, generation) in candidates {
+            let matches = *endpoints.entry(generation.clone()).or_insert_with(|| {
+                if generation == current_generation {
+                    return true;
+                }
+                if uuid::Uuid::parse_str(&generation).is_err() {
+                    return false;
+                }
+                let path = registry.join(format!("server-{generation}.json"));
+                let Ok(file) = ilium_platform::secure_fs::open_regular_file(&path) else {
+                    return false;
+                };
+                let mut bytes = Vec::new();
+                if file.take(4097).read_to_end(&mut bytes).is_err() || bytes.len() > 4096 {
+                    return false;
+                }
+                serde_json::from_slice::<PathBuf>(&bytes).is_ok_and(|endpoint| endpoint == socket)
+            });
+            if matches {
+                navigable.push(reservation);
+            }
+        }
+        Ok(navigable)
+    })
+    .await?;
+    Ok(result)
+}
 type ActiveWaitProjection = (u64, Vec<(NodeId, ReservationId)>);
 
 fn active_waits(
@@ -681,20 +798,23 @@ async fn snapshot_from(
     clock: ResourceClock,
 ) -> Result<ResourceMemory<ServerEvent>, ResourceError> {
     let local_invocations = local_invocations(state, &catalog).await?;
+    let navigable_reservations = navigable_reservations(state, &catalog).await?;
     let waits = active_waits(state)?;
     io(state, move || {
         // Move the full envelopes into the worker, rather than letting precise
         // closure capture retire their leases before execution admission.
         let ((wait_revision, active_waits), wait_hold) = waits.into_parts();
         let (local_invocations, local_hold) = local_invocations.into_parts();
+        let (navigable_reservations, navigation_hold) = navigable_reservations.into_parts();
         let event = ServerEvent::ResourceSnapshot {
             active_waits,
             wait_revision,
             local_invocations,
+            navigable_reservations,
             catalog: projection(catalog.value.clone()),
             clock,
         };
-        drop((wait_hold, local_hold));
+        drop((wait_hold, local_hold, navigation_hold));
         Ok(event)
     })
     .await
@@ -836,6 +956,7 @@ async fn execute(
                 active_waits: Vec::new(),
                 wait_revision: 0,
                 local_invocations: Vec::new(),
+                navigable_reservations: Vec::new(),
                 catalog: ResourceCatalog::default(),
                 clock: now,
                 result: None,
@@ -878,15 +999,21 @@ async fn execute(
         ResourceOperation::Status { reservation_id }
         | ResourceOperation::Wait { reservation_id } => {
             let q = locate(&catalog, &reservation_id)?.clone();
-            let who = actor(state, request.pane_id, &path).await?;
-            if let ResourceActor::Agent(agent) = &who {
+            let who = request_actor(
+                state,
+                request.pane_id,
+                request.external_name.as_deref(),
+                &path,
+            )
+            .await?;
+            if let ResourceActor::Agent(agent) | ResourceActor::External(agent) = &who {
                 if !agent.same_invocation(&q.agent) {
                     return Err(err("actor", "Reservation belongs to another invocation"));
                 }
             }
             if q.state == ReservationState::Owned
                 && q.acquisition_pending
-                && matches!(who, ResourceActor::Agent(_))
+                && matches!(who, ResourceActor::Agent(_) | ResourceActor::External(_))
             {
                 catalog = committed_catalog(
                     commit(
@@ -942,6 +1069,7 @@ async fn execute(
                     | ResourceCommand::ReconcileEligibility
                     | ResourceCommand::ReconcileInvocation { .. }
                     | ResourceCommand::SetSyncDebt { .. }
+                    | ResourceCommand::ClearCustody { .. }
             ) {
                 return Err(err(
                     "system_required",
@@ -984,7 +1112,13 @@ async fn execute(
             }) {
                 return Err(err("project_moved","Project moved; use resource rebind before mutating its resource links or claims"));
             }
-            let who = actor(state, request.pane_id, &path).await?;
+            let who = request_actor(
+                state,
+                request.pane_id,
+                request.external_name.as_deref(),
+                &path,
+            )
+            .await?;
             let replay = request
                 .request_key
                 .as_ref()
@@ -1052,11 +1186,12 @@ async fn execute(
             if matches!(
                 command,
                 ResourceCommand::Reserve { .. }
+                    | ResourceCommand::RegisterCustody { .. }
                     | ResourceCommand::Release { .. }
                     | ResourceCommand::Cancel { .. }
                     | ResourceCommand::Estimate { .. }
                     | ResourceCommand::Acknowledge { .. }
-            ) && !matches!(who, ResourceActor::Agent(_))
+            ) && !matches!(who, ResourceActor::Agent(_) | ResourceActor::External(_))
             {
                 return Err(err(
                     "actor",
@@ -1064,7 +1199,7 @@ async fn execute(
                 ));
             }
             let mut eligibility = evidence(state, &catalog).await?;
-            if let ResourceActor::Agent(a) = &who {
+            if let ResourceActor::Agent(a) | ResourceActor::External(a) = &who {
                 let agent = a.clone();
                 let previous = eligibility;
                 eligibility = Arc::new(
@@ -1126,14 +1261,17 @@ async fn execute(
         }
     }
     let local_invocations = local_invocations(state, &catalog).await?;
+    let navigable_reservations = navigable_reservations(state, &catalog).await?;
     let waits = active_waits(state)?;
     io(state, move || {
         let ((wait_revision, active_waits), wait_hold) = waits.into_parts();
         let (local_invocations, local_hold) = local_invocations.into_parts();
+        let (navigable_reservations, navigation_hold) = navigable_reservations.into_parts();
         let reply = ResourceReply {
             active_waits,
             wait_revision,
             local_invocations,
+            navigable_reservations,
             catalog: projection(catalog.value.clone()),
             clock: now,
             result,
@@ -1141,7 +1279,7 @@ async fn execute(
             recovery_token: token,
             message,
         };
-        drop((wait_hold, local_hold));
+        drop((wait_hold, local_hold, navigation_hold));
         Ok(reply)
     })
     .await
@@ -1179,9 +1317,10 @@ async fn wait(
     let ResourceOperation::Wait { reservation_id } = &request.operation else {
         return Err(err("operation", "Expected wait"));
     };
-    let pane = request
-        .pane_id
-        .ok_or_else(|| err("actor", "Wait requires an agent pane"))?;
+    let pane = request.pane_id;
+    if pane.is_none() && request.external_name.is_none() {
+        return Err(err("actor", "Wait requires an agent pane or external name"));
+    }
     // Authenticate before publishing pane state; rejected callers cannot spoof waiting badges.
     let initial = execute(state, request.clone()).await?;
     if initial
@@ -1192,7 +1331,7 @@ async fn wait(
         return Ok(initial);
     }
     drop(initial);
-    {
+    let _guard = if let Some(pane) = pane {
         let mut waits = service(state)?
             .waits
             .lock()
@@ -1204,11 +1343,13 @@ async fn wait(
                 reservation_id: Some(reservation_id.clone()),
             });
         }
-    }
-    let _guard = WaitGuard {
-        state,
-        pane,
-        reservation: reservation_id.clone(),
+        Some(WaitGuard {
+            state,
+            pane,
+            reservation: reservation_id.clone(),
+        })
+    } else {
+        None
     };
     let mut updates = service(state)?.changed.subscribe();
     let outcome = loop {
@@ -1308,6 +1449,33 @@ fn finish_observation_cycle(interval: &mut tokio::time::Interval) {
     // Disk durability can take longer than one period. Never burst through
     // missed observations and repeatedly reacquire the cross-process lock.
     interval.reset();
+}
+
+/// The catalog can stay at the same revision while panes or invocation proofs
+/// change. Publish those projection changes as well as ledger mutations.
+fn observation_signature(event: &ServerEvent) -> Option<(u64, u64)> {
+    use std::hash::{Hash, Hasher};
+    let ServerEvent::ResourceSnapshot {
+        catalog,
+        local_invocations,
+        navigable_reservations,
+        ..
+    } = event
+    else {
+        return None;
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for agent in local_invocations {
+        agent.project_id.0.hash(&mut hasher);
+        agent.session_id.hash(&mut hasher);
+        agent.pane_id.0.hash(&mut hasher);
+        agent.runtime_generation.hash(&mut hasher);
+        agent.invocation_id.0.hash(&mut hasher);
+    }
+    for id in navigable_reservations {
+        id.0.hash(&mut hasher);
+    }
+    Some((catalog.revision, hasher.finish()))
 }
 
 pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
@@ -1468,13 +1636,10 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
             match outcome {
                 Ok(event) => {
                     busy_cycles = 0;
-                    let revision = match &event.value {
-                        ServerEvent::ResourceSnapshot { catalog, .. } => catalog.revision,
-                        _ => 0,
-                    };
-                    if last != Some(revision) {
+                    let signature = observation_signature(&event.value);
+                    if last != signature {
                         match memory::publish(&state, event) {
-                            Ok(()) => last = Some(revision),
+                            Ok(()) => last = signature,
                             Err(error) => {
                                 tracing::warn!(%error,"Resource event publication refused")
                             }
@@ -1485,7 +1650,7 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                         last = None;
                     }
                     if active {
-                        if let Ok(service) = service(&state) {
+                        if let (Ok(service), Some((revision, _))) = (service(&state), signature) {
                             service.changed.send_replace(revision);
                         }
                     }

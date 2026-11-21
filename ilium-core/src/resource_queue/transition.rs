@@ -64,7 +64,7 @@ fn validate_link(l: &ProjectResourceLink) -> Result<(), ResourceDomainError> {
     bounded(&l.project_path, 4096, true)
 }
 fn validate_agent(a: &AgentIdentity) -> Result<(), ResourceDomainError> {
-    if a.pane_id.0 == 0 {
+    if a.pane_id.0 == 0 && !a.is_external() {
         return Err(error("invalid_agent", "root is not an agent pane"));
     }
     validate_id(&a.project_id.0)?;
@@ -75,7 +75,7 @@ fn validate_agent(a: &AgentIdentity) -> Result<(), ResourceDomainError> {
 }
 /// Validate untrusted decoded catalogs before allowing any mutation.
 pub fn validate_resource_catalog(c: &ResourceCatalog) -> Result<(), ResourceDomainError> {
-    if c.schema_version != 1 {
+    if c.schema_version != 1 && c.schema_version != 2 {
         return Err(error(
             "unsupported_schema",
             "resource catalog schema is not supported",
@@ -96,6 +96,8 @@ pub fn validate_resource_catalog(c: &ResourceCatalog) -> Result<(), ResourceDoma
     let mut pairs = BTreeSet::new();
     let mut physical = BTreeSet::new();
     let mut reservations = BTreeSet::new();
+    let mut custody_workloads = BTreeSet::new();
+    let mut custody_stages = BTreeSet::new();
     let mut invocations = Vec::new();
     let mut total = 0;
     let mut terminal = 0;
@@ -190,6 +192,24 @@ pub fn validate_resource_catalog(c: &ResourceCatalog) -> Result<(), ResourceDoma
                     "invalid reservation identity, ticket, generation or estimate",
                 ));
             }
+            if let Some(intent) = &q.custody {
+                request_created_at(&intent.registration_request_id)?;
+                validate_id(&intent.job_id)?;
+                validate_id(&intent.stage_id)?;
+                validate_id(&intent.workload_invocation_id)?;
+                if c.schema_version != 2
+                    || intent.ownership_generation == 0
+                    || intent.ownership_generation > q.ownership_generation
+                    || !custody_workloads.insert(intent.workload_invocation_id.clone())
+                    || !custody_stages.insert((intent.job_id.clone(), intent.stage_id.clone()))
+                    || (!intent.cleared && !q.state.occupied())
+                {
+                    return Err(error(
+                        "corrupt_catalog",
+                        "invalid custody intent or unoccupied unresolved custody",
+                    ));
+                }
+            }
             if q.ownership_generation > 0 && !generations.insert(q.ownership_generation) {
                 return Err(error("corrupt_catalog", "duplicate ownership generation"));
             }
@@ -234,10 +254,11 @@ pub fn validate_resource_catalog(c: &ResourceCatalog) -> Result<(), ResourceDoma
                     ));
                 }
                 invocations.push(&q.agent);
-                if !c
-                    .links
-                    .iter()
-                    .any(|l| l.project_id == q.agent.project_id && l.resource_id == *id)
+                if !q.agent.is_external()
+                    && !c
+                        .links
+                        .iter()
+                        .any(|l| l.project_id == q.agent.project_id && l.resource_id == *id)
                 {
                     return Err(error(
                         "corrupt_catalog",
@@ -319,7 +340,8 @@ pub fn request_created_at(id: &RequestId) -> Result<i64, ResourceDomainError> {
 }
 fn same_actor(a: &ResourceActor, b: &ResourceActor) -> bool {
     match (a, b) {
-        (ResourceActor::Agent(a), ResourceActor::Agent(b)) => a.same_invocation(b),
+        (ResourceActor::Agent(a), ResourceActor::Agent(b))
+        | (ResourceActor::External(a), ResourceActor::External(b)) => a.same_invocation(b),
         (ResourceActor::User, ResourceActor::User)
         | (ResourceActor::System, ResourceActor::System) => true,
         _ => false,
@@ -345,7 +367,9 @@ fn reason(value: &str) -> Result<(), ResourceDomainError> {
 }
 fn own(q: &Reservation, ctx: &MutationContext) -> Result<(), ResourceDomainError> {
     match &ctx.actor {
-        ResourceActor::Agent(a) if a.same_invocation(&q.agent) => Ok(()),
+        ResourceActor::Agent(a) | ResourceActor::External(a) if a.same_invocation(&q.agent) => {
+            Ok(())
+        }
         _ => Err(error(
             "stale_invocation",
             "only the current owning invocation may mutate this reservation",
@@ -424,6 +448,16 @@ pub fn apply_resource_command(
     catalog: &ResourceCatalog,
     command: ResourceCommand,
     ctx: &MutationContext,
+) -> Result<ResourceTransition, ResourceDomainError> {
+    apply_resource_command_with_verifier(catalog, command, ctx, None)
+}
+/// The caller must supply a host-owned verifier, never one supplied by the requester.
+/// The returned transition must be durably committed before launch or release.
+pub fn apply_resource_command_with_verifier(
+    catalog: &ResourceCatalog,
+    command: ResourceCommand,
+    ctx: &MutationContext,
+    verifier: Option<&dyn CustodyProofVerifier>,
 ) -> Result<ResourceTransition, ResourceDomainError> {
     validate_resource_catalog(catalog)?;
     validate_id(&ctx.clock.boot_id)?;
@@ -660,7 +694,7 @@ pub fn apply_resource_command(
         } => {
             estimate(*estimate_seconds)?;
             validate_id(&rid.0)?;
-            let ResourceActor::Agent(agent) = &ctx.actor else {
+            let (ResourceActor::Agent(agent) | ResourceActor::External(agent)) = &ctx.actor else {
                 return Err(error(
                     "agent_required",
                     "reserve needs a verified live agent invocation",
@@ -673,10 +707,11 @@ pub fn apply_resource_command(
                     "reserve requires fresh live invocation evidence",
                 ));
             }
-            if !c
-                .links
-                .iter()
-                .any(|l| l.resource_id == *id && l.project_id == agent.project_id)
+            if !agent.is_external()
+                && !c
+                    .links
+                    .iter()
+                    .any(|l| l.resource_id == *id && l.project_id == agent.project_id)
             {
                 return Err(error(
                     "not_linked",
@@ -737,11 +772,101 @@ pub fn apply_resource_command(
                     state: ReservationState::Queued,
                     ownership_generation: 0,
                     acquisition_pending: false,
+                    custody: None,
                 });
                 promote(r, ctx)?;
                 reservation_id = Some(rid.clone())
             }
             resource_id = Some(id.clone());
+        }
+        ResourceCommand::RegisterCustody {
+            reservation_id: id,
+            ownership_generation,
+            job_id,
+            stage_id,
+            workload_invocation_id,
+        } => {
+            validate_id(job_id)?;
+            validate_id(stage_id)?;
+            validate_id(workload_invocation_id)?;
+            // Both identities are permanent launch fences, including after clearance and release.
+            if c.resources
+                .values()
+                .flat_map(|r| &r.reservations)
+                .filter_map(|q| q.custody.as_ref())
+                .any(|i| {
+                    i.workload_invocation_id == *workload_invocation_id
+                        || (i.job_id == *job_id && i.stage_id == *stage_id)
+                })
+            {
+                return Err(error(
+                    "custody_identity_reused",
+                    "workload invocation or job stage already has custody",
+                ));
+            }
+            let (r, i) = find_mut(&mut c, id)?;
+            let q = &mut r.reservations[i];
+            own(q, ctx)?;
+            if q.state != ReservationState::Owned || q.ownership_generation != *ownership_generation
+            {
+                return Err(error(
+                    "stale_generation",
+                    "custody intent requires the current owned grant",
+                ));
+            }
+            if q.custody.is_some() {
+                return Err(error(
+                    "custody_exists",
+                    "grant already has a custody intent",
+                ));
+            }
+            q.custody = Some(CustodyIntent {
+                registration_request_id: ctx.request_id.clone(),
+                job_id: job_id.clone(),
+                stage_id: stage_id.clone(),
+                workload_invocation_id: workload_invocation_id.clone(),
+                ownership_generation: *ownership_generation,
+                cleared: false,
+            });
+            resource_id = Some(r.definition.id.clone());
+            reservation_id = Some(id.clone());
+            // Older authorities reject this catalog rather than silently ignoring the fence.
+            c.schema_version = 2;
+        }
+        ResourceCommand::ClearCustody {
+            reservation_id: id,
+            ownership_generation,
+        } => {
+            if !matches!(ctx.actor, ResourceActor::System) {
+                return Err(error(
+                    "system_required",
+                    "custody clearance requires trusted authority",
+                ));
+            }
+            let (r, i) = find_mut(&mut c, id)?;
+            let q = &mut r.reservations[i];
+            let intent = q
+                .custody
+                .as_ref()
+                .ok_or_else(|| error("custody_missing", "no custody intent"))?;
+            if intent.cleared
+                || intent.ownership_generation != *ownership_generation
+                || !q.state.occupied()
+            {
+                return Err(error(
+                    "stale_generation",
+                    "clearance must name the unresolved original grant",
+                ));
+            }
+            if !verifier.is_some_and(|v| v.verify_stopped(&r.definition.id, q, intent)) {
+                return Err(error(
+                    "custody_unverified",
+                    "exact workload stop proof unavailable",
+                ));
+            }
+            q.custody.as_mut().expect("intent checked above").cleared = true;
+            resource_id = Some(r.definition.id.clone());
+            reservation_id = Some(id.clone());
         }
         ResourceCommand::Release {
             reservation_id: id,
@@ -754,6 +879,12 @@ pub fn apply_resource_command(
                 return Err(error(
                     "stale_generation",
                     "release does not name a current occupied generation",
+                ));
+            }
+            if q.custody.as_ref().is_some_and(|i| !i.cleared) {
+                return Err(error(
+                    "custody_unresolved",
+                    "workload stop proof required before release",
                 ));
             }
             q.state = ReservationState::Released;
@@ -879,6 +1010,16 @@ pub fn apply_resource_command(
             if !r.reservations[i].state.occupied() {
                 return Err(error("not_owned", "only an occupied claim can be revoked"));
             }
+            if r.reservations[i]
+                .custody
+                .as_ref()
+                .is_some_and(|i| !i.cleared)
+            {
+                return Err(error(
+                    "custody_unresolved",
+                    "workload stop proof required before revocation",
+                ));
+            }
             r.reservations[i].state = ReservationState::Revoked {
                 reason: why.clone(),
             };
@@ -911,6 +1052,15 @@ pub fn apply_resource_command(
                 return Err(error(
                     "busy",
                     "revoke live owner before confirming device clear",
+                ));
+            }
+            if r.reservations
+                .iter()
+                .any(|q| q.custody.as_ref().is_some_and(|i| !i.cleared))
+            {
+                return Err(error(
+                    "custody_unresolved",
+                    "workload stop proof required before recovery",
                 ));
             }
             for q in &mut r.reservations {
@@ -965,6 +1115,15 @@ pub fn apply_resource_command(
                 return Err(error(
                     "nothing_to_recover",
                     "no stale owner is waiting for recovery",
+                ));
+            }
+            if r.reservations
+                .iter()
+                .any(|q| q.custody.as_ref().is_some_and(|i| !i.cleared))
+            {
+                return Err(error(
+                    "custody_unresolved",
+                    "workload stop proof required before recovery",
                 ));
             }
             for q in &mut r.reservations {
@@ -1112,6 +1271,8 @@ pub fn apply_resource_command(
             .collect();
         r.reservations.retain(|q| {
             q.state.active()
+                // Pruning a cleared intent would permit a previously launched workload to relaunch.
+                || q.custody.is_some()
                 || keep.contains(&q.id)
                 || q.terminal_at.is_some_and(|t| {
                     ctx.clock.unix_millis.saturating_sub(t) <= REQUEST_WINDOW_MILLIS

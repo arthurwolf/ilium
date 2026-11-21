@@ -126,6 +126,9 @@ pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
 pub mod plugin_host;
+mod polling_client;
+mod polling_save;
+pub mod polling_settings;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
@@ -173,6 +176,7 @@ mod session_goal_store;
 mod session_models;
 pub mod session_naming;
 pub mod session_stats;
+mod session_stats_codex_children;
 pub mod session_stats_popover;
 pub mod session_stats_store;
 pub mod session_stats_timeline;
@@ -189,6 +193,13 @@ pub mod status_rule_visual;
 pub mod status_rules_editor;
 pub(crate) mod status_rules_save;
 pub mod status_screen_observations;
+pub mod weekly_usage;
+mod weekly_usage_discovery;
+mod weekly_usage_heat;
+mod weekly_usage_history;
+mod weekly_usage_quota;
+mod weekly_usage_store;
+pub mod weekly_usage_ui;
 /// Typed source custody returned when light-copy shutdown cannot finish.
 pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
@@ -1152,6 +1163,7 @@ async fn run_inner(
     app.apply_reset_planning_settings(config.reset_planning);
     app.apply_attention_settings(config.attention);
     app.apply_cost_settings(config.cost);
+    app.polling_settings = config.polling_detection;
     app.apply_remote_compaction_settings(config.remote_compaction);
     app.apply_debug_settings(config.debug);
     app.apply_api_settings(config.api);
@@ -2339,6 +2351,7 @@ async fn run_inner(
     // File publication is an accepted local side effect. Its warning deadline
     // must not be cancelled by the separate bounded network-request drain.
     // A pending debounced rules write joins the queue the drain below waits for.
+    app.flush_polling_save();
     app.flush_custom_status_rules_save();
     app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {

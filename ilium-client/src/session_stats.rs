@@ -338,6 +338,9 @@ pub struct SessionStats {
 
     pub cost: Option<ReportedCost>,
     pub rate_limits: Vec<(String, RateLimitWindow)>,
+    /// Timestamp of the transcript event that carried these account readings.
+    #[serde(default)]
+    pub rate_limits_at_ms: Option<i64>,
 
     pub samples: Vec<TokenSample>,
     /// Per-minute, per-model token spend including sub-agent calls; the
@@ -353,6 +356,12 @@ pub struct SessionStats {
 
     pub bytes_read: u64,
     pub records_parsed: u64,
+    /// Records over the line limit that were read in bounded form; their
+    /// middle was skipped (usage fields are salvaged when present).
+    #[serde(default)]
+    pub oversized_records: u32,
+    #[serde(default)]
+    pub oversized_bytes: u64,
     #[serde(skip)]
     pub(crate) retention: StatsRetention,
 }
@@ -500,6 +509,12 @@ struct ClaudeCall {
     model: String,
     tokens: TokenTotals,
     sidechain: bool,
+    /// Calls the advisor tool made to a stronger model during this response.
+    /// The CLI reports them only inside `usage.iterations` (type
+    /// `advisor_message`), never in the top-level token counts, yet they are
+    /// billed at the advisor model's own price.
+    #[serde(default)]
+    advisors: Vec<(String, TokenTotals)>,
 }
 
 // JSON object keys cannot represent the timestamp/model pairs used here.
@@ -559,12 +574,22 @@ pub struct StatsAccumulator {
     /// Bytes consumed so far from each sub-agent transcript that belongs to
     /// this session (see [`Self::ingest_extra_file`]).
     extra_offsets: HashMap<PathBuf, u64>,
+    /// Per child rollout of a Codex session (spawned sub-agent threads): its
+    /// own cumulative counter and current model, so deltas never mix threads.
+    #[serde(default)]
+    codex_children: HashMap<PathBuf, (TokenTotals, Option<String>)>,
+    /// While a child rollout is fed, only token spend is recorded: its
+    /// prompts, context and account readings are not this thread's.
+    #[serde(skip)]
+    codex_child_mode: bool,
 
     codex_last_total: TokenTotals,
     codex_model_usage: HashMap<String, (u32, TokenTotals)>,
     codex_totals: TokenTotals,
     codex_current_model: Option<String>,
     codex_rate_limits: Vec<(String, RateLimitWindow)>,
+    #[serde(default)]
+    codex_rate_limits_at_ms: Option<i64>,
     codex_samples: Vec<TokenSample>,
     #[serde(with = "ordered_pairs")]
     codex_spend: BTreeMap<(i64, String), TokenTotals>,
@@ -599,11 +624,14 @@ impl StatsAccumulator {
             claude_call_index: HashMap::new(),
             claude_tool_errors: 0,
             extra_offsets: HashMap::new(),
+            codex_children: HashMap::new(),
+            codex_child_mode: false,
             codex_last_total: TokenTotals::default(),
             codex_model_usage: HashMap::new(),
             codex_totals: TokenTotals::default(),
             codex_current_model: None,
             codex_rate_limits: Vec::new(),
+            codex_rate_limits_at_ms: None,
             codex_samples: Vec::new(),
             codex_spend: BTreeMap::new(),
             codex_quota_last: HashMap::new(),
@@ -663,7 +691,15 @@ impl StatsAccumulator {
             + self
                 .claude_calls
                 .iter()
-                .map(|call| call.model.capacity())
+                .map(|call| {
+                    call.model.capacity()
+                        + call.advisors.capacity() * std::mem::size_of::<(String, TokenTotals)>()
+                        + call
+                            .advisors
+                            .iter()
+                            .map(|(name, _)| name.capacity())
+                            .sum::<usize>()
+                })
                 .sum::<usize>()
             + self
                 .codex_spend
@@ -678,6 +714,7 @@ impl StatsAccumulator {
             + self
                 .extra_offsets
                 .keys()
+                .chain(self.codex_children.keys())
                 .map(|path| path.capacity() + 128)
                 .sum::<usize>()
             + (self.tool_counts.capacity()
@@ -709,32 +746,61 @@ impl StatsAccumulator {
         }
         Ok(())
     }
-    fn read_bounded_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> std::io::Result<usize> {
+    /// Reads one line. A line over `MAX_LINE_BYTES` is never buffered whole:
+    /// only its head and tail (`EDGE_BYTES` each) are kept, the middle is
+    /// discarded as it streams past, and `line` receives a small salvage
+    /// record (see `salvage_oversized`) so valid statistics survive. The
+    /// returned length is the true number of bytes consumed from the file;
+    /// the flag says whether the line was oversized.
+    fn read_bounded_line(
+        reader: &mut impl BufRead,
+        line: &mut Vec<u8>,
+        class: &AgentClass,
+    ) -> std::io::Result<(usize, bool)> {
         const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+        const EDGE_BYTES: usize = 64 * 1024;
         line.clear();
+        let mut total = 0_usize;
+        let mut tail: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
+        let mut oversized = false;
+        let mut ended = false;
         loop {
             let buffer = reader.fill_buf()?;
             if buffer.is_empty() {
-                return Ok(line.len());
+                break;
             }
             let count = buffer
                 .iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(buffer.len(), |index| index + 1);
-            let observed = line.len().saturating_add(count);
-            if observed > MAX_LINE_BYTES {
-                return Err(std::io::Error::other(format!(
-                    "Statistics transcript line size limit reached: used {} bytes, next chunk requires {count}, limit {MAX_LINE_BYTES}, observed at least {observed} (at least {} over); totals incomplete",
-                    line.len(),
-                    observed.saturating_sub(MAX_LINE_BYTES)
-                )));
+            let chunk = &buffer[..count];
+            if !oversized && total + count > MAX_LINE_BYTES {
+                oversized = true;
+                line.truncate(EDGE_BYTES);
             }
-            line.extend_from_slice(&buffer[..count]);
+            if oversized {
+                tail.extend(chunk.iter().copied());
+                let excess = tail.len().saturating_sub(EDGE_BYTES);
+                tail.drain(..excess);
+            } else {
+                line.extend_from_slice(chunk);
+            }
+            total += count;
+            ended = chunk.last() == Some(&b'\n');
             reader.consume(count);
-            if line.last() == Some(&b'\n') {
-                return Ok(line.len());
+            if ended {
+                break;
             }
         }
+        if oversized {
+            let tail: Vec<u8> = tail.into_iter().collect();
+            let mut salvage = salvage_oversized(class, line, &tail);
+            if ended {
+                salvage.push(b'\n');
+            }
+            *line = salvage;
+        }
+        Ok((total, oversized))
     }
 
     /// Bytes consumed so far (always at a line boundary).
@@ -790,7 +856,7 @@ impl StatsAccumulator {
                     "Statistics cancelled; totals incomplete",
                 ));
             }
-            let read = Self::read_bounded_line(&mut reader, &mut line)?;
+            let (read, oversized) = Self::read_bounded_line(&mut reader, &mut line, &self.class)?;
             if read == 0 {
                 break;
             }
@@ -800,11 +866,14 @@ impl StatsAccumulator {
                 break;
             }
             // Resume from the last complete record, never a partial line.
-            if self.offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES {
+            if self.offset > pass_start
+                && self.offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES
+            {
                 break;
             }
             self.offset += read as u64;
             since_progress += read as u64;
+            self.note_oversized(oversized, read);
             self.feed_line(&line);
             self.check_bounds()?;
             if since_progress >= PROGRESS_INTERVAL_BYTES {
@@ -837,19 +906,85 @@ impl StatsAccumulator {
         let pass_start = offset;
         const PASS_BYTES: u64 = 16 * 1024 * 1024;
         loop {
-            let read = Self::read_bounded_line(&mut reader, &mut line)?;
+            let (read, oversized) = Self::read_bounded_line(&mut reader, &mut line, &self.class)?;
             if read == 0 || line.last() != Some(&b'\n') {
                 break;
             }
-            if offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES {
+            if offset > pass_start && offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES {
                 break;
             }
             offset += read as u64;
+            self.note_oversized(oversized, read);
             self.feed_line(&line);
             self.check_bounds()?;
         }
         self.extra_offsets.insert(path.to_path_buf(), offset);
         Ok(())
+    }
+
+    /// Feeds a Codex sub-agent rollout (a thread spawned by this session).
+    /// Codex logs those in their own files with their own cumulative token
+    /// counters, so each file keeps a separate baseline and model, and only
+    /// its token spend joins this session's totals.
+    pub fn ingest_codex_child(&mut self, path: &Path) -> std::io::Result<()> {
+        let file = ilium_platform::secure_fs::open_regular_file(path)?;
+        let length = file.metadata()?.len();
+        let mut offset = self.extra_offsets.get(path).copied().unwrap_or(0);
+        if length <= offset {
+            return Ok(());
+        }
+        let mut reader = BufReader::with_capacity(1 << 20, file);
+        reader.seek(SeekFrom::Start(offset))?;
+        let (mut last_total, mut model) = self.codex_children.remove(path).unwrap_or_default();
+        std::mem::swap(&mut self.codex_last_total, &mut last_total);
+        std::mem::swap(&mut self.codex_current_model, &mut model);
+        self.codex_child_mode = true;
+        let result = self.read_codex_child_lines(&mut reader, &mut offset);
+        self.codex_child_mode = false;
+        std::mem::swap(&mut self.codex_last_total, &mut last_total);
+        std::mem::swap(&mut self.codex_current_model, &mut model);
+        self.codex_children
+            .insert(path.to_path_buf(), (last_total, model));
+        self.extra_offsets.insert(path.to_path_buf(), offset);
+        result?;
+        self.check_bounds()
+    }
+
+    fn read_codex_child_lines(
+        &mut self,
+        reader: &mut BufReader<std::fs::File>,
+        offset: &mut u64,
+    ) -> std::io::Result<()> {
+        let mut line = Vec::new();
+        let pass_start = *offset;
+        const PASS_BYTES: u64 = 16 * 1024 * 1024;
+        loop {
+            let (read, oversized) = Self::read_bounded_line(reader, &mut line, &self.class)?;
+            if read == 0 || line.last() != Some(&b'\n') {
+                break;
+            }
+            if *offset > pass_start && offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES
+            {
+                break;
+            }
+            *offset += read as u64;
+            self.note_oversized(oversized, read);
+            let prefix = &line[..line.len().min(CODEX_PREFIX_BYTES)];
+            if matches!(
+                codex_filters().classify(prefix),
+                Some(CodexLine::TurnContext | CodexLine::TokenCount)
+            ) {
+                self.feed_codex(&line);
+            }
+        }
+        Ok(())
+    }
+
+    fn note_oversized(&mut self, oversized: bool, bytes: usize) {
+        if oversized {
+            self.stats.oversized_records += 1;
+            self.stats.oversized_bytes = self.stats.oversized_bytes.saturating_add(bytes as u64);
+        }
     }
 
     /// Consumes one transcript line. Unknown, malformed, or irrelevant lines
@@ -948,11 +1083,19 @@ impl StatsAccumulator {
             return;
         };
         let tokens = claude_tokens(usage);
+        let advisors = claude_advisor_calls(usage);
         let id = message.get("id").and_then(Value::as_str).unwrap_or("");
         // Every content block of one response repeats the same usage object,
         // so merging by message id (never summing) avoids multi-counting.
         if let Some(&index) = self.claude_call_index.get(id).filter(|_| !id.is_empty()) {
-            self.claude_calls[index].tokens.max_merge(&tokens);
+            let call = &mut self.claude_calls[index];
+            call.tokens.max_merge(&tokens);
+            for (position, (advisor_model, advisor_tokens)) in advisors.into_iter().enumerate() {
+                match call.advisors.get_mut(position) {
+                    Some((_, existing)) => existing.max_merge(&advisor_tokens),
+                    None => call.advisors.push((advisor_model, advisor_tokens)),
+                }
+            }
             return;
         }
         if !id.is_empty() {
@@ -964,6 +1107,7 @@ impl StatsAccumulator {
             model: model.to_string(),
             tokens,
             sidechain,
+            advisors,
         });
     }
 
@@ -1111,9 +1255,13 @@ impl StatsAccumulator {
                 self.touch(at_ms);
                 if let Some(model) = string_at(payload, "model") {
                     self.codex_current_model = Some(model.clone());
-                    self.stats.model = Some(model);
+                    if !self.codex_child_mode {
+                        self.stats.model = Some(model);
+                    }
                 }
-                set_if_some(&mut self.stats.effort, string_at(payload, "effort"));
+                if !self.codex_child_mode {
+                    set_if_some(&mut self.stats.effort, string_at(payload, "effort"));
+                }
             }
             CodexLine::TokenCount => self.codex_token_count(payload, at_ms),
             CodexLine::TaskStarted => {
@@ -1197,7 +1345,10 @@ impl StatsAccumulator {
 
     fn codex_token_count(&mut self, payload: &Value, at_ms: Option<i64>) {
         self.touch(at_ms);
-        if let Some(limits) = payload.get("rate_limits") {
+        if let Some(limits) = payload
+            .get("rate_limits")
+            .filter(|_| !self.codex_child_mode)
+        {
             set_if_some(&mut self.stats.plan_type, string_at(limits, "plan_type"));
             let mut parsed = Vec::new();
             for key in ["primary", "secondary"] {
@@ -1223,12 +1374,17 @@ impl StatsAccumulator {
             }
             if !parsed.is_empty() {
                 self.codex_rate_limits = parsed;
+                self.codex_rate_limits_at_ms = at_ms;
             }
         }
         let Some(info) = payload.get("info").filter(|info| info.is_object()) else {
             return;
         };
-        if let Some(window) = info.get("model_context_window").and_then(Value::as_u64) {
+        if let Some(window) = info
+            .get("model_context_window")
+            .and_then(Value::as_u64)
+            .filter(|_| !self.codex_child_mode)
+        {
             self.stats.context_window = Some(window);
         }
         let Some(total) = info.get("total_token_usage").map(codex_tokens) else {
@@ -1251,6 +1407,7 @@ impl StatsAccumulator {
             .get("last_token_usage")
             .and_then(|last| last.get("input_tokens"))
             .and_then(Value::as_u64);
+        let context = context.filter(|_| !self.codex_child_mode);
         if let Some(context) = context {
             self.stats.context_tokens = Some(context);
             self.stats.peak_context_tokens = self.stats.peak_context_tokens.max(context);
@@ -1269,7 +1426,7 @@ impl StatsAccumulator {
         usage.0 += 1;
         usage.1.add(&delta);
         self.stats.model_calls += 1;
-        if let Some(at_ms) = at_ms {
+        if let Some(at_ms) = at_ms.filter(|_| !self.codex_child_mode) {
             self.push_activity(at_ms);
             push_sample(
                 &mut self.codex_samples,
@@ -1445,6 +1602,12 @@ impl StatsAccumulator {
             let usage = by_model.entry(call.model.as_str()).or_default();
             usage.0 += 1;
             usage.1.add(&call.tokens);
+            for (advisor_model, advisor_tokens) in &call.advisors {
+                stats.tokens.add(advisor_tokens);
+                let usage = by_model.entry(advisor_model.as_str()).or_default();
+                usage.0 += 1;
+                usage.1.add(advisor_tokens);
+            }
             if call.sidechain {
                 continue;
             }
@@ -1474,6 +1637,12 @@ impl StatsAccumulator {
                     .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), call.model.as_str()))
                     .or_default()
                     .add(&call.tokens);
+                for (advisor_model, advisor_tokens) in &call.advisors {
+                    spend
+                        .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), advisor_model.as_str()))
+                        .or_default()
+                        .add(advisor_tokens);
+                }
             }
         }
         stats.spend = spend_buckets(spend.into_iter());
@@ -1496,6 +1665,7 @@ impl StatsAccumulator {
                 .map(|(model, value)| (model.clone(), *value)),
         );
         stats.rate_limits = self.codex_rate_limits.clone();
+        stats.rate_limits_at_ms = self.codex_rate_limits_at_ms;
         stats.quota_spend = self.quota_buckets();
         stats.samples = decimate(self.codex_samples.clone());
         stats.spend = spend_buckets(
@@ -1643,6 +1813,28 @@ fn parse_timestamp_ms(text: &str) -> Option<i64> {
         .map(|time| time.timestamp_millis())
 }
 
+/// Advisor-tool calls of one response: each is a separate billed model call
+/// with its own token counts, listed as `advisor_message` iterations.
+fn claude_advisor_calls(usage: &Value) -> Vec<(String, TokenTotals)> {
+    usage
+        .get("iterations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|iteration| {
+            iteration.get("type").and_then(Value::as_str) == Some("advisor_message")
+        })
+        .map(|iteration| {
+            let model = iteration
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("advisor")
+                .to_string();
+            (model, claude_tokens(iteration))
+        })
+        .collect()
+}
+
 fn claude_tokens(usage: &Value) -> TokenTotals {
     let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
     TokenTotals {
@@ -1707,6 +1899,62 @@ fn is_claude_synthetic_prompt(text: &str) -> bool {
         || text.starts_with(
             "Caveat: The messages below were generated by the user while running local commands",
         )
+}
+
+/// Builds a small stand-in record for an oversized line from its head and
+/// tail. Claude assistant records keep `model`, `usage` and the timestamp
+/// near an edge, so the token counts survive; every other oversized record
+/// (tool output, images, API blobs) becomes an empty line and is skipped.
+fn salvage_oversized(class: &AgentClass, head: &[u8], tail: &[u8]) -> Vec<u8> {
+    if !matches!(class, AgentClass::Claude) {
+        return Vec::new();
+    }
+    static FIELDS: OnceLock<[Regex; 6]> = OnceLock::new();
+    let fields = FIELDS.get_or_init(|| {
+        [
+            Regex::new(r#""timestamp":\s*"([^"\\]{1,40})""#).expect("static regex"),
+            Regex::new(r#""model":\s*"([^"\\]{1,80})""#).expect("static regex"),
+            Regex::new(r#""id":\s*"(msg_[A-Za-z0-9_]{1,80})""#).expect("static regex"),
+            Regex::new(r#""usage":\s*(\{(?:[^{}]|\{[^{}]*\})*\})"#).expect("static regex"),
+            Regex::new(r#""isSidechain":\s*(true|false)"#).expect("static regex"),
+            Regex::new(r#""type":\s*"assistant""#).expect("static regex"),
+        ]
+    });
+    if !fields[5].is_match(head) {
+        return Vec::new();
+    }
+    let find = |index: usize| -> Option<Vec<u8>> {
+        [tail, head].iter().find_map(|part| {
+            fields[index]
+                .captures_iter(part)
+                .last()
+                .and_then(|captures| captures.get(1))
+                .map(|found| found.as_bytes().to_vec())
+        })
+    };
+    let (Some(usage), Some(model)) = (find(3), find(1)) else {
+        return Vec::new();
+    };
+    let mut record = Vec::with_capacity(usage.len() + 256);
+    record.extend_from_slice(br#"{"type":"assistant","isSidechain":"#);
+    record.extend_from_slice(&find(4).unwrap_or_else(|| b"false".to_vec()));
+    if let Some(timestamp) = find(0) {
+        record.extend_from_slice(br#","timestamp":""#);
+        record.extend_from_slice(&timestamp);
+        record.push(b'"');
+    }
+    record.extend_from_slice(br#","message":{"model":""#);
+    record.extend_from_slice(&model);
+    record.push(b'"');
+    if let Some(id) = find(2) {
+        record.extend_from_slice(br#","id":""#);
+        record.extend_from_slice(&id);
+        record.push(b'"');
+    }
+    record.extend_from_slice(br#","usage":"#);
+    record.extend_from_slice(&usage);
+    record.extend_from_slice(b"}}");
+    record
 }
 
 struct ClaudeFilters {
@@ -2040,6 +2288,10 @@ mod tests {
         assert_eq!(stats.plan_type.as_deref(), Some("pro"));
         assert_eq!(stats.provider.as_deref(), Some("OpenAI"));
         assert_eq!(stats.rate_limits.len(), 1);
+        assert_eq!(
+            stats.rate_limits_at_ms,
+            parse_timestamp_ms("2026-09-20T02:58:20.209Z")
+        );
         assert!((stats.rate_limits[0].1.used_percent - 74.0).abs() < 1e-9);
         assert_eq!(
             stats.first_at_ms,
@@ -2167,19 +2419,272 @@ mod tests {
         assert_eq!(buckets.iter().map(|b| b.events).sum::<u32>(), 3);
     }
 
+    /// Manual real-data check: `ILIUM_REAL_TRANSCRIPT=<file> ILIUM_REAL_CLASS=claude|codex`.
     #[test]
-    fn oversized_complete_line_is_explicitly_incomplete_and_does_not_advance_offset() {
+    #[ignore = "reads a real transcript named by ILIUM_REAL_TRANSCRIPT"]
+    fn real_transcript_totals_for_manual_comparison() {
+        let Ok(path) = std::env::var("ILIUM_REAL_TRANSCRIPT") else {
+            return;
+        };
+        let class = if std::env::var("ILIUM_REAL_CLASS").as_deref() == Ok("codex") {
+            AgentClass::Codex
+        } else {
+            AgentClass::Claude
+        };
+        let mut accumulator = StatsAccumulator::new(class);
+        let path = std::path::PathBuf::from(path);
+        while {
+            let before = accumulator.offset();
+            accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+            accumulator.offset() != before
+        } {}
+        let stats = accumulator.snapshot();
+        let mut per_model: std::collections::BTreeMap<String, [u64; 4]> = Default::default();
+        for bucket in &stats.spend {
+            let entry = per_model.entry(bucket.model.to_string()).or_default();
+            entry[0] += bucket.tokens.input;
+            entry[1] += bucket.tokens.cache_read;
+            entry[2] += bucket.tokens.cache_write;
+            entry[3] += bucket.tokens.output;
+        }
+        println!(
+            "REAL oversized={} models={per_model:?}",
+            stats.oversized_records
+        );
+    }
+
+    #[test]
+    fn oversized_irrelevant_line_is_skipped_and_later_records_still_count() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("synthetic-oversized.jsonl");
         let mut bytes = vec![b'x'; 4 * 1024 * 1024 + 1];
         bytes.push(b'\n');
+        bytes.extend_from_slice(
+            claude_assistant("msg_9", 7, "2026-11-10T10:00:00.000Z", None).as_bytes(),
+        );
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert_eq!(accumulator.offset(), bytes.len() as u64);
+        let stats = accumulator.snapshot();
+        assert_eq!(stats.oversized_records, 1);
+        assert_eq!(stats.tokens.output, 7);
+    }
+
+    /// Manual check against a real rollout:
+    /// `ILIUM_REAL_CODEX_ROLLOUT=<parent.jsonl> <test binary> real_codex_family_report --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_codex_family_report() {
+        let Ok(path) = std::env::var("ILIUM_REAL_CODEX_ROLLOUT") else {
+            println!("set ILIUM_REAL_CODEX_ROLLOUT to a parent rollout file");
+            return;
+        };
+        let main = std::path::PathBuf::from(path);
+        let started = std::time::Instant::now();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        // The store reads a bounded slice per pass and repeats until caught up.
+        let mut main_total = TokenTotals::default();
+        let mut children = Vec::new();
+        for pass in 0..10_000 {
+            let before = (
+                accumulator.offset(),
+                accumulator.extra_offsets.values().sum::<u64>(),
+            );
+            accumulator.ingest_file(&main, |_, _, _| {}).unwrap();
+            if pass == 0 || children.is_empty() {
+                children = crate::session_stats_codex_children::children_of(&main);
+            }
+            for child in &children {
+                accumulator.ingest_codex_child(child).unwrap();
+            }
+            let after = (
+                accumulator.offset(),
+                accumulator.extra_offsets.values().sum::<u64>(),
+            );
+            if before == after {
+                break;
+            }
+        }
+        // The main file alone, for comparison with the family total.
+        let mut main_only = StatsAccumulator::new(AgentClass::Codex);
+        loop {
+            let before = main_only.offset();
+            main_only.ingest_file(&main, |_, _, _| {}).unwrap();
+            if main_only.offset() == before {
+                break;
+            }
+        }
+        main_total.add(&main_only.snapshot().tokens);
+        let stats = accumulator.snapshot();
+        println!(
+            "children={} main_input={} main_cache_read={} main_output={}",
+            children.len(),
+            main_total.input,
+            main_total.cache_read,
+            main_total.output
+        );
+        println!(
+            "family_input={} family_cache_read={} family_cache_write={} family_output={} models={} spend_buckets={}",
+            stats.tokens.input,
+            stats.tokens.cache_read,
+            stats.tokens.cache_write,
+            stats.tokens.output,
+            stats.models.len(),
+            stats.spend.len()
+        );
+        println!(
+            "retained_bytes={} elapsed_ms={}",
+            accumulator.retained_bytes() + stats.retained_bytes(),
+            started.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn advisor_tool_calls_are_billed_to_the_advisor_model_once_per_response() {
+        let record = |block: &str| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-11-10T10:00:10.000Z","message":{{"id":"m1","model":"claude-opus-5-5","content":[{block}],"usage":{{"input_tokens":4,"output_tokens":10,"iterations":[{{"type":"message","input_tokens":4,"output_tokens":10}},{{"type":"advisor_message","model":"claude-fable-5-2","input_tokens":1000,"output_tokens":200}}]}}}}}}"#
+            )
+        };
+        // Two content blocks of the same response repeat the usage object.
+        let stats = feed(
+            AgentClass::Claude,
+            &[
+                &record(r#"{"type":"text","text":"a"}"#),
+                &record(r#"{"type":"text","text":"b"}"#),
+            ],
+        );
+        let fable = stats
+            .models
+            .iter()
+            .find(|usage| usage.model == "claude-fable-5-2")
+            .expect("advisor model is listed");
+        assert_eq!((fable.tokens.input, fable.tokens.output), (1000, 200));
+        let opus = stats
+            .models
+            .iter()
+            .find(|usage| usage.model == "claude-opus-5-5")
+            .unwrap();
+        assert_eq!((opus.tokens.input, opus.tokens.output), (4, 10));
+        assert!(stats
+            .spend
+            .iter()
+            .any(|bucket| &*bucket.model == "claude-fable-5-2"));
+    }
+
+    #[test]
+    fn codex_sub_agent_threads_add_their_own_spend_without_mixing_counters() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = |model: &str, at: &str| {
+            format!(
+                r#"{{"timestamp":"{at}","type":"turn_context","payload":{{"model":"{model}","effort":"high"}}}}"#
+            )
+        };
+        let main = directory.path().join("main.jsonl");
+        std::fs::write(
+            &main,
+            format!(
+                "{}\n{}\n",
+                context("gpt-6.1-sol", "2026-11-10T10:00:00.000Z"),
+                codex_token_count((100, 0, 10, 0), 100, "2026-11-10T10:01:00.000Z")
+            ),
+        )
+        .unwrap();
+        // The child's cumulative counter restarts at zero and uses another model.
+        let child = directory.path().join("child.jsonl");
+        std::fs::write(
+            &child,
+            format!(
+                "{}\n{}\n{}\n",
+                context("gpt-6.1-luna", "2026-11-10T10:02:00.000Z"),
+                codex_token_count((50, 0, 5, 0), 50, "2026-11-10T10:03:00.000Z"),
+                codex_token_count((80, 0, 9, 0), 30, "2026-11-10T10:04:00.000Z")
+            ),
+        )
+        .unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        accumulator.ingest_file(&main, |_, _, _| {}).unwrap();
+        accumulator.ingest_codex_child(&child).unwrap();
+        // A second pass must not count the child again.
+        accumulator.ingest_codex_child(&child).unwrap();
+        let stats = accumulator.snapshot();
+        assert_eq!(stats.tokens.input, 180);
+        assert_eq!(stats.tokens.output, 19);
+        let mut models: Vec<_> = stats
+            .models
+            .iter()
+            .map(|usage| (usage.model.clone(), usage.tokens.input))
+            .collect();
+        models.sort();
+        assert_eq!(
+            models,
+            vec![
+                ("gpt-6.1-luna".to_owned(), 80),
+                ("gpt-6.1-sol".to_owned(), 100)
+            ]
+        );
+        // The child never redefines the parent's displayed model or context.
+        assert_eq!(stats.model.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(stats.context_tokens, Some(100));
+        assert!(stats
+            .spend
+            .iter()
+            .any(|bucket| &*bucket.model == "gpt-6.1-luna"));
+    }
+
+    #[test]
+    fn oversized_claude_assistant_record_keeps_its_usage() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-oversized-assistant.jsonl");
+        let filler = "y".repeat(5 * 1024 * 1024);
+        let line = format!(
+            r#"{{"isSidechain":true,"type":"assistant","timestamp":"2026-11-10T10:00:00.000Z","message":{{"model":"claude-sonnet-5","id":"msg_big","role":"assistant","content":[{{"type":"text","text":"{filler}"}}],"usage":{{"input_tokens":3,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":42}}}}}}"#
+        );
+        let mut bytes = line.into_bytes();
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+        accumulator.ingest_extra_file(&path).unwrap();
+        let stats = accumulator.snapshot();
+        assert_eq!(stats.oversized_records, 1);
+        assert_eq!(stats.tokens.output, 42);
+        assert_eq!(stats.tokens.cache_read, 1000);
+    }
+
+    #[test]
+    fn a_line_larger_than_the_pass_budget_still_makes_progress() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-huge.jsonl");
+        let mut bytes = br#"{"type":"response_item","payload":""#.to_vec();
+        bytes.extend(vec![b'z'; 17 * 1024 * 1024]);
+        bytes.extend_from_slice(b"\"}\n{}\n");
         std::fs::write(&path, &bytes).unwrap();
         let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
-        let error = accumulator.ingest_file(&path, |_, _, _| {}).unwrap_err();
-        assert!(error.to_string().contains("totals incomplete"));
-        assert_eq!(accumulator.offset(), 0);
-        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert!(
+            accumulator.offset() > 17 * 1024 * 1024,
+            "huge line consumed"
+        );
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert_eq!(accumulator.offset(), bytes.len() as u64);
     }
+
+    #[test]
+    fn oversized_codex_record_is_skipped_without_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-oversized-codex.jsonl");
+        let mut bytes = br#"{"type":"response_item","payload":""#.to_vec();
+        bytes.extend(vec![b'z'; 6 * 1024 * 1024]);
+        bytes.extend_from_slice(b"\"}\n");
+        std::fs::write(&path, &bytes).unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert_eq!(accumulator.offset(), bytes.len() as u64);
+        assert_eq!(accumulator.snapshot().oversized_records, 1);
+    }
+
     #[test]
     fn cancellation_preserves_the_last_complete_record_offset() {
         let directory = tempfile::tempdir().unwrap();

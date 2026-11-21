@@ -25,6 +25,7 @@ use ilium::session;
 mod broadcast;
 mod close_pane;
 mod ctl;
+mod external_task;
 mod pane_filter;
 mod pane_scan;
 mod panes;
@@ -93,6 +94,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Read or update the external-task ledger of a loopback Ilium server.
+    ExternalTask(external_task::ExternalTaskArgs),
     /// Coordinate exclusive shared GPU and USB-board reservations.
     #[command(alias = "ressource")]
     Resource(resource::ResourceArgs),
@@ -552,6 +555,7 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
         Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
+        Some(Command::ExternalTask(args)) => external_task::run(args).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,

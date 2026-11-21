@@ -62,6 +62,7 @@ pub mod detached;
 pub mod disk_space;
 pub mod file_identity;
 pub mod file_lock;
+pub mod file_lock_owner;
 pub mod flatpak_host;
 #[cfg(unix)]
 pub mod interruptible_reader;

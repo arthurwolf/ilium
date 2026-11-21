@@ -1145,6 +1145,23 @@ pub enum ClientRequest {
         pane_id: NodeId,
         command_line: String,
     },
+    /// Secret-free polling projections and advisory operations.
+    Polling {
+        request_id: u64,
+        operation: crate::polling::PollingOperation,
+    },
+    /// Private detector handshake; authority is the kernel peer and held lease,
+    /// never this payload. Ordinary polling projections grant no evidence access.
+    SubscribePollingEvidence {
+        request_id: u64,
+        subscription: crate::polling::PollingEvidenceSubscription,
+    },
+    /// Moves every pane and folder entry under one project to the project's
+    /// top level and removes the groups and split views left empty.
+    /// Appended last to keep every earlier bincode discriminant stable.
+    FlattenProject {
+        project_id: NodeId,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1162,6 +1179,8 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::Polling { .. } => "polling",
+            Self::SubscribePollingEvidence { .. } => "subscribe_polling_evidence",
             Self::MonitoringEvents { .. } => "monitoring_events",
             Self::MonitoringAck { .. } => "monitoring_ack",
             Self::ControlWrite { .. } => "control_write",
@@ -1185,6 +1204,7 @@ impl ClientRequest {
             Self::KillSession => "kill_session",
             Self::NewGroup { .. } => "new_group",
             Self::ReparentNode { .. } => "reparent_node",
+            Self::FlattenProject { .. } => "flatten_project",
             Self::SetAutomaticPaneTitle { .. } => "set_automatic_pane_title",
             Self::SetPaneFocus { .. } => "set_pane_focus",
             Self::RestartServer => "restart_server",
@@ -1786,6 +1806,7 @@ pub enum ServerEvent {
         catalog: ilium_core::resource_queue::ResourceCatalog,
         clock: ilium_core::resource_queue::ResourceClock,
         local_invocations: Vec<ilium_core::resource_queue::AgentIdentity>,
+        navigable_reservations: Vec<ilium_core::resource_queue::ReservationId>,
     },
     ResourceResult {
         request_id: u64,
@@ -1827,5 +1848,15 @@ pub enum ServerEvent {
     MonitoringAck {
         request_id: u64,
         result: Result<String, String>,
+    },
+    /// Correlated polling projection; private activity is never included.
+    Polling {
+        request_id: u64,
+        reply: crate::polling::PollingReply,
+    },
+    /// Private direct delivery; never place this on the session event bus.
+    PollingEvidence {
+        subscription_id: u64,
+        event: crate::polling::PollingFeedEvent,
     },
 }

@@ -176,6 +176,14 @@ async fn async_main(
         }
     };
     let options = ilium_server::ServerOptions {
+        polling_paths: directories::ProjectDirs::from("", "", "ilium").map(|directories| {
+            let data_directory = directories.data_local_dir().join("polling");
+            ilium_server::PollingPaths {
+                config_directory: config_dir.clone(),
+                registry_directory: data_directory.join("sessions"),
+                data_directory,
+            }
+        }),
         resource_catalog_path: directories::ProjectDirs::from("", "", "ilium")
             .map(|directories| directories.data_local_dir().join("resources/catalog.json")),
         session_name: launch.session_name,

@@ -14,7 +14,7 @@ use crate::execution::{ExecutionClient, ExecutionError};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use ilium_core::{BuiltinAgentProvider, ROOT_ID};
 use ilium_execution::{JobCost, Lane, Retained, Retention};
@@ -42,6 +42,10 @@ pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::ta
         let router = Router::new()
             .route("/create_agent", post(create_agent))
             .route("/v1/agents", post(create_agent))
+            .route(
+                "/v1/external-tasks",
+                get(list_external_tasks).post(update_external_task),
+            )
             .merge(crate::http_control::routes())
             .layer(axum::middleware::from_fn_with_state(
                 Arc::clone(&state),
@@ -52,6 +56,125 @@ pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::ta
             tracing::error!(%address, %error, "loopback HTTP API stopped");
         }
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExternalTaskRequest {
+    key: ilium_core::external_tasks::ExternalTaskKey,
+    observation: ilium_core::external_tasks::ExternalTaskObservation,
+}
+
+/// Read the durable task ledger, including tombstones required to resume sequencing.
+async fn list_external_tasks(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response, ApiError> {
+    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+        return Err(api_error(
+            StatusCode::UNAUTHORIZED,
+            "external task reads require an access token",
+        ));
+    }
+    let path = state.snapshot_path.with_extension("external-tasks.json");
+    let client = &state
+        .execution
+        .get()
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "external task execution unavailable",
+            )
+        })?
+        .client;
+    let result = client
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 32 * 1024 * 1024,
+                result_bytes: 32 * 1024 * 1024,
+            },
+            move |_| {
+                let store = crate::external_tasks::ExternalTaskStore::new(path)
+                    .map_err(|error| error.to_string())?;
+                let tasks = store.snapshot().map_err(|error| error.to_string())?;
+                Ok::<_, String>(
+                    tasks
+                        .entries()
+                        .map(|(key, observation)| (key.clone(), observation.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            },
+        )
+        .await
+        .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    let (entries, retention) = result.into_parts();
+    state.clear_blocking_error(None, "external_tasks");
+    Ok(json_response(
+        StatusCode::OK,
+        &entries,
+        Some(Arc::new(retention)),
+    ))
+}
+
+/// Persist one producer observation; a `null` value is an ordered removal.
+async fn update_external_task(
+    State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
+    Json(request): Json<ExternalTaskRequest>,
+) -> Result<Response, ApiError> {
+    crate::control_access::audit(
+        &state,
+        level,
+        None,
+        "external_task_update",
+        serde_json::json!({"producer": &request.key.producer, "job": &request.key.job}),
+    )
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let path = state.snapshot_path.with_extension("external-tasks.json");
+    let client = &state
+        .execution
+        .get()
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "external task execution unavailable",
+            )
+        })?
+        .client;
+    let result = client
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 32 * 1024 * 1024,
+                result_bytes: 4096,
+            },
+            move |_| {
+                let store = crate::external_tasks::ExternalTaskStore::new(path)
+                    .map_err(|error| error.to_string())?;
+                store
+                    .update(request.key, request.observation)
+                    .map_err(|error| error.to_string())
+            },
+        )
+        .await
+        .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    state.clear_blocking_error(None, "external_tasks");
+    use ilium_core::external_tasks::ExternalTaskUpdate;
+    let (status, outcome) = match result.view() {
+        ExternalTaskUpdate::Applied => (StatusCode::OK, "applied"),
+        ExternalTaskUpdate::Replay => (StatusCode::OK, "replay"),
+        ExternalTaskUpdate::Stale => (StatusCode::CONFLICT, "stale"),
+        ExternalTaskUpdate::Conflict => (StatusCode::CONFLICT, "conflict"),
+        ExternalTaskUpdate::Invalid => (StatusCode::BAD_REQUEST, "invalid"),
+        ExternalTaskUpdate::CapacityExceeded => (StatusCode::SERVICE_UNAVAILABLE, "capacity"),
+    };
+    Ok(json_response(
+        status,
+        &serde_json::json!({"outcome": outcome}),
+        None,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -543,6 +666,19 @@ fn project_name_candidates_bounded(
 #[cfg(test)]
 mod tests {
     use super::{project_name_candidates, CreateAgentRequest, HttpWorkspaceSpec};
+
+    #[test]
+    fn external_task_request_accepts_ordered_removal_and_rejects_unknown_fields() {
+        let request = serde_json::json!({
+            "key": {"producer": "fixture", "job": "job-1"},
+            "observation": {"sequence": 2, "value": null}
+        });
+        let decoded: super::ExternalTaskRequest = serde_json::from_value(request.clone()).unwrap();
+        assert!(decoded.observation.value.is_none());
+        let mut invalid = request;
+        invalid["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<super::ExternalTaskRequest>(invalid).is_err());
+    }
 
     #[test]
     fn create_agent_request_accepts_server_chosen_worktree_path_and_legacy_shape() {

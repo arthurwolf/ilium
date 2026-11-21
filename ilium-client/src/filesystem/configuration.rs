@@ -30,6 +30,7 @@ pub enum ConfigurationChange {
     ResetPlanning(crate::reset_planning::ResetPlanningSettings),
     Attention(crate::attention::AttentionSettings),
     Cost(crate::cost_settings::CostSettings),
+    PollingDetection(ilium_core::polling_detection::PollingSettings),
     RemoteCompaction(crate::remote_compaction_settings::RemoteCompactionSettings),
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
@@ -133,6 +134,10 @@ impl Job for ConfigurationWrite {
                 .map(|()| ConfigurationSaved::Plain),
             Cost(value) => crate::config::save_cost_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
+            PollingDetection(value) => {
+                crate::config::save_polling_detection_settings(directory, &value)
+                    .map(|()| ConfigurationSaved::Plain)
+            }
             RemoteCompaction(value) => {
                 crate::config::save_remote_compaction_settings(directory, &value)
                     .map(|()| ConfigurationSaved::Plain)
@@ -282,6 +287,7 @@ impl ConfigurationChange {
                     + value.icons.lock.capacity()
                     + value.icons.frozen_agent.capacity()
                     + value.icons.toolbar_search.capacity()
+                    + value.icons.toolbar_weekly_usage.capacity()
                     + value.icons.toolbar_restructure.capacity()
                     + value.icons.toolbar_settings.capacity()
                     + value.icons.row_rename.capacity()
@@ -349,6 +355,7 @@ impl ConfigurationChange {
             ResetPlanning(value) => serialized_bound(value)?,
             Attention(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
+            PollingDetection(value) => serialized_bound(value)?,
             RemoteCompaction(value) => serialized_bound(value)?,
             Onboarding(value) => serialized_bound(value)?,
             Sound(value) => serialized_bound(value)?,

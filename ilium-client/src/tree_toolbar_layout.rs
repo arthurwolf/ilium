@@ -22,6 +22,7 @@ pub enum TreeToolbarEntry {
     Split,
     Folder,
     ActivityFilter,
+    WeeklyUsage,
     Restructure,
     Settings,
     CustomAgent(String),
@@ -29,7 +30,7 @@ pub enum TreeToolbarEntry {
 
 impl TreeToolbarEntry {
     /// The built-in entries; custom agents are added per profile.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Search,
         Self::Project,
         Self::Shell,
@@ -42,6 +43,7 @@ impl TreeToolbarEntry {
         Self::Split,
         Self::Folder,
         Self::ActivityFilter,
+        Self::WeeklyUsage,
         Self::Restructure,
         Self::Settings,
     ];
@@ -78,6 +80,7 @@ impl TreeToolbarEntry {
             Self::Split => "split",
             Self::Folder => "folder",
             Self::ActivityFilter => "activity_filter",
+            Self::WeeklyUsage => "weekly_usage",
             Self::Restructure => "restructure",
             Self::Settings => "settings",
         }
@@ -111,7 +114,10 @@ pub struct TreeToolbarLayout {
 impl Default for TreeToolbarLayout {
     fn default() -> Self {
         Self {
-            entries: TreeToolbarEntry::ALL.to_vec(),
+            entries: TreeToolbarEntry::ALL
+                .into_iter()
+                .filter(|entry| *entry != TreeToolbarEntry::WeeklyUsage)
+                .collect(),
             known_custom_agents: Vec::new(),
         }
     }
@@ -261,12 +267,45 @@ mod tests {
         assert!(!layout.reconcile_custom_agents(&ids));
         assert_eq!(
             layout.available(&ids),
-            vec![TreeToolbarEntry::CustomAgent("a".into())]
+            vec![
+                TreeToolbarEntry::WeeklyUsage,
+                TreeToolbarEntry::CustomAgent("a".into())
+            ]
         );
         assert!(layout.reconcile_custom_agents(&["b".to_owned()]));
         assert!(!layout
             .entries
             .contains(&TreeToolbarEntry::CustomAgent("a".into())));
+    }
+
+    #[test]
+    fn weekly_usage_is_available_but_not_a_default_toolbar_entry() {
+        let layout = TreeToolbarLayout::default();
+        assert!(layout
+            .entries
+            .iter()
+            .all(|entry| entry.key() != "weekly_usage"));
+        assert!(layout
+            .available(&[])
+            .iter()
+            .any(|entry| entry.key() == "weekly_usage"));
+    }
+
+    #[test]
+    fn old_customized_layout_does_not_gain_weekly_usage() {
+        let layout: TreeToolbarLayout =
+            toml::from_str("entries = [\"search\", \"settings\"]\nknown_custom_agents = []\n")
+                .unwrap();
+        assert_eq!(
+            layout.entries,
+            vec![TreeToolbarEntry::Search, TreeToolbarEntry::Settings]
+        );
+        assert!(layout
+            .available(&[])
+            .contains(&TreeToolbarEntry::WeeklyUsage));
+        let encoded = toml::to_string(&layout).unwrap();
+        let restored: TreeToolbarLayout = toml::from_str(&encoded).unwrap();
+        assert_eq!(restored, layout);
     }
 
     #[test]

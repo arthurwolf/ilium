@@ -17,8 +17,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 
 mod relay;
+mod secret_redaction;
 mod service;
 pub use relay::{LogRelayEndpoint, LogRelayServer};
+pub use secret_redaction::{redact_secrets, Redacted, REDACTION_MARKER};
 pub use service::{
     logger_control_bytes, logger_storage_bytes, LoggingHealth, LoggingReceipt, LoggingShutdown,
     LoggingShutdownDeadline, LoggingShutdownReport, LOGGER_STACK_BYTES, MAX_EVENT_BYTES,

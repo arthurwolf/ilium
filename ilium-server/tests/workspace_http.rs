@@ -75,9 +75,14 @@ impl Drop for IsolatedHttpServer {
 
 impl IsolatedHttpServer {
     async fn start() -> Self {
+        let scratch = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/data/ilium-resource-queue-tests"));
+        std::fs::create_dir_all(&scratch).expect("isolated test scratch");
+        std::fs::write(scratch.join(".scratch-reaper"), b"").expect("mark test scratch");
         let root = tempfile::Builder::new()
             .prefix("iwh")
-            .tempdir_in("/tmp")
+            .tempdir_in(scratch)
             .expect("short isolated test root");
         let project = ilium_platform::paths::canonicalize(root.path())
             .expect("canonical fixture root")
@@ -600,6 +605,92 @@ async fn control_post(
         head.split_whitespace().nth(1).unwrap().parse().unwrap(),
         body.into(),
     )
+}
+
+async fn external_task_request(
+    server: &IsolatedHttpServer,
+    method: &str,
+    token: Option<&str>,
+    value: Option<Value>,
+) -> (u16, String) {
+    let body = value.map(|value| value.to_string()).unwrap_or_default();
+    let authorization = token
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+        .await
+        .unwrap();
+    stream.write_all(format!("{method} /v1/external-tasks HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", server.port, body.len()).as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (
+        head.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        body.into(),
+    )
+}
+
+#[tokio::test]
+async fn external_tasks_require_tokens_and_fence_removals_against_stale_updates() {
+    let server = IsolatedHttpServer::start().await;
+    let tokens: Value = serde_json::from_reader(
+        std::fs::File::open(server.socket.with_extension("ctl-tokens.json")).unwrap(),
+    )
+    .unwrap();
+    let read = tokens["read"].as_str().unwrap();
+    let act = tokens["act"].as_str().unwrap();
+    let update = json!({"key":{"producer":"fixture","job":"one"},"observation":{"sequence":1,"value":{"title":"fixture","status":"running"}}});
+    assert_eq!(
+        external_task_request(&server, "GET", None, None).await.0,
+        401
+    );
+    assert_eq!(
+        external_task_request(&server, "GET", Some("invalid"), None)
+            .await
+            .0,
+        401
+    );
+    assert_eq!(
+        external_task_request(&server, "POST", Some(read), Some(update.clone()))
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        external_task_request(&server, "POST", Some(act), Some(update.clone()))
+            .await
+            .0,
+        200
+    );
+    let removal =
+        json!({"key":{"producer":"fixture","job":"one"},"observation":{"sequence":2,"value":null}});
+    assert_eq!(
+        external_task_request(&server, "POST", Some(act), Some(removal.clone()))
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        external_task_request(&server, "POST", Some(act), Some(removal))
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        external_task_request(&server, "POST", Some(act), Some(update))
+            .await
+            .0,
+        409
+    );
+    let (status, body) = external_task_request(&server, "GET", Some(read), None).await;
+    assert_eq!(status, 200, "{body}");
+    let records: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(records[0][1]["sequence"], 2);
+    assert!(records[0][1]["value"].is_null());
 }
 
 #[tokio::test]

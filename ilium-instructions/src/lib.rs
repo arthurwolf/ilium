@@ -171,6 +171,31 @@ pub fn global_claude_path() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".claude/CLAUDE.md"))
 }
 
+/// Known global provider instruction targets, resolved when they exist.
+pub fn global_agent_instruction_paths() -> std::collections::BTreeSet<PathBuf> {
+    let Some(claude) = global_claude_path() else {
+        return std::collections::BTreeSet::new();
+    };
+    let Some(home) = claude.parent().and_then(Path::parent) else {
+        return std::collections::BTreeSet::new();
+    };
+    [
+        claude.clone(),
+        home.join(".codex/AGENTS.md"),
+        home.join(".gemini/GEMINI.md"),
+    ]
+    .into_iter()
+    .map(|path| {
+        path.canonicalize().unwrap_or_else(|_| {
+            path.parent()
+                .and_then(|parent| parent.canonicalize().ok())
+                .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+                .unwrap_or(path)
+        })
+    })
+    .collect()
+}
+
 pub fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetupStatus> {
     status_with_policy(path, feature, global_claude_path().as_deref())
 }

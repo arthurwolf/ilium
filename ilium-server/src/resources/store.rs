@@ -92,13 +92,44 @@ impl ResourceStore {
     fn locked(&self) -> Result<ResourceLedgerFile, ResourceStoreError> {
         ResourceLedgerFile::try_lock(&self.catalog_path)?.ok_or(ResourceStoreError::Busy)
     }
+    // The catalog lock is always acquired first. The two suffixes ensure that
+    // with_extension("lock") yields a distinct name even for extensionless catalogs.
+    fn custody_witness(&self) -> Result<ResourceLedgerFile, ResourceStoreError> {
+        let mut name = self.catalog_path.as_os_str().to_os_string();
+        name.push(".custody-witness.data");
+        ResourceLedgerFile::try_lock(Path::new(&name))?.ok_or(ResourceStoreError::Busy)
+    }
     fn read(&self, file: &ResourceLedgerFile) -> Result<ResourceCatalog, ResourceStoreError> {
-        let catalog = match file.read_reconciled_cached(MAX_CATALOG_BYTES, &self.read_cache)? {
+        let bytes = file.read_reconciled_cached(MAX_CATALOG_BYTES, &self.read_cache)?;
+        let witness = self.custody_witness()?.read_reconciled(MAX_CATALOG_BYTES)?;
+        // The witness stores exact bytes rather than only a revision. Coordinated
+        // rollback of both files and writers unaware of this protocol are unsupported.
+        if witness
+            .as_ref()
+            .is_some_and(|expected| bytes.as_ref() != Some(expected))
+        {
+            return Err(std::io::Error::other(
+                "custody catalog witness missing or mismatched; explicit recovery required",
+            )
+            .into());
+        }
+        let witnessed = witness.is_some();
+        drop(witness);
+        let catalog: ResourceCatalog = match bytes {
             Some(bytes) => serde_json::from_slice(&bytes)?,
             None => ResourceCatalog::default(),
         };
         validate_resource_catalog(&catalog)?;
         check_catalog_capacity(&catalog)?;
+        match (witnessed, catalog.schema_version) {
+            (true, 2) | (false, 1) => {}
+            _ => {
+                return Err(std::io::Error::other(
+                    "custody catalog witness missing or mismatched; explicit recovery required",
+                )
+                .into())
+            }
+        }
         Ok(catalog)
     }
     pub fn snapshot(&self) -> Result<ResourceCatalog, ResourceStoreError> {
@@ -110,9 +141,36 @@ impl ResourceStore {
         command: ResourceCommand,
         context: MutationContext,
     ) -> Result<CommittedResourceChange, ResourceStoreError> {
+        self.transact_checked(command, context, None)
+    }
+    /// Internal clearance must use a server-owned verifier while the ledger is locked.
+    /// A caller still needs an authoritative stopped-workload proof; an IPC claim is not one.
+    pub(super) fn clear_verified_custody(
+        &self,
+        reservation_id: ReservationId,
+        ownership_generation: u64,
+        context: MutationContext,
+        verifier: &dyn CustodyProofVerifier,
+    ) -> Result<CommittedResourceChange, ResourceStoreError> {
+        self.transact_checked(
+            ResourceCommand::ClearCustody {
+                reservation_id,
+                ownership_generation,
+            },
+            context,
+            Some(verifier),
+        )
+    }
+    fn transact_checked(
+        &self,
+        command: ResourceCommand,
+        context: MutationContext,
+        verifier: Option<&dyn CustodyProofVerifier>,
+    ) -> Result<CommittedResourceChange, ResourceStoreError> {
         let file = self.locked()?;
         let catalog = self.read(&file)?;
-        let transition = apply_resource_command(&catalog, command, &context)?;
+        let transition =
+            apply_resource_command_with_verifier(&catalog, command, &context, verifier)?;
         check_catalog_capacity(&transition.catalog)?;
         if std::mem::size_of::<CommittedResourceChange>()
             .saturating_add(transition.catalog.heap_bytes())
@@ -131,6 +189,14 @@ impl ResourceStore {
                     ResourceStoreError::Decode(e)
                 }
             })?;
+            // Advance the witness first: an interrupted or uncertain write makes
+            // the next read refuse both old and missing catalog state. Recovery
+            // requires an audited external procedure; never silently roll back.
+            if transition.catalog.schema_version == 2 {
+                self.custody_witness()?
+                    .replace(&bytes.0)
+                    .map_err(ResourceStoreError::OutcomeUnknown)?;
+            }
             file.replace(&bytes.0)
                 .map_err(ResourceStoreError::OutcomeUnknown)?;
         }
@@ -229,6 +295,7 @@ pub(super) fn capacity_test_catalog() -> ResourceCatalog {
                 },
                 ownership_generation: if index == 0 { 1 } else { 0 },
                 acquisition_pending: index == 0,
+                custody: None,
             });
             catalog.receipts.insert(
                 request_id,
@@ -543,6 +610,240 @@ mod process_tests {
     }
     // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
     #[cfg(target_os = "linux")]
+    #[test]
+    fn custody_survives_store_reopen_and_fences_release() {
+        struct ExactStopped;
+        impl CustodyProofVerifier for ExactStopped {
+            fn verify_stopped(
+                &self,
+                resource: &ResourceId,
+                reservation: &Reservation,
+                intent: &CustodyIntent,
+            ) -> bool {
+                resource.0 == "gpu"
+                    && reservation.id.0 == "a"
+                    && intent.job_id == "job-1"
+                    && intent.stage_id == "stage-1"
+                    && intent.workload_invocation_id == "worker-1"
+                    && intent.ownership_generation == 1
+            }
+        }
+        let dir = durable_test_directory();
+        let path = dir.path().join("catalog.json");
+        let store = ResourceStore::new(&path).unwrap();
+        create(&store);
+        let mut owner = context("a", false);
+        store
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "gpu".into(),
+                    reservation_id: "a".into(),
+                    estimate_seconds: 1,
+                },
+                owner.clone(),
+            )
+            .unwrap();
+        owner.request_id = RequestId(format!("{}:custody-register", owner.clock.unix_millis));
+        store
+            .transact(
+                ResourceCommand::RegisterCustody {
+                    reservation_id: "a".into(),
+                    ownership_generation: 1,
+                    job_id: "job-1".into(),
+                    stage_id: "stage-1".into(),
+                    workload_invocation_id: "worker-1".into(),
+                },
+                owner.clone(),
+            )
+            .unwrap();
+        drop(store);
+
+        let reopened = ResourceStore::new(&path).unwrap();
+        let catalog = reopened.snapshot().unwrap();
+        assert_eq!(catalog.schema_version, 2);
+        let intent = catalog.resources[&"gpu".into()].reservations[0]
+            .custody
+            .as_ref()
+            .unwrap();
+        assert_eq!(intent.registration_request_id, owner.request_id);
+        assert_eq!(intent.job_id, "job-1");
+        assert_eq!(intent.stage_id, "stage-1");
+        assert_eq!(intent.workload_invocation_id, "worker-1");
+        assert_eq!(intent.ownership_generation, 1);
+        assert!(!intent.cleared);
+        owner.request_id = RequestId(format!("{}:custody-release", owner.clock.unix_millis));
+        let error = reopened
+            .transact(
+                ResourceCommand::Release {
+                    reservation_id: "a".into(),
+                    ownership_generation: 1,
+                },
+                owner.clone(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, ResourceStoreError::Domain(ref domain) if domain.code == "custody_unresolved")
+        );
+        let mut system = context("clear", true);
+        system.actor = ResourceActor::System;
+        let clear = ResourceCommand::ClearCustody {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+        };
+        let error = reopened.transact(clear, system.clone()).unwrap_err();
+        assert!(
+            matches!(error, ResourceStoreError::Domain(ref domain) if domain.code == "custody_unverified")
+        );
+        reopened
+            .clear_verified_custody("a".into(), 1, system, &ExactStopped)
+            .unwrap();
+        let final_catalog = ResourceStore::new(&path).unwrap().snapshot().unwrap();
+        assert!(
+            final_catalog.resources[&"gpu".into()].reservations[0]
+                .custody
+                .as_ref()
+                .unwrap()
+                .cleared
+        );
+    }
+    #[test]
+    fn custody_witness_refuses_missing_catalog_and_older_catalog() {
+        let dir = durable_test_directory();
+        let path = dir.path().join("catalog.json");
+        let store = ResourceStore::new(&path).unwrap();
+        create(&store);
+        let mut owner = context("a", false);
+        store
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "gpu".into(),
+                    reservation_id: "a".into(),
+                    estimate_seconds: 1,
+                },
+                owner.clone(),
+            )
+            .unwrap();
+        let before_custody = std::fs::read(&path).unwrap();
+        owner.request_id = RequestId(format!("{}:witness-register", owner.clock.unix_millis));
+        store
+            .transact(
+                ResourceCommand::RegisterCustody {
+                    reservation_id: "a".into(),
+                    ownership_generation: 1,
+                    job_id: "job".into(),
+                    stage_id: "stage".into(),
+                    workload_invocation_id: "worker".into(),
+                },
+                owner,
+            )
+            .unwrap();
+        let protected = std::fs::read(&path).unwrap();
+        let mut same_revision = ResourceStore::new(&path).unwrap().snapshot().unwrap();
+        assert_eq!(same_revision.schema_version, 2);
+        same_revision
+            .resources
+            .get_mut(&ResourceId::from("gpu"))
+            .unwrap()
+            .definition
+            .description = "different valid contents".into();
+        validate_resource_catalog(&same_revision).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&same_revision).unwrap()).unwrap();
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_err());
+        std::fs::write(&path, &protected).unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_err());
+        std::fs::write(&path, &before_custody).unwrap();
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_err());
+        std::fs::write(&path, &protected).unwrap();
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_ok());
+
+        let mut witness_name = path.as_os_str().to_os_string();
+        witness_name.push(".custody-witness.data");
+        std::fs::remove_file(Path::new(&witness_name)).unwrap();
+        // A protected legacy catalog requires explicit migration, not an automatic bootstrap.
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_err());
+    }
+    #[test]
+    fn custody_witness_uses_a_distinct_lock_for_extensionless_catalogs() {
+        let dir = durable_test_directory();
+        let path = dir.path().join("catalog");
+        let store = ResourceStore::new(&path).unwrap();
+        create(&store);
+        let mut owner = context("a", false);
+        store
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "gpu".into(),
+                    reservation_id: "a".into(),
+                    estimate_seconds: 1,
+                },
+                owner.clone(),
+            )
+            .unwrap();
+        owner.request_id = RequestId(format!(
+            "{}:extensionless-register",
+            owner.clock.unix_millis
+        ));
+        store
+            .transact(
+                ResourceCommand::RegisterCustody {
+                    reservation_id: "a".into(),
+                    ownership_generation: 1,
+                    job_id: "job".into(),
+                    stage_id: "stage".into(),
+                    workload_invocation_id: "worker".into(),
+                },
+                owner,
+            )
+            .unwrap();
+        assert_eq!(
+            ResourceStore::new(&path)
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .schema_version,
+            2
+        );
+    }
+    #[test]
+    fn custody_witness_ahead_of_catalog_requires_recovery() {
+        let dir = durable_test_directory();
+        let path = dir.path().join("catalog.json");
+        let store = ResourceStore::new(&path).unwrap();
+        create(&store);
+        let mut owner = context("a", false);
+        store
+            .transact(
+                ResourceCommand::Reserve {
+                    resource_id: "gpu".into(),
+                    reservation_id: "a".into(),
+                    estimate_seconds: 1,
+                },
+                owner.clone(),
+            )
+            .unwrap();
+        owner.request_id = RequestId(format!("{}:witness-register", owner.clock.unix_millis));
+        store
+            .transact(
+                ResourceCommand::RegisterCustody {
+                    reservation_id: "a".into(),
+                    ownership_generation: 1,
+                    job_id: "job".into(),
+                    stage_id: "stage".into(),
+                    workload_invocation_id: "worker".into(),
+                },
+                owner,
+            )
+            .unwrap();
+        let revision = store.snapshot().unwrap().revision;
+        let witness = store.custody_witness().unwrap();
+        witness
+            .replace((revision + 1).to_string().as_bytes())
+            .unwrap();
+        drop(witness);
+        assert!(ResourceStore::new(&path).unwrap().snapshot().is_err());
+    }
     #[test]
     fn acknowledged_commit_roundtrips_and_retries() {
         let dir = durable_test_directory();

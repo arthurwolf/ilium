@@ -76,7 +76,7 @@ async fn accept_loop_with_limit(
         let connection_state = Arc::clone(&state);
         tracing::info!(session_name = %state.session_name, "client connection accepted");
         let handle = tokio::spawn(async move {
-            connection::handle(connection_state, stream).await;
+            connection::handle_session(connection_state, stream).await;
         });
         state.track_connection_task(handle);
     }

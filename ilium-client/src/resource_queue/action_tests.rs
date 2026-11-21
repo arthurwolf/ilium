@@ -127,6 +127,7 @@ fn submit_during_catalog_load_runs_after_successful_snapshot() {
             wait_revision: 0,
             active_waits: Vec::new(),
             local_invocations: Vec::new(),
+            navigable_reservations: Vec::new(),
             clock: ResourceClock {
                 unix_millis: 1000,
                 monotonic_millis: 1000,
@@ -213,6 +214,7 @@ fn busy_catalog_load_retries_read_without_losing_submit_or_replaying_mutation() 
         active_waits: vec![],
         wait_revision: 0,
         local_invocations: vec![],
+        navigable_reservations: vec![],
         result: None,
         reservation: None,
         recovery_token: None,
@@ -305,6 +307,124 @@ fn arrows_and_enter_cross_resource_local_reference_and_real_rows_without_mutatin
         .take_outbound_requests()
         .iter()
         .any(|request| matches!(request, ClientRequest::NewPane { .. })));
+}
+
+#[test]
+fn clicking_a_verified_agent_under_another_linked_project_opens_its_pane() {
+    let (mut tree, mut catalog, _, local) = tree::tests::fixture();
+    let other_path = "/synthetic-other-resource-project";
+    let other_project = tree.add_project(other_path.into()).unwrap();
+    let mut other_link = catalog.links[0].clone();
+    other_link.project_id = ResourceProjectId::from("other-project");
+    other_link.project_path = other_path.into();
+    catalog.links.push(other_link);
+    let proof = catalog.resources[&ResourceId::from("gpu")].reservations[0]
+        .agent
+        .clone();
+    let mut app = App::new("test".into(), "/synthetic-resource-project".into());
+    app.tree = tree;
+    app.ui_settings.resource_queue_grouping = true;
+    app.receive_resource_catalog(
+        catalog,
+        ResourceClock {
+            unix_millis: 1000,
+            monotonic_millis: 1000,
+            boot_id: "boot".into(),
+        },
+        vec![proof],
+        vec![],
+        0,
+    );
+    let row = *app
+        .resources
+        .rows
+        .targets
+        .iter()
+        .find_map(|(id, target)| match target {
+            ResourceRowTarget::Participant {
+                project_id,
+                reservation_id,
+                ..
+            } if *project_id == other_project && reservation_id.0 == "reservation" => Some(id),
+            _ => None,
+        })
+        .unwrap();
+    let resource = app.resources.rows.projects[&other_project][0];
+    app.select_tree_path(vec![other_project, resource, row]);
+    app.focus = FocusTarget::Tree;
+    let point = position(&mut app, row);
+    mouse(&mut app, point, MouseEventKind::Down(MouseButton::Left));
+    assert_eq!(app.right_panel_target.active_pane_id(), Some(local));
+}
+
+#[test]
+fn clicking_a_restored_participant_opens_the_existing_pane() {
+    let mut fixture = fixture();
+    let mut catalog = fixture.app.resources.catalog.clone().unwrap();
+    let reservation = &mut catalog
+        .resources
+        .get_mut(&ResourceId::from("gpu"))
+        .unwrap()
+        .reservations[0];
+    reservation.state = ReservationState::NeedsAttention {
+        reason: "original invocation exited".into(),
+    };
+    reservation.agent.label = fixture.app.tree.get(fixture.local).unwrap().name.clone();
+    let clock = fixture.app.resources.clock.clone().unwrap();
+    fixture.app.receive_resource_projection(
+        catalog,
+        clock,
+        Vec::new(),
+        vec![ReservationId::from("reservation")],
+        Vec::new(),
+        1,
+    );
+    let point = position(&mut fixture.app, fixture.local_row);
+    mouse(
+        &mut fixture.app,
+        point,
+        MouseEventKind::Down(MouseButton::Left),
+    );
+    assert_eq!(
+        fixture.app.right_panel_target.active_pane_id(),
+        Some(fixture.local)
+    );
+    assert!(fixture.app.resources.local_invocations.is_empty());
+    fixture
+        .app
+        .show_resource(fixture.project, ResourceId::from("gpu"));
+    fixture
+        .app
+        .select_tree_path(vec![fixture.project, fixture.resource, fixture.local_row]);
+    fixture.app.focus = FocusTarget::Tree;
+    key(&mut fixture.app, KeyCode::Enter);
+    assert_eq!(
+        fixture.app.right_panel_target.active_pane_id(),
+        Some(fixture.local)
+    );
+}
+
+#[test]
+fn clicking_resource_and_local_participant_opens_their_own_panels() {
+    let mut fixture = fixture();
+    for (row, expected) in [
+        (fixture.resource, None),
+        (fixture.local_row, Some(fixture.local)),
+    ] {
+        let point = position(&mut fixture.app, row);
+        mouse(
+            &mut fixture.app,
+            point,
+            MouseEventKind::Down(MouseButton::Left),
+        );
+        assert_eq!(fixture.app.right_panel_target.active_pane_id(), expected);
+        if expected.is_none() {
+            assert!(matches!(
+                fixture.app.right_panel_target,
+                RightPanelTarget::Resource { .. }
+            ));
+        }
+    }
 }
 
 #[test]
@@ -633,6 +753,7 @@ fn resource_and_initial_tree_snapshots_commute_without_resetting_observation_clo
         local_invocations: vec![catalog.resources[&ResourceId::from("gpu")].reservations[0]
             .agent
             .clone()],
+        navigable_reservations: Vec::new(),
         catalog,
         clock: clock.clone(),
         active_waits: vec![(NodeId(2), ReservationId::from("reservation"))],

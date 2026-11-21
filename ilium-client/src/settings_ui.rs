@@ -618,6 +618,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 );
             }
         }
+        SettingsTab::PollingDetection => render_scrollable(
+            frame,
+            layout.content_area,
+            crate::polling_settings::view(app, state.selected_row, layout.content_area.width),
+            state.scroll,
+        ),
         SettingsTab::Cost => crate::cost_settings_ui::render(
             frame,
             layout.content_area,
@@ -780,6 +786,23 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::About => {}
+        SettingsTab::PollingDetection => {
+            for (index, row) in
+                crate::polling_settings::layout(app, state.selected_row, layout.content_area.width)
+                    .rows
+                    .iter()
+                    .enumerate()
+            {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    "POLLING-01",
+                    row.control_line.min(usize::from(u16::MAX)) as u16,
+                    state.scroll,
+                    state.selected_row == index,
+                );
+            }
+        }
         SettingsTab::Toolbar => {
             push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
         }
@@ -1409,6 +1432,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
+        SettingsTab::PollingDetection => "↻",
         SettingsTab::Optimization => "↗",
         SettingsTab::RemoteCompaction => "⇥",
         SettingsTab::Keyboard => "⌨",
@@ -1441,6 +1465,7 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::AgentMonitoring => "Agents",
         SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
+        SettingsTab::PollingDetection => "Polling",
         SettingsTab::Optimization => "Optimize",
         SettingsTab::RemoteCompaction => "Remote",
         SettingsTab::KanbanBoard => "Kanban",
@@ -1878,6 +1903,17 @@ pub(crate) fn custom_agent_view(app: &App, state: &SettingsState) -> CustomAgent
                     custom_agent_action_row(&format!("Remove variable {}", position + 1), selected)
                 }
                 EditorRow::AddEnvironment => custom_agent_action_row("Add variable", selected),
+                EditorRow::ShowNameInTitle => custom_agent_form_row(
+                    "Show name in tree title",
+                    if editor.draft.show_name_in_title {
+                        "On"
+                    } else {
+                        "Off"
+                    },
+                    "",
+                    selected,
+                    false,
+                ),
                 EditorRow::RevealValues => custom_agent_form_row(
                     "Show values",
                     if editor.reveal_values { "On" } else { "Off" },
@@ -2196,6 +2232,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Cost => {
             return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
         }
+        SettingsTab::PollingDetection => {
+            crate::polling_settings::view(app, selected_row, content_area.width).len() as u16
+        }
         SettingsTab::Optimization => {
             return crate::compaction_ui::max_scroll(app, content_area);
         }
@@ -2226,7 +2265,7 @@ fn setup_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "Ilium installs and refreshes Claude + Codex instructions automatically · Enter refreshes · R restores the default Claude file",
+            "Chatroom guidance follows project rooms · Progress guidance is global · Enter refreshes · R restores the default Claude file",
             Style::new().add_modifier(Modifier::DIM),
         )),
         Line::from(""),
@@ -4355,7 +4394,7 @@ fn wrapped_setting_description(description: &str, width: u16) -> Vec<String> {
     wrapped_setting_description_with_indent(description, width, 4)
 }
 
-fn wrapped_setting_description_with_indent(
+pub(crate) fn wrapped_setting_description_with_indent(
     description: &str,
     width: u16,
     preferred_indent: u16,
@@ -4504,6 +4543,12 @@ pub(crate) fn described_settings_scroll_for_selection(
     state: &SettingsState,
 ) -> u16 {
     let line = match state.tab {
+        SettingsTab::PollingDetection => {
+            crate::polling_settings::layout(app, state.selected_row, area.width)
+                .rows
+                .get(state.selected_row)
+                .map(|row| row.control_line)
+        }
         SettingsTab::Sound => sound_description_geometry(area.width)
             .row_lines
             .get(state.selected_row)
@@ -5574,6 +5619,7 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
             AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).len()
         }
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
+        SettingsTab::PollingDetection => crate::polling_settings::PollingRow::ALL.len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Session => crate::app::SessionRow::ALL.len(),
         SettingsTab::Attention => crate::app::AttentionRow::ALL.len(),
@@ -7840,8 +7886,8 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
-            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "☷", "◉", "↻", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷",
+            "♪", "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
@@ -8569,6 +8615,64 @@ mod tests {
             tab_at_for_active(short, Position::new(2, 7), SettingsTab::Setup),
             Some(SettingsTab::Setup)
         );
+    }
+
+    #[test]
+    fn polling_keyboard_selection_reveals_controls_below_a_short_viewport() {
+        let app = App::new("synthetic-polling-scroll".into(), std::env::temp_dir());
+        let state = SettingsState {
+            tab: SettingsTab::PollingDetection,
+            selected_row: 10,
+            ..Default::default()
+        };
+        let scroll = described_settings_scroll_for_selection(&app, Rect::new(0, 0, 60, 8), &state);
+        assert!(
+            scroll > 0,
+            "keyboard selection must reveal the selected polling control"
+        );
+    }
+
+    #[test]
+    fn polling_settings_navigation_reaches_opt_in_controls_and_spending_status() {
+        let mut tab = SettingsTab::AgentMonitoring.next();
+        let mut selected = None;
+        for _ in 0..SettingsTab::ALL.len() {
+            if tab.label() == "Polling Detection" {
+                selected = Some(tab);
+                break;
+            }
+            tab = tab.next();
+        }
+        let tab = selected.expect("polling settings must be reachable through tab navigation");
+        let app = App::new("synthetic-polling-settings".into(), std::env::temp_dir());
+        let state = SettingsState {
+            tab,
+            ..Default::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        for label in [
+            "Enable detection",
+            "Check every",
+            "Recent window",
+            "Monthly limit",
+            "OpenAI",
+            "bounded",
+            "Off",
+            "Spending",
+        ] {
+            assert!(rendered.contains(label), "polling settings omitted {label}");
+        }
+        assert!(max_scroll(tab, &app, 0, Rect::new(0, 0, 60, 4)) > 0);
     }
 
     #[test]

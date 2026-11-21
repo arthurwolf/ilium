@@ -37,7 +37,7 @@ fields!(AgentIdentity {
 impl AllocationSize for ResourceActor {
     fn heap_bytes(&self) -> usize {
         match self {
-            Self::Agent(agent) => agent.heap_bytes(),
+            Self::Agent(agent) | Self::External(agent) => agent.heap_bytes(),
             Self::User | Self::System => 0,
         }
     }
@@ -99,6 +99,14 @@ fields!(ProjectResourceLink {
     desired_instruction_revision,
     sync_debt
 });
+fields!(CustodyIntent {
+    registration_request_id,
+    job_id,
+    stage_id,
+    workload_invocation_id,
+    ownership_generation,
+    cleared
+});
 fields!(Reservation {
     id,
     request_id,
@@ -111,7 +119,8 @@ fields!(Reservation {
     terminal_at,
     state,
     ownership_generation,
-    acquisition_pending
+    acquisition_pending,
+    custody
 });
 fields!(ResourceRecord {
     definition,
@@ -165,6 +174,24 @@ impl AllocationSize for ResourceCommand {
                 .heap_bytes()
                 .saturating_add(reservation_id.heap_bytes())
                 .saturating_add(estimate_seconds.heap_bytes()),
+            Self::RegisterCustody {
+                reservation_id,
+                ownership_generation,
+                job_id,
+                stage_id,
+                workload_invocation_id,
+            } => reservation_id
+                .heap_bytes()
+                .saturating_add(ownership_generation.heap_bytes())
+                .saturating_add(job_id.heap_bytes())
+                .saturating_add(stage_id.heap_bytes())
+                .saturating_add(workload_invocation_id.heap_bytes()),
+            Self::ClearCustody {
+                reservation_id,
+                ownership_generation,
+            } => reservation_id
+                .heap_bytes()
+                .saturating_add(ownership_generation.heap_bytes()),
             Self::Release {
                 reservation_id,
                 ownership_generation,

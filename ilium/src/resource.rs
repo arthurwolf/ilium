@@ -22,6 +22,9 @@ pub(crate) struct ResourceArgs {
     /// Pane number or session/pane number; never an arbitrary display label.
     #[arg(long, global = true)]
     agent: Option<String>,
+    /// Act as a named external participant instead of an Ilium agent.
+    #[arg(long, global = true, conflicts_with = "agent")]
+    name: Option<String>,
     /// Reuse the exact time-bearing key when retrying a mutation.
     #[arg(long, global = true)]
     request_id: Option<String>,
@@ -53,8 +56,24 @@ enum ResourceCommandArgs {
     Status {
         reservation: Option<String>,
     },
+    /// Record a workload before launch, fencing release until verified clearance.
+    RegisterCustody {
+        reservation: String,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        generation: u64,
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        stage: String,
+        #[arg(long)]
+        workload: String,
+    },
+    /// Release a reservation, optionally fencing it to a previously observed ownership generation.
     Release {
         reservation: String,
+        /// Refuse release if this exact ownership generation no longer owns the reservation.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        expected_generation: Option<u64>,
     },
     Cancel {
         reservation: String,
@@ -288,6 +307,7 @@ fn resolve_resource(
     reply: &ResourceReply,
     name: &str,
     project_path: &str,
+    global: bool,
 ) -> Result<ResourceId, String> {
     if reply
         .catalog
@@ -296,15 +316,16 @@ fn resolve_resource(
     {
         return Ok(ResourceId(name.into()));
     }
-    let matches: Vec<_> = reply
+    let matches: std::collections::BTreeSet<_> = reply
         .catalog
         .links
         .iter()
-        .filter(|link| link.slug == name && link.project_path == project_path)
+        .filter(|link| link.slug == name && (global || link.project_path == project_path))
+        .map(|link| link.resource_id.clone())
         .collect();
-    match matches.as_slice() {
-        [link] => Ok(link.resource_id.clone()),
-        [] => Err(format!(
+    match matches.len() {
+        1 => Ok(matches.into_iter().next().ok_or("Resource not found")?),
+        0 => Err(format!(
             "Resource {name:?} is not linked in the selected project"
         )),
         _ => Err(format!(
@@ -365,6 +386,10 @@ fn result_json(
             ReservationState::Revoked { .. } => "revoked",
         };
         value["reservation_id"] = json!(reservation.id);
+        // The mutation request key is distinct from the original reservation key.
+        // Recovery must match both the original claim and its durable workload intent.
+        value["reservation_request_id"] = json!(reservation.request_id);
+        value["custody"] = json!(reservation.custody);
         value["resource_slug"] = json!(reply
             .catalog
             .links
@@ -413,11 +438,24 @@ pub(crate) async fn run(
     cwd_explicit: bool,
 ) -> Result<(), CliError> {
     if matches!(&args.command, ResourceCommandArgs::NotifyUrgent) {
-        if args.session.is_some() || args.agent.is_some() || args.request_id.is_some() {
+        if args.session.is_some()
+            || args.agent.is_some()
+            || args.name.is_some()
+            || args.request_id.is_some()
+        {
             return Err(error("resource_notify_urgent", "", "invalid_input", "Urgent resource notices target the project; session, agent and request-id selectors are not supported", 2));
         }
         return crate::broadcast::urgent_resource_notice(args.project.as_deref().unwrap_or(cwd))
             .await;
+    }
+    if matches!(&args.command, ResourceCommandArgs::RegisterCustody { .. })
+        && args.request_id.is_none()
+    {
+        return Err(error(
+            "resource_register_custody", "", "request_id_required",
+            "Record a unique time-bearing request ID before registering custody, then pass --request-id",
+            2,
+        ));
     }
     let key = args.request_id.clone().unwrap_or_else(request_key);
     let operation = match &args.command {
@@ -427,6 +465,7 @@ pub(crate) async fn run(
         ResourceCommandArgs::Reserve { .. } => "resource_reserve",
         ResourceCommandArgs::Wait { .. } => "resource_wait",
         ResourceCommandArgs::Status { .. } => "resource_status",
+        ResourceCommandArgs::RegisterCustody { .. } => "resource_register_custody",
         ResourceCommandArgs::Release { .. } => "resource_release",
         ResourceCommandArgs::Cancel { .. } => "resource_cancel",
         ResourceCommandArgs::Estimate { .. } => "resource_estimate",
@@ -448,6 +487,15 @@ pub(crate) async fn run(
     } else {
         None
     };
+    if args.name.is_some() && reserve.as_ref().is_some_and(|input| input.agent.is_some()) {
+        return Err(error(
+            operation,
+            &key,
+            "invalid_identity",
+            "Use either --name or an agent reference",
+            2,
+        ));
+    }
     let explicit = reserve
         .as_ref()
         .and_then(|r| r.agent.as_deref())
@@ -515,6 +563,7 @@ pub(crate) async fn run(
             parsed_agent.as_ref().map(|(_, p)| *p),
         )
     };
+    let pane = if args.name.is_some() { None } else { pane };
     let user_cancel = matches!(
         &args.command,
         ResourceCommandArgs::Cancel {
@@ -527,11 +576,12 @@ pub(crate) async fn run(
             args.command,
             ResourceCommandArgs::Reserve { .. }
                 | ResourceCommandArgs::Wait { .. }
+                | ResourceCommandArgs::RegisterCustody { .. }
                 | ResourceCommandArgs::Release { .. }
                 | ResourceCommandArgs::Cancel { .. }
                 | ResourceCommandArgs::Estimate { .. }
         );
-    if agent_command && pane.is_none() {
+    if agent_command && pane.is_none() && args.name.is_none() {
         return Err(error(
             operation,
             &key,
@@ -547,7 +597,7 @@ pub(crate) async fn run(
     snapshot_request.pane_id = pane;
     let snapshot = exchange(&mut connection, snapshot_request, &key, operation, false).await?;
     let resolve = |name: &str| {
-        resolve_resource(&snapshot, name, &project_path)
+        resolve_resource(&snapshot, name, &project_path, args.name.is_some())
             .map_err(|e| error(operation, &key, "resource_not_found", e, 2))
     };
     let link_for = |resource_id: ResourceId, slug: String| ProjectResourceLink {
@@ -561,6 +611,7 @@ pub(crate) async fn run(
     };
     let mut request = ResourceRequest::new(None, ResourceOperation::Snapshot);
     request.request_key = Some(key.clone());
+    request.external_name = args.name.clone();
     request.pane_id = if agent_command || matches!(args.command, ResourceCommandArgs::Status { .. })
     {
         pane
@@ -613,11 +664,15 @@ pub(crate) async fn run(
                 .flat_map(|r| &r.reservations)
                 .filter(|r| {
                     r.state.active()
-                        && pane.is_none_or(|p| p == r.agent.pane_id)
-                        && snapshot
-                            .local_invocations
-                            .iter()
-                            .any(|local| local.same_invocation(&r.agent))
+                        && if let Some(name) = args.name.as_deref() {
+                            r.agent.same_invocation(&AgentIdentity::external(name))
+                        } else {
+                            pane.is_none_or(|p| p == r.agent.pane_id)
+                                && snapshot
+                                    .local_invocations
+                                    .iter()
+                                    .any(|local| local.same_invocation(&r.agent))
+                        }
                 })
                 .collect();
             let resource_instructions: Vec<_> = reservations.iter().filter_map(|reservation| {
@@ -665,7 +720,26 @@ pub(crate) async fn run(
                 estimate_seconds: input.seconds,
             })
         }
-        ResourceCommandArgs::Release { reservation: id } => {
+        ResourceCommandArgs::RegisterCustody {
+            reservation: id,
+            generation,
+            job,
+            stage,
+            workload,
+        } => {
+            selected_reservation = Some(id.clone());
+            Some(ResourceCommand::RegisterCustody {
+                reservation_id: ReservationId(id),
+                ownership_generation: generation,
+                job_id: job,
+                stage_id: stage,
+                workload_invocation_id: workload,
+            })
+        }
+        ResourceCommandArgs::Release {
+            reservation: id,
+            expected_generation,
+        } => {
             let reservation = find_reservation(&snapshot, &id).ok_or_else(|| {
                 error(
                     operation,
@@ -678,7 +752,8 @@ pub(crate) async fn run(
             selected_reservation = Some(id.clone());
             Some(ResourceCommand::Release {
                 reservation_id: ReservationId(id),
-                ownership_generation: reservation.ownership_generation,
+                ownership_generation: expected_generation
+                    .unwrap_or(reservation.ownership_generation),
             })
         }
         ResourceCommandArgs::Cancel {
@@ -1118,6 +1193,97 @@ mod tests {
             crate::Cli::try_parse_from(["ilium", "resource", "reserve", "a", "b", "c", "d"])
                 .is_err()
         );
+    }
+    #[test]
+    fn release_generation_must_be_a_positive_integer() {
+        for value in ["0", "bad"] {
+            assert!(crate::Cli::try_parse_from([
+                "ilium",
+                "resource",
+                "release",
+                "r",
+                "--expected-generation",
+                value
+            ])
+            .is_err());
+        }
+        assert!(crate::Cli::try_parse_from([
+            "ilium",
+            "resource",
+            "release",
+            "r",
+            "--expected-generation",
+            "42"
+        ])
+        .is_ok());
+        assert!(crate::Cli::try_parse_from(["ilium", "resource", "release", "r"]).is_ok());
+    }
+    #[test]
+    fn custody_registration_requires_identity_and_positive_generation() {
+        assert!(crate::Cli::try_parse_from([
+            "ilium",
+            "resource",
+            "register-custody",
+            "r",
+            "--generation",
+            "4",
+            "--job",
+            "job-1",
+            "--stage",
+            "stage-1",
+            "--workload",
+            "worker-1",
+        ])
+        .is_ok());
+        for generation in ["0", "bad"] {
+            assert!(crate::Cli::try_parse_from([
+                "ilium",
+                "resource",
+                "register-custody",
+                "r",
+                "--generation",
+                generation,
+                "--job",
+                "job-1",
+                "--stage",
+                "stage-1",
+                "--workload",
+                "worker-1",
+            ])
+            .is_err());
+        }
+        assert!(crate::Cli::try_parse_from([
+            "ilium",
+            "resource",
+            "register-custody",
+            "r",
+            "--generation",
+            "4",
+            "--job",
+            "job-1",
+        ])
+        .is_err());
+    }
+    #[tokio::test]
+    async fn custody_registration_refuses_an_unrecorded_request_key_before_connecting() {
+        let args = ResourceArgs {
+            project: None,
+            session: None,
+            agent: None,
+            name: None,
+            request_id: None,
+            command: ResourceCommandArgs::RegisterCustody {
+                reservation: "reservation".into(),
+                generation: 1,
+                job: "job".into(),
+                stage: "stage".into(),
+                workload: "worker".into(),
+            },
+        };
+        assert!(matches!(
+            run(args, Path::new("/"), false).await,
+            Err(CliError::ExitStatus(2))
+        ));
     }
     #[test]
     fn agent_references_do_not_guess_display_names() {

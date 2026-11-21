@@ -476,6 +476,8 @@ pub enum Mode {
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
     /// Full-screen finder over terminal replay and locally-open buffers.
     Search(Box<SearchState>),
+    /// Full-screen, client-local agent usage over a selectable time range.
+    WeeklyUsage(Box<crate::weekly_usage_ui::WeeklyUsageState>),
     /// Step/progress/log dialog over a frozen agent pane while its session is
     /// converted to the other provider. State lives in `App::conversion`.
     ConvertSession,
@@ -582,6 +584,8 @@ pub enum SettingsTab {
     Attention,
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
+    /// Advisory polling detection and its separate provider spending.
+    PollingDetection,
     /// Scans agent transcripts and recommends the auto-compaction threshold
     /// (see `crate::compaction_ui`).
     Optimization,
@@ -749,12 +753,13 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 29] = [
+    pub const ALL: [SettingsTab; 30] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
         Self::Toolbar,
         Self::AgentMonitoring,
+        Self::PollingDetection,
         Self::Attention,
         Self::Cost,
         Self::Optimization,
@@ -807,6 +812,7 @@ impl SettingsTab {
             Self::AgentMonitoring => "Agent Monitoring",
             Self::Attention => "Attention",
             Self::Cost => "Agent Cost",
+            Self::PollingDetection => "Polling Detection",
             Self::Optimization => "Optimization",
             Self::RemoteCompaction => "Remote compaction",
             Self::Debug => "Debug",
@@ -1458,6 +1464,7 @@ pub enum ProjectFolderSelection {
 pub enum ContextMenuAction {
     /// Opens full-screen workspace search regardless of the clicked node.
     Search,
+    WeeklyUsage,
     FocusPane,
     CreateBoardFromMarkdown,
     SchedulePaneInput,
@@ -1500,6 +1507,9 @@ pub enum ContextMenuAction {
     ResourceRequestCancel,
     ResourceRequestRelease,
     ChangeProjectFolder,
+    /// Project-only: moves every entry to the project root and removes all
+    /// groups and split views (`ClientRequest::FlattenProject`).
+    FlattenFolders,
     /// Sets a durable bookmark on the context-menu target. The desired state
     /// is captured while the menu opens, making the server mutation idempotent
     /// across multiple attached clients.
@@ -1566,12 +1576,14 @@ impl ContextMenuAction {
             Self::Worktree => (3, 0),
             Self::ManageWorktrees => (3, 1),
             Self::ChangeProjectFolder => (3, 2),
+            Self::FlattenFolders => (3, 3),
             Self::SetBookmark { .. } => (4, 0),
             Self::SetNodeLockedClosed { .. } => (4, 1),
             Self::Rename => (4, 2),
             Self::MoveUp => (4, 3),
             Self::MoveDown => (4, 4),
             Self::Search => (5, 0),
+            Self::WeeklyUsage => (5, 1),
             Self::OrderBy => (5, 1),
             Self::Settings => (5, 2),
             Self::Restart => (5, 3),
@@ -1600,6 +1612,7 @@ impl ContextMenuAction {
         use crate::icon_settings::IconTarget;
         match self {
             Self::Search => IconTarget::ToolbarSearch,
+            Self::WeeklyUsage => IconTarget::ToolbarWeeklyUsage,
             Self::FocusPane | Self::NewTerminal => IconTarget::Terminal,
             Self::CreateBoardFromMarkdown => IconTarget::Board,
             Self::SchedulePaneInput => IconTarget::WaitingBackground,
@@ -1618,7 +1631,9 @@ impl ContextMenuAction {
             Self::NewAgent(BuiltinAgentProvider::Codex) => IconTarget::Codex,
             Self::NewAgent(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::NewEditor => IconTarget::Editor,
-            Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
+            Self::NewFolder | Self::ChangeProjectFolder | Self::FlattenFolders => {
+                IconTarget::Folder
+            }
             Self::AddChatroom | Self::RemoveChatroom | Self::NewResource | Self::LinkResource => {
                 IconTarget::Project
             }
@@ -1648,6 +1663,7 @@ impl ContextMenuAction {
     pub fn label(self) -> String {
         match self {
             Self::Search => "Search workspace…".to_string(),
+            Self::WeeklyUsage => "Agent usage…".to_string(),
             Self::FocusPane => "Focus pane".to_string(),
             Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
             Self::SchedulePaneInput => "Schedule keystrokes…".to_string(),
@@ -1681,6 +1697,7 @@ impl ContextMenuAction {
             Self::ResourceRequestCancel => "Request: cancel this waiting request…".to_string(),
             Self::ResourceRequestRelease => "Request: release (I am done using it)…".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
+            Self::FlattenFolders => "Flatten folders".to_string(),
             Self::SetBookmark {
                 is_bookmarked: true,
             } => "Bookmark".to_string(),
@@ -1707,7 +1724,13 @@ impl ContextMenuAction {
 
     /// Actions that apply to the client/tree view as a whole rather than the
     /// node under the pointer. One registry keeps every menu target in sync.
-    const GLOBAL_ACTIONS: [Self; 4] = [Self::Search, Self::OrderBy, Self::Restart, Self::Settings];
+    const GLOBAL_ACTIONS: [Self; 5] = [
+        Self::Search,
+        Self::WeeklyUsage,
+        Self::OrderBy,
+        Self::Restart,
+        Self::Settings,
+    ];
 
     /// Materializes provider-driven creation entries for any tree menu.
     fn new_agent_actions() -> impl Iterator<Item = Self> {
@@ -2479,6 +2502,13 @@ pub struct App {
     pub attention: crate::attention::state::AttentionState,
     /// Agent-spend indicator settings (the Agent Cost tab).
     pub cost_settings: CostSettings,
+    pub polling_settings: ilium_core::polling_detection::PollingSettings,
+    pub(crate) polling_save: crate::polling_save::PollingSave,
+    pub polling_snapshot: Option<ilium_ipc::polling::PollingSnapshot>,
+    pub(crate) polling_settings_retention: Option<crate::connection::EventRetention>,
+    pub(crate) polling_snapshot_request: Option<u64>,
+    /// When the open Polling Detection page last asked for a fresh projection.
+    pub(crate) polling_snapshot_requested_at: Option<std::time::Instant>,
     /// Text being typed into the sparkline-window field of the Agent Cost
     /// tab (`Enter` on that row), or `None` while it is not being edited.
     pub cost_window_input: Option<String>,
@@ -2837,6 +2867,11 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Earliest local observation of the current verified pane/session owner.
+    pub(crate) agent_binding_observed_at_ms: HashMap<NodeId, i64>,
+    pub(crate) weekly_usage_history: crate::weekly_usage_history::UsageHistory,
+    /// Last range chosen in the usage view; reopening keeps it for this run.
+    pub(crate) weekly_usage_range: crate::weekly_usage::UsageRange,
     /// Non-secret profile identity for custom-agent panes.
     pub custom_agent_panes: HashMap<NodeId, ilium_core::custom_agent::CustomAgentIdentity>,
     /// Recap fence, in-flight dedupe and the recaps the server last reported.
@@ -3200,6 +3235,12 @@ impl App {
             attention_settings: crate::attention::AttentionSettings::default(),
             attention: crate::attention::state::AttentionState::default(),
             cost_settings: CostSettings::default(),
+            polling_settings: ilium_core::polling_detection::PollingSettings::default(),
+            polling_save: crate::polling_save::PollingSave::default(),
+            polling_snapshot: None,
+            polling_settings_retention: None,
+            polling_snapshot_request: None,
+            polling_snapshot_requested_at: None,
             cost_window_input: None,
             remote_compaction_settings:
                 crate::remote_compaction_settings::RemoteCompactionSettings::default(),
@@ -3491,6 +3532,9 @@ impl App {
             last_tree_activity_projection: None,
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            agent_binding_observed_at_ms: HashMap::new(),
+            weekly_usage_history: crate::weekly_usage_history::UsageHistory::default(),
+            weekly_usage_range: crate::weekly_usage::UsageRange::default(),
             custom_agent_panes: HashMap::new(),
             recap: crate::recap_state::RecapState::default(),
             pending_recap_requests: Vec::new(),
@@ -4387,6 +4431,7 @@ impl App {
             ClientRequest::RenameNode { .. } => ("Renaming", tree_change),
             ClientRequest::RemoveWorkspace { .. } => ("Removing worktree", tree_change),
             ClientRequest::ChangeProjectFolder { .. } => ("Changing project folder", tree_change),
+            ClientRequest::FlattenProject { .. } => ("Flattening folders", tree_change),
             ClientRequest::PruneWorkspace { .. } => ("Cleaning worktree", quick),
             ClientRequest::QueryWorkspaceInventory { .. } => ("Checking worktrees", quick),
             ClientRequest::QueryWorkspaceCloseOffer { .. } => ("Checking worktree", quick),
@@ -7866,7 +7911,10 @@ impl App {
         let projects = self.agent_setup_project_roots();
         let mut rows = Vec::new();
         for feature in AgentFeature::ALL {
-            if let Some(instruction_file) = self.agent_setup_global_file(feature) {
+            if let Some(instruction_file) = self
+                .agent_setup_global_file(feature)
+                .filter(|_| feature != AgentFeature::Chatroom)
+            {
                 let is_custom = match feature {
                     AgentFeature::Chatroom => {
                         self.agent_setup_settings.chatroom_global_file.is_some()
@@ -8044,6 +8092,19 @@ impl App {
             .is_some_and(|path| self.setup_feature_needs_install(feature, &path) == Some(false))
     }
 
+    fn project_has_cached_chatroom(&self, project_root: &Path) -> bool {
+        self.tree.project_ids().into_iter().any(|id| {
+            self.chatroom_projects.contains(&id)
+                && self
+                    .tree
+                    .get(id)
+                    .and_then(Node::project_path)
+                    .is_some_and(|path| {
+                        normalize_path_lexically(path) == normalize_path_lexically(project_root)
+                    })
+        })
+    }
+
     fn queue_agent_setup_prompt_global(&mut self) {
         if self.agent_setup_settings.never_ask_global || self.has_seen_global_setup_prompt {
             return;
@@ -8054,17 +8115,12 @@ impl App {
         ) else {
             return;
         };
-        let Some(chatroom) =
-            self.setup_feature_needs_install(AgentFeature::Chatroom, &chatroom_file)
-        else {
-            return;
-        };
         let Some(progress) =
             self.setup_feature_needs_install(AgentFeature::Progress, &progress_file)
         else {
             return;
         };
-        if !chatroom && !progress {
+        if !progress {
             return;
         }
         self.has_seen_global_setup_prompt = true;
@@ -8097,7 +8153,7 @@ impl App {
         else {
             return;
         };
-        let chatroom = chatroom && !self.global_setup_covers(AgentFeature::Chatroom);
+        let chatroom = chatroom && self.project_has_cached_chatroom(&project_root);
         let progress = progress && !self.global_setup_covers(AgentFeature::Progress);
         if !chatroom && !progress {
             return;
@@ -8179,10 +8235,13 @@ impl App {
                     (file.clone(), file)
                 }
             };
-            let Some(chatroom) =
-                self.setup_feature_needs_install(AgentFeature::Chatroom, &chatroom_file)
-            else {
-                continue;
+            let chatroom = match &scope {
+                crate::setup_prompt::SetupPromptScope::Global { .. } => false,
+                crate::setup_prompt::SetupPromptScope::Project(project) => {
+                    self.project_has_cached_chatroom(project)
+                        && self.setup_feature_needs_install(AgentFeature::Chatroom, &chatroom_file)
+                            == Some(true)
+                }
             };
             let Some(progress) =
                 self.setup_feature_needs_install(AgentFeature::Progress, &progress_file)
@@ -9440,6 +9499,7 @@ impl App {
     /// every setting added to it) must keep matching.
     pub fn action_open_settings(&mut self) {
         self.refresh_agent_setup_statuses();
+        self.request_polling_snapshot();
         self.mode = Mode::Settings(Box::default());
     }
 
@@ -9448,6 +9508,13 @@ impl App {
     /// every query edit remain immediate even with large retained journals.
     pub fn action_open_search(&mut self) {
         self.mode = Mode::Search(Box::default());
+    }
+
+    /// Opens the same global view from the tree toolbar and context menu.
+    pub fn action_open_weekly_usage(&mut self) {
+        let mut state = Box::<crate::weekly_usage_ui::WeeklyUsageState>::default();
+        state.range = self.weekly_usage_range;
+        self.mode = Mode::WeeklyUsage(state);
     }
 
     /// Starts one debounced background scan when the active finder has been
@@ -13841,7 +13908,9 @@ impl App {
                         resource_id,
                         pane_id: Some(pane),
                         ..
-                    } if *pane == id => Some((*row, *project_id, resource_id.clone())),
+                    } if *pane == id && self.tree.project_ancestor(id) == Some(*project_id) => {
+                        Some((*row, *project_id, resource_id.clone()))
+                    }
                     _ => None,
                 });
             if let Some((row, project, resource)) = participant {
@@ -15478,6 +15547,28 @@ impl App {
         event: &ilium_ipc::ServerEvent,
     ) -> Option<usize> {
         match event {
+            ilium_ipc::ServerEvent::Polling {
+                request_id,
+                reply: ilium_ipc::polling::PollingReply::Rejected(_),
+            } if self.polling_snapshot_request == Some(*request_id) => Some(256),
+            ilium_ipc::ServerEvent::Polling {
+                request_id,
+                reply: ilium_ipc::polling::PollingReply::Snapshot(snapshot),
+            } if self.accepts_polling_snapshot(*request_id, snapshot) => Some(
+                snapshot
+                    .settings
+                    .excluded_projects
+                    .iter()
+                    .fold(
+                        snapshot
+                            .settings
+                            .excluded_projects
+                            .len()
+                            .saturating_mul(std::mem::size_of::<String>()),
+                        |bytes, project| bytes.saturating_add(project.len()),
+                    )
+                    .saturating_add(512),
+            ),
             ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(
                 errors
                     .iter()
@@ -17574,6 +17665,7 @@ impl App {
                 );
                 actions.insert(0, ContextMenuAction::NewResource);
                 actions.insert(0, ContextMenuAction::LinkResource);
+                actions.insert(0, ContextMenuAction::FlattenFolders);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 self.insert_lock_actions(&mut actions, target, 0);
                 if !self.tree.panes_eligible_for_update(target).is_empty() {
@@ -17692,6 +17784,7 @@ impl App {
         self.mode = Mode::Normal;
         match action {
             ContextMenuAction::Search => self.action_open_search(),
+            ContextMenuAction::WeeklyUsage => self.action_open_weekly_usage(),
             ContextMenuAction::FocusPane => self.focus_pane(target),
             ContextMenuAction::CreateBoardFromMarkdown => {
                 self.request_board_from_markdown_editor(target)
@@ -17746,6 +17839,10 @@ impl App {
                 self.run_resource_context_action(target, action)
             }
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
+            ContextMenuAction::FlattenFolders => {
+                self.restore_manual_tree_order_for_mutation();
+                self.queue_request(ClientRequest::FlattenProject { project_id: target });
+            }
             ContextMenuAction::SetBookmark { is_bookmarked } => {
                 self.request_set_node_bookmarked(target, is_bookmarked);
                 self.status_message = Some(if is_bookmarked {
@@ -18661,6 +18758,7 @@ impl App {
                 _ => None,
             })
             .chain(self.restructure_budget_autosave_deadline)
+            .chain(self.polling_save.deadline)
             .chain(self.remote_compaction_save_deadline)
             .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_chatroom_reconcile_at)
@@ -21775,6 +21873,7 @@ mod tests {
                 base_provider: BuiltinAgentProvider::Claude,
                 command: String::new(),
                 arguments: String::new(),
+                show_name_in_title: false,
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "private-sentinel".into(),
@@ -30508,7 +30607,11 @@ mod tests {
         assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::Toolbar);
-        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Attention);
+        assert_eq!(
+            SettingsTab::AgentMonitoring.next(),
+            SettingsTab::PollingDetection
+        );
+        assert_eq!(SettingsTab::PollingDetection.next(), SettingsTab::Attention);
         assert_eq!(SettingsTab::Attention.next(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Cost.previous(), SettingsTab::Attention);
         assert_eq!(SettingsTab::Cost.next(), SettingsTab::Optimization);
@@ -31534,11 +31637,15 @@ mod tests {
 
         let rows = app.agent_setup_rows();
 
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 4);
         for feature in AgentFeature::ALL {
             assert_eq!(
                 rows.iter().filter(|row| row.feature() == feature).count(),
-                3
+                if feature == AgentFeature::Chatroom {
+                    1
+                } else {
+                    3
+                }
             );
             assert!(rows.iter().any(|row| matches!(
                 row,
@@ -31552,7 +31659,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_setup_teaches_claude_and_codex_globally_without_project_copies() {
+    fn automatic_setup_keeps_progress_global_without_global_chatroom_guidance() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path().join("project");
         let home = directory.path().join("home");
@@ -31572,17 +31679,58 @@ mod tests {
             home.join(".claude/CLAUDE.md"),
             home.join(".codex/AGENTS.md"),
         ] {
-            for feature in AgentFeature::ALL {
-                assert_eq!(
-                    crate::agent_feature_setup::status(&target, feature).unwrap(),
-                    FeatureSetupStatus::Managed,
-                    "{} should contain current {} teaching",
-                    target.display(),
-                    feature.label()
-                );
-            }
+            assert_eq!(
+                crate::agent_feature_setup::status(&target, AgentFeature::Progress).unwrap(),
+                FeatureSetupStatus::Managed
+            );
+            assert_eq!(
+                crate::agent_feature_setup::status(&target, AgentFeature::Chatroom).unwrap(),
+                FeatureSetupStatus::NotInstalled
+            );
         }
         assert!(app.pending_agent_setup_prompts.is_empty());
+    }
+
+    #[test]
+    fn automatic_cleanup_preserves_a_global_target_that_is_also_a_room_instruction() {
+        let project = tempfile::tempdir().unwrap();
+        crate::chatroom::initialize(project.path()).unwrap();
+        let instructions = project.path().join("CLAUDE.md");
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        app.agent_setup_settings.chatroom_global_file = Some(instructions.clone());
+        app.agent_setup_settings.progress_global_file = Some(project.path().join("progress.md"));
+        app.tree
+            .ensure_launch_project(project.path().to_path_buf())
+            .unwrap();
+        app.is_initial_state_sync_complete = true;
+        app.reconcile_agent_setup_prompts();
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::agent_feature_setup::status(&instructions, AgentFeature::Chatroom).unwrap(),
+            FeatureSetupStatus::Managed
+        );
+    }
+
+    #[test]
+    fn automatic_cleanup_preserves_room_guidance_in_a_closed_project() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("other-project");
+        std::fs::create_dir(&project).unwrap();
+        crate::chatroom::initialize(&project).unwrap();
+        let instructions = project.join("CLAUDE.md");
+        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
+        app.agent_setup_settings.chatroom_global_file = Some(instructions.clone());
+        app.agent_setup_settings.progress_global_file = Some(directory.path().join("progress.md"));
+        app.tree
+            .ensure_launch_project(directory.path().to_path_buf())
+            .unwrap();
+        app.is_initial_state_sync_complete = true;
+        app.reconcile_agent_setup_prompts();
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::agent_feature_setup::status(&instructions, AgentFeature::Chatroom).unwrap(),
+            FeatureSetupStatus::Managed
+        );
     }
 
     #[test]
@@ -32924,5 +33072,12 @@ mod smart_copy_capture_retention_contract_tests {
         assert_eq!(capture_client.usage().input_bytes, 0);
         assert_eq!(capture_client.usage().result_bytes, 0);
         assert_eq!(model_client.usage().result_bytes, 0);
+    }
+    #[test]
+    fn weekly_usage_is_a_global_tree_context_action() {
+        let app = App::new("test-session".into(), std::env::temp_dir());
+        assert!(app
+            .context_actions_for(ilium_core::ROOT_ID)
+            .contains(&ContextMenuAction::WeeklyUsage));
     }
 }

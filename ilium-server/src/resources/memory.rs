@@ -86,7 +86,7 @@ pub(super) trait ResourceBytes {
     fn resource_bytes(&self) -> usize;
 }
 macro_rules! domain{($($kind:ty),* $(,)?)=>{$(impl ResourceBytes for $kind{fn resource_bytes(&self)->usize{self.retained_bytes()}})*};}
-domain!(ResourceProjectId,ResourceCatalog,(),PathBuf,BTreeMap<InvocationId,InvocationEligibility>,Vec<PathBuf>,Vec<AgentIdentity>,Vec<ProjectResourceLink>);
+domain!(ResourceProjectId,ResourceCatalog,(),PathBuf,BTreeMap<InvocationId,InvocationEligibility>,Vec<PathBuf>,Vec<AgentIdentity>,Vec<ReservationId>,Vec<ProjectResourceLink>);
 impl ResourceBytes for ResourceProcessIdentity {
     fn resource_bytes(&self) -> usize {
         size_of::<Self>().saturating_add(self.boot_id.capacity())
@@ -115,6 +115,7 @@ impl ResourceBytes for ResourceReply {
             .saturating_add(self.recovery_token.heap_bytes())
             .saturating_add(self.message.heap_bytes())
             .saturating_add(self.local_invocations.heap_bytes())
+            .saturating_add(self.navigable_reservations.heap_bytes())
             .saturating_add(self.active_waits.heap_bytes())
     }
 }

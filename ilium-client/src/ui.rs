@@ -220,6 +220,7 @@ fn late_layers_are_source_transparent(app: &App) -> bool {
                 | Mode::Move
                 | Mode::Settings(_)
                 | Mode::Search(_)
+                | Mode::WeeklyUsage(_)
         )
 }
 
@@ -839,6 +840,16 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         return None;
     }
     let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
+    if let Mode::WeeklyUsage(state) = root_mode {
+        // The persistent voice control paints the footer after this layer.
+        // Keep usage text and row hit targets out of that reserved row.
+        let content_area = Rect {
+            height: area.height.saturating_sub(1),
+            ..area
+        };
+        crate::weekly_usage_ui::render(frame, content_area, state);
+        return None;
+    }
     if let Mode::Search(state) = root_mode {
         return search_ui::render_cursor(frame, area, state, &app.ui_settings.icons);
     }
@@ -908,7 +919,16 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         .map(|(pane_id, identity)| {
             let label = profiles_by_id
                 .get(identity.profile_id.as_str())
-                .map(|profile| (profile.icon.clone(), profile.name.clone()))
+                .map(|profile| {
+                    (
+                        profile.icon.clone(),
+                        if profile.show_name_in_title {
+                            profile.name.clone()
+                        } else {
+                            String::new()
+                        },
+                    )
+                })
                 .unwrap_or_else(|| {
                     (
                         "?".to_string(),
@@ -1495,7 +1515,8 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         | Mode::NavigationLeaderPending
         | Mode::Move
         | Mode::Settings(_)
-        | Mode::Search(_) => {}
+        | Mode::Search(_)
+        | Mode::WeeklyUsage(_) => {}
     }
     cursor
 }
@@ -3772,6 +3793,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
+        Mode::WeeklyUsage(_) => "AGENT USAGE",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
         // whole screen, status bar included). Kept as a real arm rather

@@ -486,6 +486,7 @@ impl crate::app::App {
                 .then_some((
                     node.id,
                     StatsRequest {
+                        transcript_hint: None,
                         class,
                         session_id,
                         project_path,
@@ -933,6 +934,7 @@ mod tests {
 
     fn request(session: &str) -> StatsRequest {
         StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Codex,
             session_id: session.into(),
             project_path: "/work".into(),
@@ -1424,6 +1426,7 @@ mod tests {
             contexts.insert(
                 NodeId(index),
                 StatsRequest {
+                    transcript_hint: None,
                     class,
                     session_id: id,
                     project_path: project_path.clone(),
@@ -1508,6 +1511,7 @@ mod tests {
         .unwrap();
 
         let request = StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Antigravity,
             session_id: id.into(),
             project_path: project_path.clone(),
@@ -1575,6 +1579,7 @@ mod tests {
         for replacement in [
             request("replacement"),
             StatsRequest {
+                transcript_hint: None,
                 class: AgentClass::Claude,
                 ..original.clone()
             },

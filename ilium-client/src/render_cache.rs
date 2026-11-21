@@ -24,7 +24,14 @@ enum SelectionReconciliation {
 /// the automatic-work trigger occurrence represented by this event, when
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
-    match event {
+    let tracks_usage_ownership = matches!(
+        &event,
+        ServerEvent::TreeSnapshot(_)
+            | ServerEvent::PaneStatusChanged { .. }
+            | ServerEvent::PaneSessionIdResolved { .. }
+            | ServerEvent::PaneSessionIdCleared { .. }
+    );
+    let occurrence = match event {
         ServerEvent::StatusScreenObserved(observation) => {
             if app.tree.get(observation.pane_id).is_some()
                 && app.custom_status_screen_observations.update(observation)
@@ -81,13 +88,15 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             catalog,
             clock,
             local_invocations,
+            navigable_reservations,
             active_waits,
             wait_revision,
         } => {
-            app.receive_resource_catalog(
+            app.receive_resource_projection(
                 catalog,
                 clock,
                 local_invocations,
+                navigable_reservations,
                 active_waits,
                 wait_revision,
             );
@@ -378,6 +387,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             });
             let became_agent = matches!(status, PaneStatus::Agent(..))
                 && !matches!(previous_status, Some(PaneStatus::Agent(..)));
+            let has_live_agent = matches!(status, PaneStatus::Agent(..));
             let transition_event = ilium_sound::event_for_transition(previous_status, &status)
                 .and_then(event_for_sound);
             // Only report `PaneBecameDone` -- and thus trigger a title
@@ -388,6 +398,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             // change that never actually happened.
             match app.tree.set_pane_status(pane_id, status) {
                 Ok(()) => {
+                    if !has_live_agent {
+                        app.agent_binding_observed_at_ms.remove(&pane_id);
+                    }
                     if app.pane_detection_evidence.get(&pane_id).is_some_and(|evidence| {
                         app.tree.get(pane_id).is_some_and(|node| {
                             matches!(&node.kind, NodeKind::Pane { status, .. } if status != &evidence.applied_status)
@@ -460,6 +473,17 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             transcript_path,
         } => {
             let prompt_was_visible = app.shows_last_prompt_banner(pane_id);
+            // The event proves ownership from receipt onward, not from the
+            // beginning of a possibly resumed transcript. A renewal closes
+            // the previous interval even when its visible ID is unchanged.
+            if process_id.is_some_and(|id| id != 0)
+                && process_identity_inode.is_some_and(|inode| inode != 0)
+            {
+                app.agent_binding_observed_at_ms
+                    .insert(pane_id, chrono::Utc::now().timestamp_millis());
+            } else {
+                app.agent_binding_observed_at_ms.remove(&pane_id);
+            }
             // The server can renew a binding after PID reuse without changing
             // the visible values. Neither old evidence nor an in-flight read
             // can be carried across that boundary.
@@ -549,6 +573,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.agent_title_generations
                 .insert(pane_id, title_generation);
             app.agent_process_ids.remove(&pane_id);
+            app.agent_binding_observed_at_ms.remove(&pane_id);
             app.agent_process_identity_inode.remove(&pane_id);
             app.agent_transcript_paths.remove(&pane_id);
             if let Some(previous_session_id) = app.agent_session_ids.remove(&pane_id) {
@@ -827,8 +852,13 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
+        ServerEvent::Polling { request_id, reply } => {
+            app.receive_polling_reply(request_id, reply);
+            None
+        }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. }
+        | ServerEvent::PollingEvidence { .. }
         | ServerEvent::MonitoringEvents { .. }
         | ServerEvent::MonitoringAck { .. }
         | ServerEvent::ControlWrite { .. } => None,
@@ -873,7 +903,11 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_voice_text_offer(request_id, sentences, start_voice);
             None
         }
+    };
+    if tracks_usage_ownership {
+        app.sync_weekly_usage_history(chrono::Utc::now().timestamp_millis());
     }
+    occurrence
 }
 
 /// Replaces the render-cache tree wholesale and reconciles `app.panes`
@@ -933,6 +967,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
             catalog,
             &app.session_name,
             &app.resources.local_invocations,
+            &app.resources.navigable_reservations,
         );
         app.open_new_resource_rows();
     }
@@ -998,6 +1033,17 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     // the same place its runtime is.
     app.agent_session_ids
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.agent_binding_observed_at_ms.retain(|pane_id, _| {
+        app.tree.get(*pane_id).is_some_and(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    status: PaneStatus::Agent(_),
+                    ..
+                }
+            )
+        })
+    });
     app.agent_process_ids
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.agent_process_identity_inode
@@ -2537,6 +2583,96 @@ mod tests {
     /// the life of the client process -- a real, if slow, memory leak
     /// across long-running sessions with heavy pane churn.
     #[test]
+    fn weekly_ownership_begins_at_verified_binding_and_ends_on_clear() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        apply(
+            &mut app,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id,
+                session_id: "session".into(),
+                process_id: Some(123),
+                process_identity_inode: Some(456),
+                title_generation: 0,
+                transcript_path: None,
+            },
+        );
+        assert!(app
+            .agent_binding_observed_at_ms
+            .get(&pane_id)
+            .is_some_and(|at| *at > 0));
+        apply(
+            &mut app,
+            ServerEvent::PaneSessionIdCleared {
+                pane_id,
+                title_generation: 1,
+            },
+        );
+        assert!(!app.agent_binding_observed_at_ms.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn weekly_ownership_requires_a_new_binding_after_agent_status_is_lost() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let agent_status =
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
+        tree.set_pane_status(pane_id, agent_status.clone()).unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        let resolution = || ServerEvent::PaneSessionIdResolved {
+            pane_id,
+            session_id: "session".into(),
+            process_id: Some(123),
+            process_identity_inode: Some(456),
+            title_generation: 0,
+            transcript_path: None,
+        };
+        apply(&mut app, resolution());
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::PlainShell,
+            },
+        );
+        assert!(!app.agent_binding_observed_at_ms.contains_key(&pane_id));
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: agent_status.clone(),
+            },
+        );
+        assert!(!app.agent_binding_observed_at_ms.contains_key(&pane_id));
+        apply(&mut app, resolution());
+        assert!(app.agent_binding_observed_at_ms.contains_key(&pane_id));
+
+        let mut replacement = app.tree.clone();
+        replacement
+            .set_pane_status(pane_id, PaneStatus::PlainShell)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(replacement));
+        assert!(!app.agent_binding_observed_at_ms.contains_key(&pane_id));
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: agent_status,
+            },
+        );
+        assert!(!app.agent_binding_observed_at_ms.contains_key(&pane_id));
+    }
+
+    #[test]
     fn tree_snapshot_prunes_pane_keyed_caches_for_removed_panes() {
         let mut app = app();
         let mut tree = ilium_core::Tree::new();
@@ -2752,6 +2888,7 @@ mod tests {
         let pane_id = NodeId(8);
         let context = ClaudeContext {
             request: StatsRequest {
+                transcript_hint: None,
                 class: AgentClass::Claude,
                 session_id: "synthetic-session".into(),
                 project_path: "/project".into(),
@@ -3177,6 +3314,13 @@ mod tests {
     #[test]
     fn automatic_setup_runs_at_initial_sync_without_displacing_recovery() {
         let directory = tempfile::tempdir().unwrap();
+        let chatroom_file = directory.path().join("global-chatroom.md");
+        std::fs::write(&chatroom_file, "# Keep\n").unwrap();
+        crate::agent_feature_setup::install(
+            &chatroom_file,
+            crate::agent_feature_setup::AgentFeature::Chatroom,
+        )
+        .unwrap();
         let mut app = App::new("test".to_string(), directory.path().to_path_buf());
         app.apply_agent_setup_settings(crate::config::AgentSetupSettings {
             chatroom_global_file: Some(directory.path().join("global-chatroom.md")),
@@ -3196,20 +3340,15 @@ mod tests {
             app.mode,
             crate::app::Mode::ConfirmSessionRecovery { pane_count: 2 }
         ));
-        for path in [
-            directory.path().join("global-chatroom.md"),
-            directory.path().join("global-progress.md"),
-        ] {
-            let feature = if path.ends_with("global-chatroom.md") {
-                crate::agent_feature_setup::AgentFeature::Chatroom
-            } else {
-                crate::agent_feature_setup::AgentFeature::Progress
-            };
-            assert_eq!(
-                crate::agent_feature_setup::status(&path, feature).unwrap(),
-                crate::agent_feature_setup::FeatureSetupStatus::Managed
-            );
-        }
+        assert_eq!(std::fs::read_to_string(&chatroom_file).unwrap(), "# Keep\n");
+        assert_eq!(
+            crate::agent_feature_setup::status(
+                &directory.path().join("global-progress.md"),
+                crate::agent_feature_setup::AgentFeature::Progress,
+            )
+            .unwrap(),
+            crate::agent_feature_setup::FeatureSetupStatus::Managed
+        );
 
         app.mode = crate::app::Mode::Normal;
         app.maybe_show_agent_setup_prompt();

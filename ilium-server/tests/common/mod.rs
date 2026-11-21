@@ -448,6 +448,46 @@ impl TestServer {
         agent_debug_menu_enabled: bool,
         notifications_config: NotificationsConfig,
     ) -> Self {
+        Self::start_with_polling_configuration(
+            session_name,
+            detection_config,
+            sound_settings,
+            sound_player,
+            agent_debug_menu_enabled,
+            notifications_config,
+            None,
+        )
+        .await
+    }
+
+    pub async fn start_with_polling_paths(
+        session_name: &str,
+        paths: ilium_server::PollingPaths,
+    ) -> Self {
+        Self::start_with_polling_configuration(
+            session_name,
+            DetectionConfig::default(),
+            ilium_sound::SoundSettings::default(),
+            Arc::new(NoopSoundPlayer),
+            false,
+            NotificationsConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            Some(paths),
+        )
+        .await
+    }
+
+    async fn start_with_polling_configuration(
+        session_name: &str,
+        detection_config: DetectionConfig,
+        sound_settings: ilium_sound::SoundSettings,
+        sound_player: Arc<dyn SoundPlayer>,
+        agent_debug_menu_enabled: bool,
+        notifications_config: NotificationsConfig,
+        polling_paths: Option<ilium_server::PollingPaths>,
+    ) -> Self {
         pin_test_pane_shell();
         // Taken before anything is started, and released when this server is
         // dropped at the end of the test.
@@ -471,6 +511,7 @@ impl TestServer {
 
         let options = ServerOptions {
             resource_catalog_path: None,
+            polling_paths,
             session_name: session_name.to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),

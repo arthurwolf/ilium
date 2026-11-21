@@ -26,6 +26,7 @@ fn resource_snapshot_and_result_are_typed() {
         active_waits: Vec::new(),
         wait_revision: 0,
         local_invocations: Vec::new(),
+        navigable_reservations: Vec::new(),
         catalog: catalog.clone(),
         clock: clock.clone(),
     };
@@ -36,6 +37,7 @@ fn resource_snapshot_and_result_are_typed() {
             active_waits: Vec::new(),
             wait_revision: 0,
             local_invocations: Vec::new(),
+            navigable_reservations: Vec::new(),
             catalog,
             clock,
             result: None,
@@ -73,6 +75,7 @@ fn boxed_resource_reply_retains_payload_and_nested_capacity() {
             recovery_token: None,
             message: Some(message),
             local_invocations: Vec::new(),
+            navigable_reservations: Vec::new(),
             active_waits: Vec::new(),
             wait_revision: 0,
         })),
@@ -145,6 +148,17 @@ fn every_resource_operation_and_event_roundtrips_with_owned_capacity() {
             resource_id: resource_id.clone(),
             reservation_id: id.clone(),
             estimate_seconds: 600,
+        },
+        ResourceCommand::RegisterCustody {
+            reservation_id: id.clone(),
+            ownership_generation: 4,
+            job_id: "fixture-job".into(),
+            stage_id: "fixture-stage".into(),
+            workload_invocation_id: "fixture-worker".into(),
+        },
+        ResourceCommand::ClearCustody {
+            reservation_id: id.clone(),
+            ownership_generation: 4,
         },
         ResourceCommand::Release {
             reservation_id: id.clone(),
@@ -234,6 +248,7 @@ fn every_resource_operation_and_event_roundtrips_with_owned_capacity() {
             catalog: ResourceCatalog::default(),
             clock: clock.clone(),
             local_invocations: vec![agent.clone()],
+            navigable_reservations: Vec::new(),
         },
         ServerEvent::ResourceResult {
             request_id: 99,
@@ -243,6 +258,7 @@ fn every_resource_operation_and_event_roundtrips_with_owned_capacity() {
                 catalog: ResourceCatalog::default(),
                 clock,
                 local_invocations: vec![agent],
+                navigable_reservations: Vec::new(),
                 result: None,
                 reservation: None,
                 recovery_token: Some("fixture".into()),
@@ -352,6 +368,7 @@ fn resource_states_history_and_wait_associations_survive_bounded_wire_decode() {
                 state: state.clone(),
                 ownership_generation: 1,
                 acquisition_pending: state == ReservationState::Owned,
+                custody: None,
             };
             let mut catalog = ResourceCatalog {
                 revision: 17,
@@ -405,6 +422,7 @@ fn resource_states_history_and_wait_associations_survive_bounded_wire_decode() {
                     recovery_token: None,
                     message: None,
                     local_invocations: vec![agent.clone()],
+                    navigable_reservations: Vec::new(),
                     active_waits: vec![(agent.pane_id, id)],
                     wait_revision: 42,
                 })),

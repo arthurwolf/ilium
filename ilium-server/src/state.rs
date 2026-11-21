@@ -379,6 +379,7 @@ pub struct ServerState {
         std::sync::Mutex<std::collections::HashMap<(Option<NodeId>, String), u64>>,
     blocking_error_next_generation: std::sync::atomic::AtomicU64,
     pub(crate) resources: std::sync::OnceLock<crate::resources::ResourceService>,
+    pub(crate) polling: crate::polling_detection::PollingService,
     pub session_name: String,
     /// Canonical project boundary shared by every pane in this server.
     pub session_cwd: PathBuf,
@@ -661,6 +662,7 @@ impl ServerState {
             .expect("a new tree always accepts its launch project");
         Self {
             resources: std::sync::OnceLock::new(),
+            polling: crate::polling_detection::PollingService::default(),
             blocking_errors: std::sync::Mutex::new(Vec::new()),
             blocking_error_generations: std::sync::Mutex::new(std::collections::HashMap::new()),
             blocking_error_next_generation: std::sync::atomic::AtomicU64::new(1),

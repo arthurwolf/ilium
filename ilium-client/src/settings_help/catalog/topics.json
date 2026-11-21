@@ -1,5 +1,15 @@
 [
   {
+    "id": "POLLING-01",
+    "title": "Advisory polling detection",
+    "explanation": "Opt in to bounded activity review through OpenAI using the saved OpenAI key. Findings appear under the controls and refresh while this page is open. The detector does not send commands or messages to agents.",
+    "specimen": "Enable detection: Off\nRecent window: 30 events\nSpending: unavailable",
+    "states": "Arrow keys adjust values; changes save automatically. Zero monthly limit prevents paid checks; unlimited budget is a separate setting.",
+    "frames": ["Enable detection: Off"],
+    "motion": "None.",
+    "caveat": "A local candidate is not a confirmed finding. Unavailable accounting and unknown charges are never zero spending. The model's answer is an estimate; findings list local counts, never its reasoning."
+  },
+  {
     "id": "CACHE-01",
     "title": "Agent cache keep-alive",
     "explanation": "Configure cache refresh during selected waits, with separate intervals for Claude and Codex.",
@@ -3477,13 +3487,13 @@
   {
     "id": "SETUP-01",
     "title": "Chatroom targets",
-    "explanation": "“Inspect and refresh Ilium’s Chatroom instructions in global and project instruction targets.”",
-    "specimen": "separate `Global file: default/custom`, `Global target [ON]/[UPDATE]/[NEWER]/[FOUND]/[OFF]`, and `Project target …` rows, with `Enter change/refresh` and `R default` shown as real controls.",
-    "states": "target status and chosen global file.",
+    "explanation": "“Inspect and refresh Ilium’s Chatroom instructions for a project.”",
+    "specimen": "project target rows show their instruction status and Enter refreshes the selected target.",
+    "states": "status per project target.",
     "motion": "static.",
     "caveat": "preserve user-authored instructions; help writes no files and uses no invented real path.",
     "frames": [
-      "separate `Global file: default/custom`, `Global target [ON]/[UPDATE]/[NEWER]/[FOUND]/[OFF]`, and `Project target …` rows, with `Enter change/refresh` and `R default` shown as real controls."
+      "Project targets show the status of their Chatroom instructions."
     ]
   },
   {

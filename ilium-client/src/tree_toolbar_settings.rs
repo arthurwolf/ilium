@@ -55,8 +55,19 @@ fn change(app: &mut App, state: &mut SettingsState, key: KeyEvent) -> bool {
             }
             KeyCode::Enter => {
                 if let Some(entry) = available.get(selected) {
-                    ui.tree_toolbar_layout.entries.push(entry.clone());
-                    state.selected_row = ui.tree_toolbar_layout.entries.len() - 1;
+                    let entries = &mut ui.tree_toolbar_layout.entries;
+                    let index = if *entry
+                        == crate::tree_toolbar_layout::TreeToolbarEntry::WeeklyUsage
+                        && entries.ends_with(
+                            &crate::tree_toolbar_layout::TreeToolbarLayout::ANCHORED_SUFFIX,
+                        ) {
+                        entries.len()
+                            - crate::tree_toolbar_layout::TreeToolbarLayout::ANCHORED_SUFFIX.len()
+                    } else {
+                        entries.len()
+                    };
+                    entries.insert(index, entry.clone());
+                    state.selected_row = index;
                     app.apply_and_persist_ui_settings(ui);
                 }
                 state.toolbar_picker = None;
@@ -403,6 +414,32 @@ mod tests {
     }
 
     #[test]
+    fn adding_weekly_usage_preserves_anchored_toolbar_buttons() {
+        let mut app = App::new("weekly toolbar test".to_owned(), std::env::temp_dir());
+        let mut state = SettingsState::default();
+        let available = app
+            .ui_settings
+            .tree_toolbar_layout
+            .available(&profile_ids(&app));
+        state.toolbar_picker = available
+            .iter()
+            .position(|entry| *entry == TreeToolbarEntry::WeeklyUsage);
+        assert!(state.toolbar_picker.is_some());
+        assert!(handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ));
+        let entries = &app.ui_settings.tree_toolbar_layout.entries;
+        assert!(entries.ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
+        assert_eq!(entries[state.selected_row], TreeToolbarEntry::WeeklyUsage);
+        assert_eq!(
+            state.selected_row + TreeToolbarLayout::ANCHORED_SUFFIX.len() + 1,
+            entries.len()
+        );
+    }
+
+    #[test]
     fn wide_settings_show_preview_next_to_list_and_narrow_settings_stack() {
         let (list, preview) = columns(Rect::new(0, 0, 100, 24));
         assert!(preview.x >= list.right());
@@ -451,6 +488,7 @@ mod tests {
             base_provider: ilium_core::BuiltinAgentProvider::Claude,
             command: String::new(),
             arguments: String::new(),
+            show_name_in_title: false,
             environment: Vec::new(),
         });
         app.reconcile_toolbar_custom_agents();

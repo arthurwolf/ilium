@@ -39,6 +39,23 @@ Keep the reservation and request identifiers returned by reserve. A successful r
 
 `wait` blocks until the reservation owns the resource or reaches a terminal result. It has no default timeout and automatically displays queue progress. Interrupting or disconnecting a wait detaches its observer; the reservation remains. Cancel a queued reservation explicitly when it is no longer needed. Once owned, stop all use and leave the device safe before explicitly releasing the reservation. One agent invocation may have only one active reservation across resources; release between phases requiring different devices.
 
+Automated custodians can pass `--expected-generation <positive-number>` to `resource release` to release only the ownership generation they recorded. A different current generation is rejected; the option does not establish that the hardware is safe. Without it, release uses the generation in the command's current snapshot.
+
+## Named participants
+
+Anyone using the same operating-system account can join the same queue without an agent pane. Select a running Ilium project with `--project` when necessary and pass the same name on each command:
+
+```sh
+ilium resource --name "Arthur" reserve gpu 10m
+ilium resource --name "Arthur" wait <reservation-id>
+ilium resource --name "Arthur" status <reservation-id>
+ilium resource --name "Arthur" estimate <reservation-id> 20m
+ilium resource --name "Arthur" release <reservation-id>
+ilium resource --name "Arthur" cancel <reservation-id>
+```
+
+The name is a cooperative identity, not a password: another process using the same name can act on that participant's reservation. Names are case-sensitive and must contain 1–200 printable bytes without surrounding whitespace. A participant may have one active reservation at a time. Named reservations share the normal FIFO queue and require explicit release or cancellation. The command can resolve a resource identifier or a globally unique linked slug; when a slug refers to different resources, use the resource identifier shown by `ilium resource list --all`. Named participants are not tied to an agent process, so closing the command does not release their claim. A reboot still requires physical clearance for an occupied resource.
+
 ## Tree, detail and progress displays
 
 Linked resources appear at the top of their projects, after the chatroom. UTF-8 indicators show free, taken, attention and queue state. Select a resource to open its right-side detail view with description, rules, owner, ordered waiting list, estimates and management actions.

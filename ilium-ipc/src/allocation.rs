@@ -554,12 +554,14 @@ impl HeapBytes for crate::resource::ResourceReply {
             recovery_token,
             message,
             local_invocations,
+            navigable_reservations,
             active_waits,
             wait_revision: _,
         } = self;
         active_waits
             .heap_bytes()
             .saturating_add(local_invocations.heap_bytes())
+            .saturating_add(navigable_reservations.heap_bytes())
             .saturating_add(catalog.heap_bytes())
             .saturating_add(clock.heap_bytes())
             .saturating_add(result.heap_bytes())
@@ -568,9 +570,67 @@ impl HeapBytes for crate::resource::ResourceReply {
             .saturating_add(message.heap_bytes())
     }
 }
+impl HeapBytes for ilium_core::polling_detection::Finding {
+    fn heap_bytes(&self) -> usize {
+        self.finding_id
+            .heap_bytes()
+            .saturating_add(self.session_id.heap_bytes())
+            .saturating_add(self.session_incarnation.heap_bytes())
+            .saturating_add(self.observed_utc.heap_bytes())
+    }
+}
+impl HeapBytes for crate::polling::PollingHistoryRecord {
+    fn heap_bytes(&self) -> usize {
+        self.created_utc
+            .heap_bytes()
+            .saturating_add(self.project_id.heap_bytes())
+            .saturating_add(self.model.heap_bytes())
+    }
+}
+impl HeapBytes for crate::polling::PollingReply {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Snapshot(snapshot) => size_of::<crate::polling::PollingSnapshot>()
+                .saturating_add(snapshot.settings.excluded_projects.heap_bytes())
+                .saturating_add(snapshot.findings.heap_bytes()),
+            Self::History(page) => page.records.heap_bytes(),
+            Self::Estimate(estimate) => estimate.estimate_id.heap_bytes(),
+            Self::Accepted | Self::Rejected(_) => 0,
+            Self::EvidenceSubscribed { server_incarnation } => server_incarnation.heap_bytes(),
+        }
+    }
+}
+impl HeapBytes for ilium_core::polling_detection::ActivityEvent {
+    fn heap_bytes(&self) -> usize {
+        self.text
+            .heap_bytes()
+            .saturating_add(self.timestamp.heap_bytes())
+            .saturating_add(self.name.heap_bytes())
+            .saturating_add(self.call_id.heap_bytes())
+    }
+}
+impl HeapBytes for crate::polling::PollingFeedEvent {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Batch(batch) => batch
+                .binding
+                .session
+                .heap_bytes()
+                .saturating_add(batch.binding.incarnation.heap_bytes())
+                .saturating_add(batch.events.heap_bytes()),
+            Self::Closed(binding) => binding
+                .session
+                .heap_bytes()
+                .saturating_add(binding.incarnation.heap_bytes()),
+            Self::Stopped(_) => 0,
+        }
+    }
+}
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
+            Self::Polling { reply, .. } => reply.heap_bytes(),
+            Self::PollingEvidence { event, .. } => event.heap_bytes(),
             Self::MonitoringEvents { result, .. } | Self::MonitoringAck { result, .. } => {
                 result.heap_bytes()
             }
@@ -586,11 +646,13 @@ impl HeapBytes for ServerEvent {
                 catalog,
                 clock,
                 local_invocations,
+                navigable_reservations,
                 active_waits,
                 wait_revision: _,
             } => active_waits.heap_bytes().saturating_add(
                 local_invocations
                     .heap_bytes()
+                    .saturating_add(navigable_reservations.heap_bytes())
                     .saturating_add(catalog.heap_bytes())
                     .saturating_add(clock.heap_bytes()),
             ),

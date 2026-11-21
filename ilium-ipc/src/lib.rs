@@ -17,6 +17,8 @@ mod error;
 mod framing;
 mod monitoring;
 pub mod plugin;
+pub mod polling;
+mod polling_subscription;
 mod protocol;
 pub mod resource;
 mod startup;
@@ -318,6 +320,9 @@ mod tests {
             },
             ClientRequest::NewProject {
                 path: PathBuf::from("/tmp/second-project"),
+            },
+            ClientRequest::FlattenProject {
+                project_id: NodeId(1),
             },
             ClientRequest::ChangeProjectFolder {
                 project_id: NodeId(1),

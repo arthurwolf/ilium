@@ -48,12 +48,15 @@ pub fn on_tick(
     let resource_saved = app.tick_resource_dialog(now);
     let budget_saved = app.tick_restructure_budget_autosave(now)
         | app.tick_inference_number_autosave(now)
+        | app.tick_polling_autosave(now)
         | app.tick_remote_compaction_save(now)
         | app.tick_custom_status_rules_save(now);
+    app.tick_polling_refresh(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     let session_stats_changed = app.tick_session_stats(now);
+    let weekly_usage_changed = app.tick_weekly_usage(now);
     let session_models_changed = app.tick_session_models(now);
     let session_goals_changed = app.tick_session_goals(now);
     let claude_goals_changed = app.tick_claude_goals(now);
@@ -96,6 +99,7 @@ pub fn on_tick(
         || chatroom_changed
         || attention_changed
         || session_stats_changed
+        || weekly_usage_changed
         || session_models_changed
         || session_goals_changed
         || claude_goals_changed

@@ -368,6 +368,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_last_prompt_dialog_mouse(app, mouse, position);
         return;
     }
+    if let Mode::WeeklyUsage(state) = &mut app.mode {
+        if state.mouse(mouse) {
+            app.mode = Mode::Normal;
+        }
+        return;
+    }
     if matches!(app.mode, Mode::Search(_)) {
         let Mode::Search(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Search above");
@@ -1616,6 +1622,10 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
     match action {
         TreeToolbarAction::Search => {
             app.action_open_search();
+            return;
+        }
+        TreeToolbarAction::WeeklyUsage => {
+            app.action_open_weekly_usage();
             return;
         }
         // Custom agents launch from the click handler, which owns the profile lookup.
@@ -3572,6 +3582,43 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 return;
             }
         }
+    }
+
+    if state.tab == crate::app::SettingsTab::PollingDetection
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+        )
+        && layout.content_area.contains(position)
+    {
+        let line = usize::from(position.y - layout.content_area.y)
+            .saturating_add(usize::from(state.scroll));
+        let geometry =
+            crate::polling_settings::layout(app, state.selected_row, layout.content_area.width);
+        if let Some((index, row)) = geometry
+            .rows
+            .iter()
+            .enumerate()
+            .find(|(_, row)| (row.first_line..=row.control_line).contains(&line))
+        {
+            state.selected_row = index;
+            if line == row.control_line
+                && position.x >= layout.content_area.x.saturating_add(row.control_x)
+                && position.x < layout.content_area.x.saturating_add(row.control_end)
+            {
+                let direction = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+                    -1
+                } else {
+                    1
+                };
+                app.settings_adjust_polling_row(
+                    crate::polling_settings::PollingRow::ALL[index],
+                    direction,
+                );
+            }
+        }
+        app.mode = Mode::Settings(Box::new(state));
+        return;
     }
 
     match mouse.kind {
@@ -5677,6 +5724,19 @@ mod row_action_click_tests {
     }
 
     #[test]
+    fn weekly_usage_toolbar_and_context_menu_open_the_same_view() {
+        let mut app = test_app();
+        execute_tree_toolbar_action(&mut app, TreeToolbarAction::WeeklyUsage);
+        assert!(matches!(app.mode, Mode::WeeklyUsage(_)));
+        app.mode = Mode::Normal;
+        app.execute_context_action(
+            crate::app::ContextMenuAction::WeeklyUsage,
+            ilium_core::ROOT_ID,
+        );
+        assert!(matches!(app.mode, Mode::WeeklyUsage(_)));
+    }
+
+    #[test]
     fn search_toolbar_action_opens_the_full_screen_workspace_finder() {
         let mut app = test_app();
         execute_tree_toolbar_action(&mut app, TreeToolbarAction::Search);
@@ -6599,6 +6659,86 @@ mod text_trigger_mouse_tests {
             ..SettingsState::default()
         }));
         app
+    }
+
+    #[test]
+    fn polling_numeric_value_supports_left_increment_and_right_decrement() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("synthetic-polling-pointer".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.set_screen_area(Rect::new(0, 0, 100, 60));
+        let state = SettingsState {
+            tab: SettingsTab::PollingDetection,
+            selected_row: 1,
+            ..Default::default()
+        };
+        let screen =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
+        let geometry = crate::polling_settings::layout(&app, 1, screen.content_area.width);
+        let row = &geometry.rows[1];
+        let column = screen.content_area.x + row.control_x;
+        let control_y = screen.content_area.y + row.control_line as u16;
+        app.mode = Mode::Settings(Box::new(state));
+        for (button, expected) in [(MouseButton::Left, 6), (MouseButton::Right, 5)] {
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(button),
+                    column,
+                    row: control_y,
+                    modifiers: crossterm::event::KeyModifiers::empty(),
+                },
+            );
+            assert_eq!(
+                app.polling_settings.event_interval, expected,
+                "polling value pointer action {button:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn polling_stacked_control_does_not_treat_trailing_blank_cells_as_a_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("synthetic-polling-hit".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.set_screen_area(Rect::new(0, 0, 60, 80));
+        let state = SettingsState {
+            tab: SettingsTab::PollingDetection,
+            selected_row: 6,
+            ..Default::default()
+        };
+        let screen =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
+        let geometry = crate::polling_settings::layout(&app, 6, screen.content_area.width);
+        let row = &geometry.rows[6];
+        assert!(
+            row.control_line > row.first_line,
+            "fixture must stack the long evidence control"
+        );
+        let value_width = crate::value_control::cell_width(
+            &crate::polling_settings::PollingRow::EvidenceLimit.value(&app.polling_settings),
+        );
+        let column = screen.content_area.right() - 3;
+        assert!(
+            usize::from(column - screen.content_area.x) >= usize::from(row.control_x) + value_width
+        );
+        let control_y = screen.content_area.y + row.control_line as u16;
+        assert!(control_y < screen.content_area.bottom());
+        app.mode = Mode::Settings(Box::new(state));
+        let before = app.polling_settings.clone();
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row: control_y,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+        assert_eq!(
+            app.polling_settings, before,
+            "blank cells must not adjust a polling value"
+        );
     }
 
     #[test]

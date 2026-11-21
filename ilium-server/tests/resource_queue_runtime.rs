@@ -38,6 +38,7 @@ impl Server {
         let socket = root.join(format!("{name}.sock"));
         let options = ServerOptions {
             resource_catalog_path: Some(catalog.to_path_buf()),
+            polling_paths: None,
             session_name: name.into(),
             socket_path: socket.clone(),
             snapshot_path: project.join("snapshot.json"),

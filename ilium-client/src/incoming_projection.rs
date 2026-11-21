@@ -191,6 +191,11 @@ impl ProjectionRetention {
             PaneDebugEntryAppended { pane_id, entry } => {
                 (Slot::Debug(entry.sequence), Some(*pane_id))
             }
+            Polling {
+                request_id,
+                reply: ilium_ipc::polling::PollingReply::Snapshot(snapshot),
+            } if app.accepts_polling_snapshot(*request_id, snapshot) => (global, None),
+            Polling { .. } => return update,
             ProjectRestructureRejected { project_id, .. } => (global, Some(*project_id)),
             PaneRecapScreen { .. }
             | MonitoringEvents { .. }
@@ -237,7 +242,10 @@ impl ProjectionRetention {
             | PaneCreateFinished { .. }
             | WorkspaceRemovalBlocked { .. } => return update,
             // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
-            Plugin(_) | Contributions(_) | Rejected(_) => return update,
+            | PollingEvidence { .. }
+            | Plugin(_)
+            | Contributions(_)
+            | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {
                     update.clear_detection_error = true;

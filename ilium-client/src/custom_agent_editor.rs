@@ -20,6 +20,7 @@ pub enum EditorRow {
     Provider,
     Command,
     Arguments,
+    ShowNameInTitle,
     EnvironmentKey(usize),
     EnvironmentValue(usize),
     RemoveEnvironment(usize),
@@ -37,6 +38,7 @@ impl CustomAgentEditor {
             EditorRow::Provider,
             EditorRow::Command,
             EditorRow::Arguments,
+            EditorRow::ShowNameInTitle,
         ];
         for index in 0..self.draft.environment.len() {
             rows.extend([
@@ -73,6 +75,7 @@ impl CustomAgentEditor {
                 command: String::new(),
                 arguments: String::new(),
                 environment: Vec::new(),
+                show_name_in_title: false,
             },
             reveal_values: false,
         }

@@ -32,7 +32,7 @@ Use `Ctrl+B ?` (or the Keyboard tab) to see the active key map. Each tab ends or
 
 ## Auto-save behaviour
 
-- Toggles, selectors and steppers are saved the moment they change.
+- Toggles, selectors and steppers are saved the moment they change. Polling Detection numeric steppers instead wait for a 600 ms pause and show their save state.
 - Text and number inputs commit when you press `Enter`. Some numeric editors (for example the restructure token budget) also save valid changes automatically after a short pause (600 ms) while you type.
 - The inference editors stay open until the new value has been durably written to disk. If saving fails (for example because the file is not writable), your input stays in the editor with an error message; press `Enter` to retry. `Esc` closes the editor without cancelling a write that has already been admitted.
 - Each tab only rewrites its own table in `config.toml` and preserves every other table, including tables written by the detached server. You can safely hand-edit unrelated tables while Ilium runs, but see [Troubleshooting](#troubleshooting) for the advice on editing the same table concurrently.
@@ -49,6 +49,7 @@ The tabs appear in this order:
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
 | Toolbar | Tree toolbar order, buttons and inactivity threshold | `[ui]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
+| [Polling Detection](polling-detection.md) | Advisory polling review controls and separate detector accounting; automatic reviews remain under integration | `[polling_detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
 | Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
 | Remote compaction | Summarize a Claude or Codex session through the Inference model and resume from it | `[remote_compaction]` |
@@ -141,6 +142,8 @@ Choose the glyph for each configurable role: group, top-level destination, proje
 ### Toolbar
 
 The tree toolbar can be arranged in Settings → Toolbar. Select a button with Up/Down; use Shift+Up/Down or the arrow buttons to move it, Delete or × to remove it, and + to open the list of available buttons. The live preview follows the chosen order. Press `r` to restore the default arrangement. Changes are saved immediately.
+
+The **Toolbar** tab can add the optional **Agent usage** tree-footer button. It is absent from the default layout; existing layouts are preserved.
 
 The eye button switches between the normal complete tree and an activity filter. The filter hides inactive terminals and agents, projects without an active terminal, and groups without an active descendant. Visible projects retain their auxiliary rows. The inactivity threshold defaults to 15 minutes and can be adjusted in this tab. The filter starts off each time Ilium opens.
 

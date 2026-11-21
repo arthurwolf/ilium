@@ -72,6 +72,14 @@ const BUILT_IN_PRICES: &[(&str, ModelPrice)] = &[
     ("claude-sonnet-4-6", ModelPrice::new(3.0, 15.0, 0.30, 3.75)),
     ("claude-sonnet-4-5", ModelPrice::new(3.0, 15.0, 0.30, 3.75)),
     ("claude-haiku-4-5", ModelPrice::new(1.0, 5.0, 0.10, 1.25)),
+    // gpt-6 / gpt-6.1 appear in real Codex transcripts; no list price is
+    // known, so they borrow their tier's 5.6 prices as a workload proxy.
+    ("gpt-6.1-sol", ModelPrice::new(4.0, 20.0, 0.40, 0.0)),
+    ("gpt-6.1-terra", ModelPrice::new(2.0, 12.0, 0.20, 0.0)),
+    ("gpt-6.1-luna", ModelPrice::new(0.20, 1.20, 0.02, 0.0)),
+    ("gpt-6-sol", ModelPrice::new(4.0, 20.0, 0.40, 0.0)),
+    ("gpt-6-terra", ModelPrice::new(2.0, 12.0, 0.20, 0.0)),
+    ("gpt-6-luna", ModelPrice::new(0.20, 1.20, 0.02, 0.0)),
     ("gpt-5.6-sol", ModelPrice::new(4.0, 20.0, 0.40, 0.0)),
     ("gpt-5.6-terra", ModelPrice::new(2.0, 12.0, 0.20, 0.0)),
     ("gpt-5.6-luna", ModelPrice::new(0.20, 1.20, 0.02, 0.0)),
@@ -661,6 +669,9 @@ mod tests {
             "gpt-5.1-codex",
             "gpt-5.1-codex-mini",
             "gpt-5-codex",
+            "gpt-6.1-sol",
+            "gpt-6-luna",
+            "gpt-6.1-terra",
         ] {
             assert!(
                 table.lookup(model).is_some(),

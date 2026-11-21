@@ -44,6 +44,7 @@ fn new_store_resumes_a_previously_scanned_large_transcript() {
     }
     drop(file);
     let request = StatsRequest {
+        transcript_hint: None,
         class: AgentClass::Claude,
         session_id: session_id.into(),
         project_path: project.path().to_path_buf(),
@@ -87,6 +88,7 @@ fn saved_accumulator_rejects_changed_transcript_and_owner() {
     )
     .unwrap();
     let request = StatsRequest {
+        transcript_hint: None,
         class: AgentClass::Claude,
         session_id: "session-one".into(),
         project_path: project.path().to_path_buf(),
@@ -131,6 +133,7 @@ fn older_cache_writer_does_not_replace_newer_progress() {
     let path = project.path().join("transcript.jsonl");
     std::fs::write(&path, b"{}\n").unwrap();
     let request = StatsRequest {
+        transcript_hint: None,
         class: AgentClass::Codex,
         session_id: "session".into(),
         project_path: project.path().to_path_buf(),
@@ -164,6 +167,7 @@ fn restored_accumulator_resumes_partial_main_and_subagent_records() {
     std::fs::write(&path, b"{}\n{\"type\":\"user\"").unwrap();
     std::fs::write(&extra, b"{}\n{\"type\":\"assistant\"").unwrap();
     let request = StatsRequest {
+        transcript_hint: None,
         class: AgentClass::Claude,
         session_id: "session".into(),
         project_path: project.path().to_path_buf(),
@@ -195,6 +199,7 @@ fn replacing_or_truncating_transcript_invalidates_saved_position() {
     let replacement = project.path().join("replacement.jsonl");
     std::fs::write(&path, b"{}\n{}\n").unwrap();
     let request = StatsRequest {
+        transcript_hint: None,
         class: AgentClass::Codex,
         session_id: "session".into(),
         project_path: project.path().to_path_buf(),

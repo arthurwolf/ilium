@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod allocation;
 pub mod attention;
+pub mod external_tasks;
 pub mod resource_queue;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;
@@ -19,6 +20,7 @@ pub mod animation_recommendation;
 pub mod cache_keepalive;
 pub mod custom_agent;
 pub mod option_compatible_list;
+pub mod polling_detection;
 pub mod progress_timing;
 pub mod status_rule_expression;
 pub use progress_timing::{
@@ -3633,6 +3635,41 @@ impl Tree {
                 }
             };
             tree.push_child(parent, child_id)?;
+        }
+        Ok(())
+    }
+
+    /// Moves every pane and folder entry under `project` to the project's top
+    /// level, in tree order, then removes the groups and split views that are
+    /// left empty. Worktree containers have fixed membership: they and the
+    /// groups that still hold one stay where they are.
+    pub fn flatten_project(&mut self, project: NodeId) -> Result<(), TreeError> {
+        let project_node = self.get(project).ok_or(TreeError::NodeNotFound(project))?;
+        if !project_node.is_project() {
+            return Err(TreeError::NotAContainer(project));
+        }
+        let mut entries = Vec::new();
+        let mut groups = Vec::new();
+        let mut frontier: Vec<NodeId> = self.children_of(project)?.iter().rev().copied().collect();
+        while let Some(id) = frontier.pop() {
+            let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
+            if node.is_worktree() {
+                continue;
+            }
+            if node.is_container() {
+                groups.push(id);
+                frontier.extend(self.children_of(id)?.iter().rev().copied());
+            } else if node.parent != Some(project) {
+                entries.push(id);
+            }
+        }
+        for id in entries {
+            self.move_node(id, project, None)?;
+        }
+        for id in groups.into_iter().rev() {
+            if self.children_of(id)?.is_empty() {
+                self.remove_node(id)?;
+            }
         }
         Ok(())
     }

@@ -679,6 +679,7 @@ impl crate::app::App {
         });
         Some(ClaudeContext {
             request: StatsRequest {
+                transcript_hint: None,
                 class,
                 session_id,
                 project_path,
@@ -718,6 +719,7 @@ mod tests {
     fn identity_changes_fence_cached_claude_text() {
         let original = ClaudeContext {
             request: StatsRequest {
+                transcript_hint: None,
                 class: AgentClass::Claude,
                 session_id: "session-a".into(),
                 project_path: "/project-a".into(),

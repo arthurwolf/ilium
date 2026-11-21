@@ -34,6 +34,23 @@ pub struct AgentIdentity {
     pub label: String,
 }
 impl AgentIdentity {
+    /// External participants have no pane or process. This reserved identity
+    /// namespace keeps the durable catalog readable by existing projections.
+    pub fn external(name: &str) -> Self {
+        Self {
+            project_id: ResourceProjectId("external".into()),
+            session_id: "external".into(),
+            pane_id: crate::NodeId(0),
+            runtime_generation: "external".into(),
+            invocation_id: InvocationId(format!("external:{name}")),
+            label: name.into(),
+        }
+    }
+    pub fn is_external(&self) -> bool {
+        self.pane_id.0 == 0
+            && self.runtime_generation == "external"
+            && *self == Self::external(&self.label)
+    }
     pub fn same_invocation(&self, other: &Self) -> bool {
         self.project_id == other.project_id
             && self.session_id == other.session_id
@@ -47,6 +64,7 @@ pub enum ResourceActor {
     Agent(AgentIdentity),
     User,
     System,
+    External(AgentIdentity),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceClock {
@@ -122,6 +140,26 @@ pub struct ProjectResourceLink {
     pub desired_instruction_revision: u64,
     pub sync_debt: Option<String>,
 }
+/// Durable intent. A cleared intent remains attached to its grant to fence relaunch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustodyIntent {
+    pub registration_request_id: RequestId,
+    pub job_id: String,
+    pub stage_id: String,
+    pub workload_invocation_id: String,
+    pub ownership_generation: u64,
+    pub cleared: bool,
+}
+/// Implemented only by the trusted host authority, after checking the entire
+/// isolated workload. Never construct this verifier from an IPC caller's claim.
+pub trait CustodyProofVerifier {
+    fn verify_stopped(
+        &self,
+        resource: &ResourceId,
+        reservation: &Reservation,
+        intent: &CustodyIntent,
+    ) -> bool;
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reservation {
     pub id: ReservationId,
@@ -136,6 +174,10 @@ pub struct Reservation {
     pub state: ReservationState,
     pub ownership_generation: u64,
     pub acquisition_pending: bool,
+    // Binary structs are positional: even None must emit its option tag.
+    // Default still accepts older JSON records without this field.
+    #[serde(default)]
+    pub custody: Option<CustodyIntent>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceRecord {
@@ -241,6 +283,18 @@ pub enum ResourceCommand {
         resource_id: ResourceId,
         reservation_id: ReservationId,
         estimate_seconds: u64,
+    },
+    RegisterCustody {
+        reservation_id: ReservationId,
+        ownership_generation: u64,
+        job_id: String,
+        stage_id: String,
+        workload_invocation_id: String,
+    },
+    /// Only the trusted verifier entry point can apply this command.
+    ClearCustody {
+        reservation_id: ReservationId,
+        ownership_generation: u64,
     },
     Release {
         reservation_id: ReservationId,

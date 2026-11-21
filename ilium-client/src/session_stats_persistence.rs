@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use super::StatsRequest;
 use crate::session_stats::StatsAccumulator;
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 4;
 // JSON containers can expand in memory, so the read bound is much smaller
 // than the separately admitted decoder workspace.
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
@@ -27,6 +27,7 @@ pub(super) fn source_identity(
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 struct Owner {
+    transcript_hint: Option<PathBuf>,
     class: ilium_core::AgentClass,
     session_id: String,
     project_path: PathBuf,
@@ -35,6 +36,7 @@ struct Owner {
 impl From<&StatsRequest> for Owner {
     fn from(request: &StatsRequest) -> Self {
         Self {
+            transcript_hint: request.transcript_hint.clone(),
             class: request.class.clone(),
             session_id: request.session_id.clone(),
             project_path: request.project_path.clone(),
@@ -243,6 +245,7 @@ mod tests {
     fn corrupt_and_oversized_cache_entries_are_misses() {
         let home = tempfile::tempdir().unwrap();
         let request = StatsRequest {
+            transcript_hint: None,
             class: ilium_core::AgentClass::Claude,
             session_id: "synthetic".into(),
             project_path: home.path().join("project"),

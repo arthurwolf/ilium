@@ -15,6 +15,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentClass, NodeId};
 
@@ -22,6 +23,9 @@ use crate::session_stats::{SessionStats, StatsAccumulator};
 
 #[path = "session_stats_persistence.rs"]
 mod persistent_cache;
+
+#[path = "session_stats_source.rs"]
+mod source;
 
 #[cfg(test)]
 #[path = "session_stats_cache_tests.rs"]
@@ -43,6 +47,8 @@ const MAX_STATS_ENTRIES: usize = 16;
 /// Everything the worker needs to find and read one pane's transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsRequest {
+    /// Server-verified main transcript, revalidated by the admitted reader.
+    pub transcript_hint: Option<PathBuf>,
     pub class: AgentClass,
     pub session_id: String,
     pub project_path: PathBuf,
@@ -231,6 +237,17 @@ impl SessionStatsStore {
             .filter(|entry| entry.request == *request)
     }
 
+    /// Shared bounded execution client used for deriving compact statistics.
+    pub(crate) fn execution_client(&self) -> Option<Client> {
+        self.client.clone()
+    }
+
+    /// Whether the matching pane's bounded transcript pass is still active.
+    pub(crate) fn matching_in_flight(&self, pane_id: NodeId, request: &StatsRequest) -> bool {
+        self.matching_entry(pane_id, request)
+            .is_some_and(|entry| entry.in_flight)
+    }
+
     /// Reconciles current live or historical transcript owners before results
     /// are drained. In-flight work for removed owners cannot revive a cache.
     pub fn reconcile_contexts(&mut self, contexts: &HashMap<NodeId, StatsRequest>) -> bool {
@@ -258,6 +275,7 @@ impl SessionStatsStore {
                 accumulator: None,
                 transcript_path: None,
                 request: StatsRequest {
+                    transcript_hint: None,
                     class: AgentClass::Codex,
                     session_id: String::new(),
                     project_path: PathBuf::new(),
@@ -378,6 +396,10 @@ impl SessionStatsStore {
         if request.session_id.capacity() > 64 * 1024
             || request.project_path.capacity() > 64 * 1024
             || request.home.capacity() > 64 * 1024
+            || request
+                .transcript_hint
+                .as_ref()
+                .is_some_and(|path| path.capacity() > 64 * 1024)
             || matches!(&request.class, AgentClass::Other(name) if name.capacity() > 64 * 1024)
         {
             self.diagnostic = Some("Statistics context exceeds retained bounds".into());
@@ -390,6 +412,10 @@ impl SessionStatsStore {
         let context_bytes = 128 * 1024
             + request.session_id.capacity()
             + request.home.capacity()
+            + request
+                .transcript_hint
+                .as_ref()
+                .map_or(0, |path| path.capacity())
             + request.project_path.capacity()
             + match &request.class {
                 AgentClass::Other(name) => name.capacity(),
@@ -650,12 +676,12 @@ impl SessionStatsStore {
 
 /// Streams Claude sub-agent transcripts without retaining the whole directory
 /// tree or every transcript path at once.
-struct ClaudeSubagentFiles {
+pub(crate) struct ClaudeSubagentFiles {
     pending: Vec<(PathBuf, std::fs::ReadDir)>,
 }
 
 impl ClaudeSubagentFiles {
-    fn new(main_transcript: &std::path::Path) -> Result<Self, String> {
+    pub(crate) fn new(main_transcript: &std::path::Path) -> Result<Self, String> {
         let directory = main_transcript.with_extension("").join("subagents");
         let pending = match std::fs::read_dir(&directory) {
             Ok(children) => vec![(directory.clone(), children)],
@@ -735,20 +761,7 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
         storage,
         storage_quota,
     } = pass;
-    let locator = TranscriptLocator::new_bounded(
-        &request.home,
-        &request.project_path,
-        ilium_agent_session::TranscriptReadLimits {
-            line_bytes: 1024 * 1024,
-            total_read_bytes: 16 * 1024 * 1024,
-            // Codex stores can contain many thousands of dated transcript
-            // files. Discovery filters by the requested session ID while
-            // walking, so the entry cap guards pathological trees without
-            // imposing a small limit on ordinary history.
-            scanned_entries: 1_000_000,
-            retained_path_bytes: 1024 * 1024,
-        },
-    );
+    let (locator, verified_hint) = source::locator(&request)?;
     // A validated saved path avoids repeating potentially expensive discovery.
     // The additional admission covers the bounded decoder and temporary data.
     let restore_hold = if accumulator.is_none() {
@@ -769,7 +782,7 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
         Some((path, saved)) => (Some(path), Some(saved)),
         None => (None, None),
     };
-    let path = known_path.or(restored_path).or_else(|| {
+    let path = verified_hint.or(known_path).or(restored_path).or_else(|| {
         locator
             .transcript_for_session(&request.class, &request.session_id)
             .map(|transcript| transcript.path)
@@ -860,6 +873,24 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
                 path.display()
             )
         })?;
+    if request.class == AgentClass::Codex {
+        for child in crate::session_stats_codex_children::children_of(&path) {
+            if context.stop_requested() {
+                return Err("Statistics cancelled; totals incomplete".into());
+            }
+            match accumulator.ingest_codex_child(&child) {
+                Ok(()) => {}
+                // A thread file removed since discovery adds nothing more.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not read sub-agent thread {}: {error}; statistics incomplete",
+                        child.display()
+                    ));
+                }
+            }
+        }
+    }
     if request.class == AgentClass::Claude {
         for extra in ClaudeSubagentFiles::new(&path)? {
             let extra = extra?;
@@ -1032,6 +1063,37 @@ mod tests {
     }
 
     #[test]
+    fn weekly_usage_interactive_refresh_progresses_beyond_the_cache_capacity() {
+        let (_owner, mut store) = isolated_stats_store();
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let request = |number| StatsRequest {
+            transcript_hint: None,
+            class: AgentClass::Claude,
+            session_id: format!("00000000-0000-4000-8000-{number:012x}"),
+            project_path: project.path().to_path_buf(),
+            home: home.path().to_path_buf(),
+        };
+        for number in 0..20 {
+            let request = request(number);
+            write_claude_transcript(home.path(), project.path(), &request.session_id);
+            let pane_id = NodeId(6000 + number);
+            assert!(store.request_refresh_interactive(pane_id, request, Instant::now()));
+            wait_for(&mut store, pane_id);
+            let entry = store.entry(pane_id).unwrap();
+            assert_eq!(entry.state, LoadState::Ready);
+            assert_eq!(entry.stats.as_ref().unwrap().tokens.output, 9);
+        }
+        assert_eq!(store.entries.len(), MAX_STATS_ENTRIES);
+        assert!(store.entry(NodeId(6000)).is_none());
+
+        assert!(store.request_refresh_interactive(NodeId(6000), request(0), Instant::now()));
+        wait_for(&mut store, NodeId(6000));
+        assert_eq!(store.entry(NodeId(6000)).unwrap().state, LoadState::Ready);
+        assert_eq!(store.entries.len(), MAX_STATS_ENTRIES);
+    }
+
+    #[test]
     fn twelve_installed_statistics_release_the_single_finite_job_slot() {
         use ilium_execution::{
             ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
@@ -1086,6 +1148,7 @@ mod tests {
             assert!(store.request_refresh(
                 pane,
                 StatsRequest {
+                    transcript_hint: None,
                     class: AgentClass::Claude,
                     session_id: session,
                     project_path: project.path().to_path_buf(),
@@ -1196,6 +1259,7 @@ mod tests {
         assert!(store.request_refresh(
             NodeId(88),
             StatsRequest {
+                transcript_hint: None,
                 class: AgentClass::Codex,
                 session_id: "synthetic-session".into(),
                 project_path: project.path().to_path_buf(),
@@ -1255,6 +1319,7 @@ mod tests {
         write_claude_transcript(home.path(), &project_path, id);
 
         let request = StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Claude,
             session_id: id.to_string(),
             project_path,
@@ -1318,6 +1383,7 @@ mod tests {
         assert!(store.request_refresh(
             pane_id,
             StatsRequest {
+                transcript_hint: None,
                 class: AgentClass::Codex,
                 session_id: session.into(),
                 project_path: project.path().to_path_buf(),
@@ -1379,6 +1445,7 @@ mod tests {
         assert_eq!(files, vec![agent_file.clone()]);
 
         let request = StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Claude,
             session_id: id.to_string(),
             project_path,
@@ -1470,6 +1537,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         let request = StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Claude,
             session_id: "22222222-2222-4222-8222-222222222222".to_string(),
             project_path: project.path().to_path_buf(),
@@ -1491,6 +1559,7 @@ mod independent_identity_tests {
     use super::*;
     fn request() -> StatsRequest {
         StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Claude,
             session_id: "same-id".into(),
             project_path: PathBuf::from("/fixture/old-project"),
@@ -1642,6 +1711,7 @@ mod cache_pressure_tests {
 
     fn defer_background(store: &mut SessionStatsStore) {
         let request = StatsRequest {
+            transcript_hint: None,
             class: AgentClass::Codex,
             session_id: "synthetic-cache-pressure".into(),
             project_path: PathBuf::from("/fixture/project"),

@@ -155,7 +155,7 @@ fn synchronize_instructions(
             targets.push(target);
         }
     }
-    let global = ilium_instructions::global_claude_path().and_then(|path| path.canonicalize().ok());
+    let global_targets = ilium_instructions::global_agent_instruction_paths();
     let mut resolved = BTreeSet::new();
     for target in targets {
         let canonical = match target.canonicalize() {
@@ -168,14 +168,26 @@ fn synchronize_instructions(
             }
             Err(error) => return Err(err("instructions", error)),
         };
-        if global.as_ref() == Some(&canonical) {
-            return Err(err("instructions", "Project instruction target resolves to global Claude instructions; global files are not resource projections"));
-        }
-        if !resolved.insert(canonical) {
+        validate_instruction_scope(project, &canonical, &global_targets)?;
+        if !resolved.insert(canonical.clone()) {
             continue;
         }
-        ilium_instructions::synchronize_resource_instructions(&target, catalog_json)
+        ilium_instructions::synchronize_resource_instructions(&canonical, catalog_json)
             .map_err(|error| err("instructions", error))?;
+    }
+    Ok(())
+}
+
+fn validate_instruction_scope(
+    project: &Path,
+    target: &Path,
+    global_targets: &BTreeSet<PathBuf>,
+) -> Result<(), ResourceError> {
+    if !target.starts_with(project) || global_targets.contains(target) {
+        return Err(err(
+            "instructions",
+            "Resource instruction target is outside the project or is a global instruction file",
+        ));
     }
     Ok(())
 }

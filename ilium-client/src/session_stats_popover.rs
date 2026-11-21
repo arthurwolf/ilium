@@ -145,7 +145,7 @@ impl App {
         }
     }
 
-    fn open_stats_popover(&mut self, pane_id: NodeId, pinned: bool) {
+    pub(crate) fn open_stats_popover(&mut self, pane_id: NodeId, pinned: bool) {
         match self.stats_popover.as_mut() {
             Some(popover) if popover.pane_id == pane_id => popover.pinned |= pinned,
             _ => {
@@ -189,6 +189,7 @@ impl App {
         }
         let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
         Some(StatsRequest {
+            transcript_hint: self.agent_transcript_paths.get(&pane_id).cloned(),
             class,
             session_id,
             project_path,

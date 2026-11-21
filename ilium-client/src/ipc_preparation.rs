@@ -314,6 +314,52 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
                 | ResourceOperation::RepairInstructions { resource_id } => resource_id.heap_bytes(),
             });
         }
+        R::SubscribePollingEvidence { subscription, .. } => {
+            count.string(&subscription.expected_server_incarnation);
+            count.string(&subscription.leader_epoch);
+        }
+        R::Polling { operation, .. } => {
+            use ilium_ipc::polling::PollingOperation;
+            match operation {
+                PollingOperation::Snapshot | PollingOperation::History { .. } => {}
+                PollingOperation::UpdateSettings { settings } => {
+                    count.vector(&settings.excluded_projects);
+                    for project in &settings.excluded_projects {
+                        if !count.visit() {
+                            break;
+                        }
+                        count.string(project);
+                    }
+                }
+                PollingOperation::Feedback {
+                    session,
+                    finding_id,
+                    ..
+                }
+                | PollingOperation::Dismiss {
+                    session,
+                    finding_id,
+                    ..
+                } => {
+                    count.string(&session.session_id);
+                    count.string(&session.incarnation);
+                    count.string(finding_id);
+                }
+                PollingOperation::EstimateRecent { session, .. } => {
+                    count.string(&session.session_id);
+                    count.string(&session.incarnation);
+                }
+                PollingOperation::AnalyzeRecent {
+                    session,
+                    estimate_id,
+                    ..
+                } => {
+                    count.string(&session.session_id);
+                    count.string(&session.incarnation);
+                    count.string(estimate_id);
+                }
+            }
+        }
         R::KeyInput { bytes, .. } => count.add(bytes.capacity()),
         R::UserKeyInput {
             bytes,
@@ -601,6 +647,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::Detach
         | R::KillSession
         | R::ReparentNode { .. }
+        | R::FlattenProject { .. }
         | R::SetPaneFocus { .. }
         | R::RestartServer
         | R::ClearPromptQueue { .. }

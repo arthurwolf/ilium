@@ -40,6 +40,9 @@ pub struct CustomAgentProfile {
     pub arguments: String,
     #[serde(default)]
     pub environment: Vec<EnvironmentEntry>,
+    /// Prefixes the profile name to its panes' titles in the tree. Off by default.
+    #[serde(default)]
+    pub show_name_in_title: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +255,7 @@ mod tests {
             base_provider: BuiltinAgentProvider::Claude,
             command: String::new(),
             arguments: String::new(),
+            show_name_in_title: false,
             environment: vec![],
         }
     }

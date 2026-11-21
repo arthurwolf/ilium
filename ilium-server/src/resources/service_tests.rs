@@ -161,6 +161,95 @@ fn synthetic_agent(f: &Fixture) -> AgentIdentity {
         label: "Synthetic GPU owner".into(),
     }
 }
+
+#[tokio::test]
+async fn restored_participant_navigation_requires_the_original_session_endpoint_and_pane() {
+    let fixture = fixture(None).await;
+    drop(create(&fixture).await);
+    reserve_synthetic(&fixture);
+    let pane = fixture
+        .state
+        .tree
+        .write()
+        .await
+        .add_pane(
+            fixture.project,
+            "Restored agent",
+            ilium_core::PaneContentKind::Terminal,
+        )
+        .unwrap();
+    let mut catalog = store(&fixture).snapshot().unwrap();
+    let claims = &mut catalog
+        .resources
+        .get_mut(&ResourceId::from("test-gpu"))
+        .unwrap()
+        .reservations;
+    let claim = &mut claims[0];
+    claim.agent.session_id = fixture.state.session_name.clone();
+    claim.agent.pane_id = pane;
+    claim.agent.label = "Restored agent".into();
+    claim.agent.runtime_generation = uuid::Uuid::new_v4().to_string();
+    claim.state = ReservationState::NeedsAttention {
+        reason: "old invocation exited".into(),
+    };
+    let registry = service(&fixture.state).unwrap().path.parent().unwrap();
+    std::fs::write(
+        registry.join(format!("server-{}.json", claim.agent.runtime_generation)),
+        serde_json::to_vec(&fixture.state.socket_path).unwrap(),
+    )
+    .unwrap();
+    let expected = claim.id.clone();
+    let mut foreign = claim.clone();
+    foreign.id = "foreign-collision".into();
+    foreign.agent.runtime_generation = uuid::Uuid::new_v4().to_string();
+    std::fs::write(
+        registry.join(format!("server-{}.json", foreign.agent.runtime_generation)),
+        serde_json::to_vec(&fixture.directory.path().join("foreign.sock")).unwrap(),
+    )
+    .unwrap();
+    claims.push(foreign);
+    let mut missing = claims[0].clone();
+    missing.id = "missing-endpoint".into();
+    missing.agent.runtime_generation = uuid::Uuid::new_v4().to_string();
+    claims.push(missing);
+    let mut replaced = claims[0].clone();
+    replaced.id = "replaced-pane".into();
+    replaced.agent.label = "Different agent".into();
+    claims.push(replaced);
+    let mut wrong_session = claims[0].clone();
+    wrong_session.id = "wrong-session".into();
+    wrong_session.agent.session_id = "another-session".into();
+    claims.push(wrong_session);
+    let candidates = navigable_reservations(&fixture.state, &catalog)
+        .await
+        .unwrap();
+    assert_eq!(&*candidates, &[expected]);
+}
+
+#[test]
+fn resource_observation_changes_when_navigation_evidence_changes_without_a_catalog_edit() {
+    let mut event = ServerEvent::ResourceSnapshot {
+        catalog: ResourceCatalog::default(),
+        clock: ResourceClock {
+            unix_millis: 0,
+            monotonic_millis: 0,
+            boot_id: "fixture".into(),
+        },
+        local_invocations: Vec::new(),
+        navigable_reservations: Vec::new(),
+        active_waits: Vec::new(),
+        wait_revision: 0,
+    };
+    let before = observation_signature(&event);
+    if let ServerEvent::ResourceSnapshot {
+        navigable_reservations,
+        ..
+    } = &mut event
+    {
+        navigable_reservations.push("restored-claim".into());
+    }
+    assert_ne!(before, observation_signature(&event));
+}
 // Linux-only helper: used only by the Linux-only resource queue tests.
 #[cfg(target_os = "linux")]
 fn reserve_synthetic(f: &Fixture) {
@@ -1065,6 +1154,7 @@ fn detail_projection_keeps_all_active_claims_and_latest_sixteen_terminal_claims(
         state: ReservationState::Queued,
         ownership_generation: 0,
         acquisition_pending: false,
+        custody: None,
     };
     let mut claims = Vec::new();
     for index in 0..24 {

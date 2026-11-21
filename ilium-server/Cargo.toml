@@ -19,6 +19,7 @@ crossterm = "0.29.0"
 directories = "6.0.0"
 ilium-agent-debug = { version = "0.1.1-preview.7", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.1-preview.7", path = "../ilium-agent-session" }
+ilium-inference = { version = "0.1.1-preview.7", path = "../ilium-inference" }
 ilium-core = { version = "0.1.1-preview.7", path = "../ilium-core" }
 ilium-control = { version = "0.1.1-preview.7", path = "../ilium-control" }
 ilium-detect = { version = "0.1.1-preview.7", path = "../ilium-detect" }
@@ -36,6 +37,7 @@ ignore = "0.4.33"
 notify-rust = "4.18.0"
 regex = "1.12.3"
 regex-automata = "0.4.18"
+rusqlite = { version = "0.37", features = ["bundled"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["raw_value"] }

@@ -844,6 +844,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::Settings(_) => "settings",
         Mode::SettingsHelp(_) => "settings_help",
         Mode::Search(_) => "search",
+        Mode::WeeklyUsage(_) => "weekly_usage",
         Mode::AnimationTextPrompt(_, _) => "animation_text_prompt",
         Mode::LocationPicker(_) => "location_picker",
     }

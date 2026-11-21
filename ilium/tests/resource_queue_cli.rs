@@ -292,6 +292,7 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
                 request_id,
                 result: Ok(Box::new(ResourceReply {
                     local_invocations: Vec::new(),
+                    navigable_reservations: Vec::new(),
                     active_waits: Vec::new(),
                     wait_revision: 0,
                     catalog: catalog.clone(),
@@ -345,6 +346,7 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
             state: ReservationState::Queued,
             ownership_generation: 0,
             acquisition_pending: false,
+            custody: None,
         };
         catalog
             .resources
@@ -358,6 +360,7 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
                 request_id,
                 result: Ok(Box::new(ResourceReply {
                     local_invocations: Vec::new(),
+                    navigable_reservations: Vec::new(),
                     active_waits: Vec::new(),
                     wait_revision: 0,
                     catalog,
@@ -404,6 +407,8 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
     assert_eq!(record["resource_slug"], "gpu");
     assert_eq!(record["queue_position"], 1);
     assert_eq!(record["request_id"], "1000:cli-retry");
+    assert_eq!(record["reservation_request_id"], "1000:cli-retry");
+    assert_eq!(record["custody"], serde_json::Value::Null);
     assert_eq!(record["estimated_wait_seconds"], serde_json::Value::Null);
     assert_eq!(record["ownership_generation"], 0);
 }
@@ -460,6 +465,7 @@ async fn bare_status_excludes_foreign_and_replaced_invocations_with_same_pane_nu
             state: ReservationState::Queued,
             ownership_generation: 0,
             acquisition_pending: false,
+            custody: None,
         })
         .collect();
     let mut catalog = ResourceCatalog::default();
@@ -506,6 +512,7 @@ async fn bare_status_excludes_foreign_and_replaced_invocations_with_same_pane_nu
                 request_id,
                 result: Ok(Box::new(ResourceReply {
                     local_invocations: vec![local],
+                    navigable_reservations: Vec::new(),
                     active_waits: Vec::new(),
                     wait_revision: 0,
                     catalog,
@@ -606,9 +613,11 @@ async fn blocking_wait_terminal_errors_and_disconnect_are_correlated_jsonl() {
             state: ReservationState::Queued,
             ownership_generation: 0,
             acquisition_pending: false,
+            custody: None,
         };
         let reply = ResourceReply {
             local_invocations: vec![claim.agent.clone()],
+            navigable_reservations: Vec::new(),
             active_waits: Vec::new(),
             wait_revision: 0,
             catalog: ResourceCatalog::default(),

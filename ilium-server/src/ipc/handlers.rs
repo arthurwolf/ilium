@@ -126,6 +126,7 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::SetPaneFocus { pane_id, .. } => Some(*pane_id),
         ClientRequest::NewFolder { parent_group, .. } => Some(*parent_group),
         ClientRequest::ChangeProjectFolder { project_id, .. } => Some(*project_id),
+        ClientRequest::FlattenProject { project_id } => Some(*project_id),
         ClientRequest::NewBoard { parent_group, .. } => Some(*parent_group),
         ClientRequest::CreateSplitView { parent_group, .. } => Some(*parent_group),
         ClientRequest::SchedulePaneInput { pane_id, .. } => Some(*pane_id),
@@ -239,6 +240,50 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Generic handlers never possess transport peer authority; fail closed.
+        ClientRequest::SubscribePollingEvidence { request_id, .. } => {
+            let _ = direct_tx
+                .send(ServerEvent::Polling {
+                    request_id,
+                    reply: ilium_ipc::polling::PollingReply::Rejected(
+                        ilium_ipc::polling::PollingRejection::Unauthorized,
+                    ),
+                })
+                .await;
+            false
+        }
+        ClientRequest::Polling {
+            request_id,
+            operation,
+        } => {
+            let result = match state.execution.get() {
+                Some(execution) => state.polling.handle(operation, &execution.client).await,
+                None => Err("polling projection execution is unavailable".into()),
+            };
+            match result {
+                Ok(reply) => {
+                    let (reply, retention) = reply.into_parts();
+                    let _ = direct_tx
+                        .send(ServerEvent::Polling { request_id, reply })
+                        .await;
+                    // The queue now owns its own admitted storage, or the
+                    // refused payload has been destroyed. Never drop earlier.
+                    drop(retention);
+                }
+                Err(error) => {
+                    state.record_blocking_error(None, "polling_projection", &error);
+                    let _ = direct_tx
+                        .send(ServerEvent::Polling {
+                            request_id,
+                            reply: ilium_ipc::polling::PollingReply::Rejected(
+                                ilium_ipc::polling::PollingRejection::Unavailable,
+                            ),
+                        })
+                        .await;
+                }
+            }
+            false
+        }
         ClientRequest::ControlWrite {
             request_id,
             token,
@@ -699,6 +744,10 @@ async fn handle_scoped_request(
         }
         ClientRequest::NewProject { path } => {
             handle_new_project(state, path, direct_tx).await;
+            false
+        }
+        ClientRequest::FlattenProject { project_id } => {
+            handle_tree_mutation(state, direct_tx, |tree| tree.flatten_project(project_id)).await;
             false
         }
         ClientRequest::ChangeProjectFolder { project_id, path } => {

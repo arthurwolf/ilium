@@ -310,6 +310,31 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::Settings(state) => handle_settings_event(app, *state, &event),
         Mode::SettingsHelp(state) => handle_settings_help_event(app, state, &event),
         Mode::Search(state) => handle_search_event(app, state, &event),
+        Mode::WeeklyUsage(mut state) => {
+            if let Event::Key(key) = &event {
+                if is_press(key) && key.code == KeyCode::Esc {
+                    return;
+                }
+                if is_press(key) && key.code == KeyCode::Enter {
+                    if let Some(pane_id) = state
+                        .selected
+                        .filter(|id| {
+                            app.session_stats_request(id.pane_id)
+                                .is_some_and(|request| id.matches_class(&request.class))
+                        })
+                        .map(|id| id.pane_id)
+                    {
+                        app.focus_pane(pane_id);
+                        app.open_stats_popover(pane_id, true);
+                        return;
+                    }
+                }
+                if is_press(key) {
+                    state.key(key.code);
+                }
+            }
+            app.mode = Mode::WeeklyUsage(state);
+        }
         Mode::Move => {
             app.mode = Mode::Move;
             if let Event::Key(key) = &event {
@@ -3723,6 +3748,33 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 return;
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::PollingDetection => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::PollingDetection => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::polling_settings::PollingRow::ALL.len() - 1);
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::PollingDetection =>
+        {
+            if let Some(row) = crate::polling_settings::PollingRow::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                let direction = if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                    -1
+                } else {
+                    1
+                };
+                app.settings_adjust_polling_row(row, direction);
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Cost => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -6564,5 +6616,26 @@ mod board_storage_catalog_submission_tests {
         assert_authored_fields(parent, &draft);
         assert_eq!(parent.parent_group, changed_destination);
         assert_eq!(parent.storage_kind, draft.storage_kind);
+    }
+
+    #[test]
+    fn agent_usage_view_keys_change_range_and_escape_returns_to_the_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("usage-keys".to_owned(), directory.path().to_path_buf());
+        app.mode = Mode::WeeklyUsage(Box::default());
+        press(&mut app, KeyCode::Right);
+        press(&mut app, KeyCode::Char(' '));
+        let Mode::WeeklyUsage(state) = &app.mode else {
+            panic!("view stays open for range and toggle keys");
+        };
+        assert_eq!(state.range, crate::weekly_usage::UsageRange::Days14);
+        press(&mut app, KeyCode::Left);
+        press(&mut app, KeyCode::Left);
+        let Mode::WeeklyUsage(state) = &app.mode else {
+            panic!("view stays open");
+        };
+        assert_eq!(state.range, crate::weekly_usage::UsageRange::Days3);
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(app.mode, Mode::Normal));
     }
 }

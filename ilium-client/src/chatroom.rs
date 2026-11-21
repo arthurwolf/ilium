@@ -63,10 +63,7 @@ pub fn require_room(project_root: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// Creates the room and runtime hooks needed by participating Claude/Codex
-/// agents. Agent instruction files are managed independently by
-/// `agent_feature_setup`, so disabling guidance in Settings cannot be undone
-/// by this integration repair path.
+/// Creates the room and project-local integrations for participating agents.
 pub fn initialize(project_root: &Path) -> anyhow::Result<()> {
     if !project_root.is_dir() {
         anyhow::bail!("project root {} is unavailable", project_root.display());
@@ -93,6 +90,7 @@ pub fn initialize(project_root: &Path) -> anyhow::Result<()> {
         ensure_codex_hooks(project_root)?;
         ensure_claude_hooks(project_root)?;
         crate::progress_guard::ensure_installed(project_root)?;
+        ensure_room_instructions(project_root)?;
         Ok(())
     })
 }
@@ -109,7 +107,62 @@ pub fn ensure_integrations(project_root: &Path) -> anyhow::Result<bool> {
         ensure_codex_hooks(project_root)?;
         ensure_claude_hooks(project_root)?;
         crate::progress_guard::ensure_installed(project_root)?;
+        ensure_room_instructions(project_root)?;
         Ok(true)
+    })
+}
+
+fn ensure_room_instructions(project_root: &Path) -> anyhow::Result<()> {
+    use crate::agent_feature_setup::{self, AgentFeature, FeatureSetupStatus};
+    let root = fs::canonicalize(project_root)?;
+    for name in ["CLAUDE.md", "AGENTS.md"] {
+        let path = project_root.join(name);
+        let target = match fs::symlink_metadata(&path) {
+            Ok(_) => fs::canonicalize(&path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && name == "AGENTS.md" => {
+                continue;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => root.join(name),
+            Err(error) => return Err(error.into()),
+        };
+        if !target.starts_with(&root)
+            || agent_feature_setup::global_agent_instruction_paths().contains(&target)
+        {
+            anyhow::bail!(
+                "instruction path {} resolves outside the project or is global",
+                path.display()
+            );
+        }
+        match agent_feature_setup::status(&target, AgentFeature::Chatroom)? {
+            FeatureSetupStatus::NotInstalled | FeatureSetupStatus::ManagedStale => {
+                agent_feature_setup::install(&target, AgentFeature::Chatroom)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Remove a stale project block only while the project still has no room.
+pub(crate) fn remove_stale_instruction(project_root: &Path, path: &Path) -> anyhow::Result<()> {
+    use crate::agent_feature_setup::{self, AgentFeature, FeatureSetupStatus};
+    let root = fs::canonicalize(project_root)?;
+    let target = fs::canonicalize(path)?;
+    if !target.starts_with(&root)
+        || agent_feature_setup::global_agent_instruction_paths().contains(&target)
+    {
+        return Ok(());
+    }
+    with_project_lock(project_root, || {
+        if !exists(project_root)
+            && matches!(
+                agent_feature_setup::status(&target, AgentFeature::Chatroom)?,
+                FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedStale
+            )
+        {
+            agent_feature_setup::uninstall(&target, AgentFeature::Chatroom)?;
+        }
+        Ok(())
     })
 }
 
@@ -130,6 +183,11 @@ pub fn remove(project_root: &Path) -> anyhow::Result<PathBuf> {
             let path = project_root.join(name);
             match fs::symlink_metadata(&path) {
                 Ok(metadata) if metadata.file_type().is_file() => {
+                    if crate::agent_feature_setup::global_agent_instruction_paths()
+                        .contains(&fs::canonicalize(&path)?)
+                    {
+                        continue;
+                    }
                     crate::agent_feature_setup::uninstall(
                         &path,
                         crate::agent_feature_setup::AgentFeature::Chatroom,
@@ -137,7 +195,10 @@ pub fn remove(project_root: &Path) -> anyhow::Result<PathBuf> {
                 }
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     let target = fs::canonicalize(&path)?;
-                    if target.starts_with(fs::canonicalize(project_root)?) {
+                    if target.starts_with(fs::canonicalize(project_root)?)
+                        && !crate::agent_feature_setup::global_agent_instruction_paths()
+                            .contains(&target)
+                    {
                         crate::agent_feature_setup::uninstall(
                             &target,
                             crate::agent_feature_setup::AgentFeature::Chatroom,
@@ -284,6 +345,9 @@ pub fn read_messages(project_root: &Path, limit: usize) -> anyhow::Result<Vec<Ch
 /// text: hook output becomes model context and must never carry terminal
 /// controls or be mistaken for executable instructions.
 pub fn context(project_root: &Path, limit: usize) -> anyhow::Result<String> {
+    if !exists(project_root) {
+        return Ok(String::new());
+    }
     let messages = read_messages(project_root, limit)?;
     let mut output = full_context_header(&messages);
     for message in &messages {
@@ -298,6 +362,9 @@ pub fn capped_context(
     limit: usize,
     max_bytes: usize,
 ) -> anyhow::Result<String> {
+    if !exists(project_root) {
+        return Ok(String::new());
+    }
     let messages = read_messages(project_root, limit)?;
     Ok(render_capped(
         full_context_header(&messages),
@@ -326,6 +393,9 @@ pub fn unread_context(
     max_bytes: usize,
     reader: &UnreadReader<'_>,
 ) -> anyhow::Result<String> {
+    if !exists(project_root) {
+        return Ok(String::new());
+    }
     let messages = read_messages(project_root, UNREAD_SCAN_RECORDS)?;
     let cursor_path = reader_cursor_path(project_root, reader.key);
     let unread_start = if reader.is_session_start {
@@ -921,6 +991,62 @@ mod tests {
     }
 
     #[test]
+    fn room_setup_installs_project_guidance_and_removal_preserves_other_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let claude = directory.path().join("CLAUDE.md");
+        let codex = directory.path().join("AGENTS.md");
+        std::fs::write(&claude, "# Claude\n").unwrap();
+        std::fs::write(&codex, "# Codex\n").unwrap();
+        initialize(directory.path()).unwrap();
+        for path in [&claude, &codex] {
+            assert!(std::fs::read_to_string(path)
+                .unwrap()
+                .contains("ilium-agent-feature: chatroom"));
+        }
+        super::remove(directory.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&claude).unwrap(), "# Claude\n");
+        assert_eq!(std::fs::read_to_string(&codex).unwrap(), "# Codex\n");
+    }
+
+    #[test]
+    fn room_setup_does_not_create_codex_instruction_file() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        assert!(directory.path().join("CLAUDE.md").exists());
+        assert!(!directory.path().join("AGENTS.md").exists());
+    }
+
+    #[test]
+    fn context_is_empty_without_a_room() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(context(directory.path(), 40).unwrap().is_empty());
+        assert!(capped_context(directory.path(), 40, 2048)
+            .unwrap()
+            .is_empty());
+        assert!(
+            unread_context(directory.path(), 40, 2048, &reader("pane", true))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!directory.path().join(".ilium").exists());
+    }
+
+    #[test]
+    fn stale_project_guidance_is_removed_only_when_the_room_is_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let instructions = directory.path().join("CLAUDE.md");
+        std::fs::write(&instructions, "# Keep\n").unwrap();
+        initialize(directory.path()).unwrap();
+        super::remove_stale_instruction(directory.path(), &instructions).unwrap();
+        assert!(std::fs::read_to_string(&instructions)
+            .unwrap()
+            .contains("ilium-agent-feature: chatroom"));
+        std::fs::remove_file(directory.path().join("CHATROOM.md")).unwrap();
+        super::remove_stale_instruction(directory.path(), &instructions).unwrap();
+        assert_eq!(std::fs::read_to_string(instructions).unwrap(), "# Keep\n");
+    }
+
+    #[test]
     fn removal_archives_messages_and_preserves_other_hooks_and_guidance() {
         let directory = tempfile::tempdir().unwrap();
         initialize(directory.path()).unwrap();
@@ -969,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn initialization_creates_an_ignored_room_and_hooks_without_editing_guidance() {
+    fn initialization_creates_an_ignored_room_hooks_and_project_guidance() {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("AGENTS.md"), "# Existing\n").unwrap();
         initialize(directory.path()).unwrap();
@@ -979,9 +1105,13 @@ mod tests {
         assert!(std::fs::read_to_string(directory.path().join(".gitignore"))
             .unwrap()
             .contains("/CHATROOM.md"));
+        let guidance = std::fs::read_to_string(directory.path().join("AGENTS.md")).unwrap();
+        assert!(guidance.starts_with("# Existing\n"));
         assert_eq!(
-            std::fs::read_to_string(directory.path().join("AGENTS.md")).unwrap(),
-            "# Existing\n"
+            guidance
+                .matches("<!-- ilium-agent-feature: chatroom -->")
+                .count(),
+            1
         );
         let chatroom_contents =
             std::fs::read_to_string(directory.path().join("CHATROOM.md")).unwrap();

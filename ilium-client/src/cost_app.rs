@@ -105,6 +105,7 @@ mod cache_status_tests {
             assert!(!app.session_stats.request_refresh(
                 NodeId(8181),
                 StatsRequest {
+                    transcript_hint: None,
                     class: AgentClass::Codex,
                     session_id: "synthetic-status".into(),
                     project_path: PathBuf::from("/fixture/project"),

@@ -44,6 +44,7 @@ mod detection;
 mod detection_effects;
 pub mod error;
 mod execution;
+pub mod external_tasks;
 mod foreground_observation;
 mod git_status;
 mod http_api;
@@ -62,6 +63,26 @@ mod pane;
 pub mod paths;
 mod persistence;
 pub mod plugin_host;
+pub mod polling_auth;
+pub mod polling_checkpoint;
+pub mod polling_config;
+mod polling_detection;
+mod polling_leader;
+pub use polling_detection::PollingPaths;
+pub mod polling_discovery;
+pub mod polling_dispatch;
+pub mod polling_evidence;
+mod polling_feed;
+mod polling_feed_transport;
+mod polling_history;
+pub mod polling_ledger;
+mod polling_private_connection;
+mod polling_projection;
+pub mod polling_prompt;
+mod polling_registry;
+mod polling_subscription_reader;
+#[cfg(all(test, target_os = "linux"))]
+mod polling_test_support;
 mod progress_monitor;
 mod progress_watchdog;
 mod prompt_queue;
@@ -125,6 +146,8 @@ pub struct ReadyLogMetadata {
 /// by tests with tempdir paths -- either way `run` itself never touches
 /// `directories::ProjectDirs`.
 pub struct ServerOptions {
+    /// None keeps embedded and isolated consumers away from user polling data.
+    pub polling_paths: Option<PollingPaths>,
     /// Shared durable resource catalog, resolved by the composition root.
     /// None disables resource coordination for explicitly isolated consumers.
     pub resource_catalog_path: Option<PathBuf>,
@@ -254,10 +277,69 @@ pub async fn run_with_resources(
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
     }
+    let polling_paths = options.polling_paths.take();
+    if let Some(paths) = polling_paths.as_ref() {
+        if let Some(execution) = state.execution.get() {
+            if let Err(error) = state
+                .polling
+                .initialize(paths.clone(), &execution.client)
+                .await
+            {
+                state.record_blocking_error(None, "polling_initialize", &error);
+            }
+        }
+    }
+    // Every configured server publishes independently of optional resources or
+    // leadership. This is only a discovery hint; private feeds authenticate peers.
+    let polling_publication =
+        if let (Some(paths), Some(execution)) = (polling_paths.as_ref(), state.execution.get()) {
+            match polling_registry::publish(
+                &execution.client,
+                paths.registry_directory.clone(),
+                state.polling.incarnation(),
+                options.socket_path.clone(),
+            )
+            .await
+            {
+                Ok(publication) => Some(publication),
+                Err(error) => {
+                    state.record_blocking_error(None, "polling_registry_publish", &error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
     if let Err(error) = control_access::initialize(&state).await {
         // Credential admission is optional for the ordinary server, but never
         // optional for automation writes: authentication remains unavailable.
         tracing::warn!(operation = "control_initialize", %error, "automation access unavailable; continuing ordinary server startup");
+    }
+    // Reconcile the durable task ledger before exposing its API. A damaged ledger
+    // stays intact and its API fails closed; ordinary terminal service can continue.
+    let external_task_path = state.snapshot_path.with_extension("external-tasks.json");
+    if let Some(execution) = state.execution.get() {
+        let recovered = execution
+            .client
+            .run(
+                ilium_execution::Lane::Io,
+                ilium_execution::JobCost {
+                    input_bytes: 32 * 1024 * 1024,
+                    result_bytes: 4096,
+                },
+                move |_| {
+                    let store = external_tasks::ExternalTaskStore::new(external_task_path)
+                        .map_err(|error| error.to_string())?;
+                    store
+                        .snapshot()
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                },
+            )
+            .await;
+        if let Err(error) = recovered {
+            state.record_blocking_error(None, "external_tasks", &error.to_string());
+        }
     }
     if let Some(path) = options.resource_catalog_path {
         let _ = state.resources.set(resources::ResourceService::new(path));
@@ -387,6 +469,15 @@ pub async fn run_with_resources(
         Arc::clone(&state),
         initial_backup_bucket,
     ));
+    let polling_leader_task = polling_paths
+        .clone()
+        .map(|paths| AbortOnDropHandle::new(polling_leader::spawn(Arc::clone(&state), paths)));
+    let polling_config_watcher_task = polling_paths.map(|paths| {
+        AbortOnDropHandle::new(polling_detection::spawn_config_watcher(
+            Arc::clone(&state),
+            paths,
+        ))
+    });
     let sound_config_watcher_task = options
         .sound_config_path
         .clone()
@@ -408,6 +499,12 @@ pub async fn run_with_resources(
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }
+    if let Some(task) = polling_leader_task {
+        task.abort();
+    }
+    if let Some(task) = polling_config_watcher_task {
+        task.abort();
+    }
     session_backup_task.abort();
     // Gives already-broadcast events (notably `KillSession`'s final
     // `TreeSnapshot`) a chance to actually reach attached clients before
@@ -417,6 +514,13 @@ pub async fn run_with_resources(
     state.abort_all_connection_tasks();
     // The semantic drain closes recovery admission, joins its accepted task,
     // and retires any unchosen original before final snapshot I/O and bank stop.
+    // Remove the owned hint before the execution bank stops. Never remove a
+    // record whose inode has been replaced by another publisher.
+    if let (Some(publication), Some(execution)) = (polling_publication, state.execution.get()) {
+        if let Err(error) = polling_registry::remove(&execution.client, publication).await {
+            state.record_blocking_error(None, "polling_registry_remove", &error);
+        }
+    }
     let drain_result = drain_session_work(&state, &mut snapshot_writer_task).await;
     sound_playback_task.abort();
 
@@ -1696,6 +1800,7 @@ mod restore_tests {
 
         let options = ServerOptions {
             resource_catalog_path: None,
+            polling_paths: None,
             session_name: "restore-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -2186,6 +2291,7 @@ mod restore_tests {
         let snapshot_path = directory.path().join("restart-test.snapshot.json");
         let options = ServerOptions {
             resource_catalog_path: None,
+            polling_paths: None,
             session_name: "restart-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
@@ -2259,6 +2365,7 @@ mod socket_tests {
     ) -> ServerOptions {
         ServerOptions {
             resource_catalog_path: None,
+            polling_paths: None,
             session_name: "ready-metadata-test".to_string(),
             socket_path,
             snapshot_path: directory.path().join("session.snapshot.json"),

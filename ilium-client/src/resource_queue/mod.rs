@@ -52,6 +52,7 @@ pub struct ResourceUi {
     pub help_scroll: u16,
     pub catalog: Option<ResourceCatalog>,
     pub local_invocations: Vec<AgentIdentity>,
+    pub navigable_reservations: Vec<ReservationId>,
     pub clock: Option<ResourceClock>,
     pub observed_at: Option<std::time::Instant>,
     pub grouping: bool,
@@ -103,6 +104,10 @@ impl ResourceUi {
                 record.reservations.iter().any(|reservation| {
                     &reservation.id == reservation_id
                         && matches!(reservation.state, ReservationState::Queued)
+                        && self
+                            .local_invocations
+                            .iter()
+                            .any(|agent| agent.same_invocation(&reservation.agent))
                 })
             }),
             _ => false,
@@ -110,6 +115,31 @@ impl ResourceUi {
     }
 }
 impl App {
+    pub fn receive_resource_projection(
+        &mut self,
+        catalog: ResourceCatalog,
+        clock: ResourceClock,
+        local_invocations: Vec<AgentIdentity>,
+        navigable_reservations: Vec<ReservationId>,
+        active_waits: Vec<(NodeId, ReservationId)>,
+        wait_revision: u64,
+    ) -> bool {
+        if self
+            .resources
+            .catalog
+            .as_ref()
+            .is_none_or(|old| old.revision <= catalog.revision)
+        {
+            self.resources.navigable_reservations = navigable_reservations;
+        }
+        self.receive_resource_catalog(
+            catalog,
+            clock,
+            local_invocations,
+            active_waits,
+            wait_revision,
+        )
+    }
     pub fn receive_resource_catalog(
         &mut self,
         catalog: ResourceCatalog,
@@ -146,9 +176,13 @@ impl App {
             .and_then(|id| self.resources.rows.targets.get(id))
             .cloned();
         self.resources.grouping = self.ui_settings.resource_queue_grouping;
-        self.resources
-            .rows
-            .rebuild(&self.tree, &catalog, &self.session_name, &local_invocations);
+        self.resources.rows.rebuild(
+            &self.tree,
+            &catalog,
+            &self.session_name,
+            &local_invocations,
+            &self.resources.navigable_reservations,
+        );
         self.resources.local_invocations = local_invocations;
         self.resources.catalog = Some(catalog);
         self.open_new_resource_rows();
@@ -549,10 +583,11 @@ impl App {
                                     })
                             })
                     });
-                let accepted = self.receive_resource_catalog(
+                let accepted = self.receive_resource_projection(
                     reply.catalog,
                     reply.clock,
                     reply.local_invocations,
+                    reply.navigable_reservations,
                     reply.active_waits,
                     reply.wait_revision,
                 );
@@ -989,6 +1024,7 @@ mod tests {
                 wait_revision: 0,
                 active_waits: Vec::new(),
                 local_invocations: Vec::new(),
+                navigable_reservations: Vec::new(),
                 clock: ResourceClock {
                     unix_millis: 1,
                     monotonic_millis: 1,
@@ -1101,6 +1137,7 @@ mod review_regressions {
         ResourceReply {
             catalog,
             local_invocations: app.resources.local_invocations.clone(),
+            navigable_reservations: app.resources.navigable_reservations.clone(),
             active_waits: Vec::new(),
             wait_revision: 5,
             clock: app.resources.clock.clone().unwrap(),

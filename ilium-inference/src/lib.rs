@@ -2,6 +2,8 @@
 //! features. Every backend implements [`InferenceProvider`], insulating the
 //! client from individual HTTP envelopes and authentication details.
 
+pub mod decisions;
+
 use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};

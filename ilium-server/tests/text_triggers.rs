@@ -518,6 +518,7 @@ async fn a_fresh_server_attaches_with_durable_rules_without_a_client_replacement
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
         resource_catalog_path: None,
+        polling_paths: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),
@@ -609,6 +610,7 @@ async fn a_running_server_reconciles_durable_trigger_edits_without_client_replac
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
         resource_catalog_path: None,
+        polling_paths: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),
@@ -720,6 +722,7 @@ async fn a_stale_client_default_payload_cannot_replace_durable_rules() {
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
         resource_catalog_path: None,
+        polling_paths: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),

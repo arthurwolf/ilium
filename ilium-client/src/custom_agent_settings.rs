@@ -187,6 +187,9 @@ pub(crate) fn handle(app: &mut App, state: &mut SettingsState, event: &Event) ->
                             .position(|candidate| *candidate == EditorRow::EnvironmentKey(added))
                             .unwrap_or(0);
                     }
+                    EditorRow::ShowNameInTitle => {
+                        editor.draft.show_name_in_title = !editor.draft.show_name_in_title
+                    }
                     EditorRow::RevealValues => editor.reveal_values = !editor.reveal_values,
                     EditorRow::Cancel => {
                         state.custom_agent_editor = None;

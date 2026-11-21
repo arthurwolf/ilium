@@ -32,6 +32,7 @@ pub enum ResourceOperation {
 pub struct ResourceRequest {
     pub project_id: Option<NodeId>,
     pub pane_id: Option<NodeId>,
+    pub external_name: Option<String>,
     pub request_key: Option<String>,
     pub expected_revision: Option<u64>,
     pub recovery_token: Option<String>,
@@ -42,6 +43,7 @@ impl ResourceRequest {
         Self {
             project_id,
             pane_id: None,
+            external_name: None,
             request_key: None,
             expected_revision: None,
             recovery_token: None,
@@ -54,6 +56,9 @@ pub struct ResourceReply {
     pub active_waits: Vec<(NodeId, ReservationId)>,
     pub wait_revision: u64,
     pub local_invocations: Vec<ilium_core::resource_queue::AgentIdentity>,
+    /// Reservation rows whose historical pane is navigable in this session.
+    /// This is presentation evidence, never authority for resource mutations.
+    pub navigable_reservations: Vec<ReservationId>,
     pub catalog: ResourceCatalog,
     pub clock: ResourceClock,
     pub result: Option<ResourceCommandResult>,

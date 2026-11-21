@@ -37,6 +37,7 @@ fn snapshot(revision: u64) -> (TreeFixture, ServerEvent) {
                 boot_id: "boot".into(),
             },
             local_invocations: Vec::new(),
+            navigable_reservations: Vec::new(),
             active_waits: vec![(pane, ReservationId::from("capacity-8191"))],
             wait_revision: revision,
         },

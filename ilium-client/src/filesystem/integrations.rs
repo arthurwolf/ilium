@@ -172,15 +172,71 @@ impl Job for IntegrationJob {
         match self {
             Self::Maintain(snapshot) => {
                 snapshot.checked()?;
+                let room_instruction_targets = snapshot
+                    .rooms
+                    .iter()
+                    .filter(|room| crate::chatroom::exists(&room.path))
+                    .flat_map(|room| {
+                        let root = room
+                            .path
+                            .canonicalize()
+                            .unwrap_or_else(|_| room.path.clone());
+                        ["CLAUDE.md", "AGENTS.md"]
+                            .into_iter()
+                            .filter_map(move |name| {
+                                room.path
+                                    .join(name)
+                                    .canonicalize()
+                                    .ok()
+                                    .filter(|path| path.starts_with(&root))
+                            })
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
                 for target in snapshot.targets {
                     let current = crate::agent_feature_setup::status(&target.path, target.feature)
                         .map_err(bounded_error);
-                    // Automatic upkeep only writes the global instruction files, which
-                    // already cover every project; per-project copies would duplicate
-                    // them, and a new project AGENTS.md would hide that project's
-                    // CLAUDE.md from Codex. Project files are only installed on request.
                     if snapshot.automatic
                         && target.project.is_none()
+                        && target.feature == AgentFeature::Chatroom
+                        && !target.path.parent().is_some_and(crate::chatroom::exists)
+                        && !target
+                            .path
+                            .canonicalize()
+                            .ok()
+                            .is_some_and(|path| room_instruction_targets.contains(&path))
+                        && matches!(
+                            &current,
+                            Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedStale)
+                        )
+                    {
+                        if let Err(error) =
+                            crate::agent_feature_setup::uninstall(&target.path, target.feature)
+                        {
+                            result.failures.push(bounded_error(error));
+                        }
+                    }
+                    if snapshot.automatic
+                        && target.feature == AgentFeature::Chatroom
+                        && matches!(
+                            &current,
+                            Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedStale)
+                        )
+                    {
+                        if let Some(project) = &target.project {
+                            if !crate::chatroom::exists(project) {
+                                if let Err(error) =
+                                    crate::chatroom::remove_stale_instruction(project, &target.path)
+                                {
+                                    result.failures.push(bounded_error(error));
+                                }
+                            }
+                        }
+                    }
+                    // Progress applies to Ilium panes in every project. Chatroom
+                    // guidance instead follows the project's room lifecycle.
+                    if snapshot.automatic
+                        && target.project.is_none()
+                        && target.feature != AgentFeature::Chatroom
                         && !matches!(
                             current,
                             Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)

@@ -169,6 +169,46 @@ fn no_binding_maintenance_does_not_create_instruction_or_settings_files() {
 }
 
 #[test]
+fn resource_instruction_target_must_stay_inside_project() {
+    let project = project_directory();
+    let root = project.path().canonicalize().unwrap();
+    let global = root.join(".codex/AGENTS.md");
+    let globals = std::collections::BTreeSet::from([global.clone()]);
+    assert!(validate_instruction_scope(&root, &root.join("CLAUDE.md"), &globals).is_ok());
+    assert!(validate_instruction_scope(&root, &global, &globals).is_err());
+    assert!(
+        validate_instruction_scope(&root, &root.parent().unwrap().join("global.md"), &globals)
+            .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resource_projection_refuses_provider_symlink_outside_project() {
+    let project = project_directory();
+    let external = tempfile::NamedTempFile::new_in(project.path().parent().unwrap()).unwrap();
+    std::fs::write(external.path(), "global instructions\n").unwrap();
+    assert!(std::process::Command::new("ln")
+        .arg("-s")
+        .arg(external.path())
+        .arg(project.path().join("AGENTS.md"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(synchronize_project(
+        project.path(),
+        &[link(project.path(), "gpu")],
+        &bindings("gpu"),
+        1,
+    )
+    .is_err());
+    assert_eq!(
+        std::fs::read_to_string(external.path()).unwrap(),
+        "global instructions\n"
+    );
+}
+
+#[test]
 fn malformed_settings_are_preserved_and_not_replaced() {
     let project = project_directory();
     std::fs::create_dir(project.path().join(".ilium")).unwrap();

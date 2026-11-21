@@ -285,6 +285,10 @@ impl App {
                 self.collect_inference_value_configuration(operation, Some(token), completion);
                 continue;
             }
+            if let Some(ConfigurationIntent::Polling { operation }) = &intent {
+                self.collect_polling_configuration(operation, completion);
+                continue;
+            }
             if let Some(ConfigurationIntent::Inference { operation }) = &intent {
                 self.collect_inference_configuration(operation, completion);
                 continue;

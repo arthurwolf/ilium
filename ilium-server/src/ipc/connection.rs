@@ -226,7 +226,23 @@ enum RequestReaderExit {
 /// either side signals the connection is done (client disconnected, a
 /// `Detach`/`KillSession` request was handled, or the write side's stream
 /// closed).
+pub(crate) async fn handle_session(
+    state: Arc<ServerState>,
+    stream: ilium_transport::SessionStream,
+) {
+    let peer_process_id = stream.peer_process_id();
+    handle_with_peer(state, stream, peer_process_id).await;
+}
+
+#[cfg(test)]
 pub async fn handle<S>(state: Arc<ServerState>, stream: S)
+where
+    S: AsyncRead + AsyncWrite + Send + 'static,
+{
+    handle_with_peer(state, stream, None).await;
+}
+
+async fn handle_with_peer<S>(state: Arc<ServerState>, stream: S, peer_process_id: Option<u32>)
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
@@ -259,12 +275,13 @@ where
     // admitting a broadcast across that cutover boundary.
     let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
 
-    let reader = read_requests(
+    let reader = read_requests_with_peer(
         Arc::clone(&state),
         read_half,
         direct_tx,
         attach_phase_tx,
         stream_control_tx,
+        peer_process_id,
     );
     let writer = write_replies_ordered(
         write_half,
@@ -295,12 +312,35 @@ where
 /// connection alone (via `direct_tx`, inside `handlers::handle_request`)
 /// and never stops the loop -- one malformed or rejected request must not
 /// end the whole connection, only the request that caused it.
+#[cfg(test)]
 async fn read_requests<R>(
     state: Arc<ServerState>,
     read_half: R,
     direct_tx: DirectEventSender,
     attach_phase_tx: watch::Sender<AttachPhase>,
     stream_control_tx: mpsc::Sender<StreamControlCommand>,
+) -> RequestReaderExit
+where
+    R: AsyncRead + Unpin,
+{
+    read_requests_with_peer(
+        state,
+        read_half,
+        direct_tx,
+        attach_phase_tx,
+        stream_control_tx,
+        None,
+    )
+    .await
+}
+
+async fn read_requests_with_peer<R>(
+    state: Arc<ServerState>,
+    read_half: R,
+    direct_tx: DirectEventSender,
+    attach_phase_tx: watch::Sender<AttachPhase>,
+    stream_control_tx: mpsc::Sender<StreamControlCommand>,
+    peer_process_id: Option<u32>,
 ) -> RequestReaderExit
 where
     R: AsyncRead + Unpin,
@@ -324,6 +364,9 @@ where
     // Connection-owned tasks are cancelled when the connection closes.
     let mut resource_snapshot = tokio::task::JoinSet::new();
     let mut screen_watches = tokio::task::JoinSet::new();
+    // A private subscription belongs to this connection, never a broadcast.
+    let mut polling_feeds = tokio::task::JoinSet::new();
+
     loop {
         let decoded = tokio::select! {
             biased;
@@ -356,6 +399,78 @@ where
         };
 
         let request = decoded.view();
+        if let ClientRequest::SubscribePollingEvidence {
+            request_id,
+            subscription,
+        } = request
+        {
+            // A private detector connection consumes direct evidence only.
+            // Fence session broadcasts before any admission work or reply,
+            // including rejected subscriptions and replacements.
+            attach_phase_tx.send_replace(AttachPhase::Monitoring);
+            // Retire the exact old subscription before accepting or rejecting
+            // its replacement; completed/cancelled handles cannot accumulate.
+            polling_feeds.shutdown().await;
+            // Validate the borrowed fields before allocating a second payload.
+            let bounded = [
+                &subscription.expected_server_incarnation,
+                &subscription.leader_epoch,
+            ]
+            .iter()
+            .all(|value| !value.is_empty() && value.len() <= 256);
+            let admitted = if bounded {
+                match state.execution.get() {
+                    Some(execution) => match state
+                        .polling
+                        .admit_feed(peer_process_id, subscription.clone(), &execution.client)
+                        .await
+                    {
+                        Ok(admitted) => Some(admitted),
+                        Err(error) => {
+                            state.record_blocking_error(None, "polling_feed_admission", &error);
+                            None
+                        }
+                    },
+                    None => None,
+                }
+            } else {
+                None
+            };
+            let accepted = admitted
+                .as_ref()
+                .is_some_and(|value| value.view().is_some());
+            let reply = if accepted {
+                ilium_ipc::polling::PollingReply::EvidenceSubscribed {
+                    server_incarnation: state.polling.incarnation().to_string(),
+                }
+            } else {
+                ilium_ipc::polling::PollingReply::Rejected(
+                    ilium_ipc::polling::PollingRejection::Unauthorized,
+                )
+            };
+            if direct_tx
+                .send(ServerEvent::Polling {
+                    request_id: *request_id,
+                    reply,
+                })
+                .await
+                .is_err()
+            {
+                break;
+            }
+            if accepted {
+                if let Some(admitted) = admitted {
+                    polling_feeds.spawn(crate::polling_feed::run(
+                        Arc::clone(&state),
+                        *request_id,
+                        admitted,
+                        direct_tx.clone(),
+                    ));
+                }
+            }
+            continue;
+        }
+
         if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
             // Validated and replaced as a whole, so a refused set never runs
             // partially. The client fences every observation by revision and
@@ -2199,6 +2314,47 @@ mod tests {
         assert!(requests
             .iter()
             .all(progress_monitor_request_does_not_need_terminal_stream));
+    }
+
+    #[tokio::test]
+    async fn polling_private_handshake_suppresses_session_broadcasts_before_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = Arc::new(crate::state::test_server_state(&directory));
+        initialize_fixture_execution(&state);
+        let (mut client, server) = tokio::io::duplex(8192);
+        let (direct, mut replies) = DirectEventSender::channel(1);
+        let (phase, observed_phase) = watch::channel(AttachPhase::Open);
+        let (control, _controls) = mpsc::channel(1);
+        let task =
+            crate::task_guard::AbortOnDropHandle::new(tokio::spawn(read_requests_with_peer(
+                state,
+                server,
+                direct,
+                phase,
+                control,
+                Some(std::process::id()),
+            )));
+        ilium_ipc::write_frame(
+            &mut client,
+            &ClientRequest::SubscribePollingEvidence {
+                request_id: 91,
+                subscription: ilium_ipc::polling::PollingEvidenceSubscription {
+                    expected_server_incarnation: "synthetic-unconfigured-server".into(),
+                    leader_epoch: "synthetic-unowned-epoch".into(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+        let reply = tokio::time::timeout(std::time::Duration::from_secs(5), replies.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(reply, ServerEvent::Polling { request_id: 91, .. }));
+        assert_eq!(*observed_phase.borrow(), AttachPhase::Monitoring,
+            "private polling must suppress ordinary session broadcasts before replying, including rejected admission");
+        drop(client);
+        task.join().await.unwrap();
     }
 
     #[tokio::test]

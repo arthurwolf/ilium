@@ -45,6 +45,9 @@ pub(crate) enum ConfigurationIntent {
     Inference {
         operation: Arc<()>,
     },
+    Polling {
+        operation: Arc<()>,
+    },
     InferenceValueDialog {
         operation: Arc<()>,
         token: Arc<()>,

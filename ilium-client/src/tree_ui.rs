@@ -126,6 +126,7 @@ pub enum TreeToolbarAction {
     Split,
     Folder,
     ActivityFilter,
+    WeeklyUsage,
     /// Triggers `App::action_request_restructure` -- one independent LLM
     /// regroup-and-retitle call per non-empty project (see
     /// `crate::restructure`'s module docs). Anchored next to `Settings`
@@ -162,6 +163,7 @@ impl TreeToolbarAction {
             Self::Restructure => 11,
             Self::Settings => 12,
             Self::ActivityFilter => 13,
+            Self::WeeklyUsage => 14,
         }
     }
 
@@ -203,6 +205,7 @@ impl TreeToolbarAction {
     pub(crate) fn glyph(self, icons: &IconSettings) -> &str {
         match self {
             Self::Search => icons.glyph(IconTarget::ToolbarSearch),
+            Self::WeeklyUsage => icons.glyph(IconTarget::ToolbarWeeklyUsage),
             Self::Shell => icons.glyph(IconTarget::Terminal),
             Self::Agent(BuiltinAgentProvider::Claude) => icons.glyph(IconTarget::Claude),
             Self::Agent(BuiltinAgentProvider::Codex) => icons.glyph(IconTarget::Codex),
@@ -228,6 +231,7 @@ impl TreeToolbarAction {
     pub(crate) fn accent(self) -> Color {
         match self {
             Self::Search => Color::Cyan,
+            Self::WeeklyUsage => Color::Cyan,
             Self::Shell => Color::Gray,
             Self::Agent(BuiltinAgentProvider::Claude) => Color::Rgb(0xd9, 0x77, 0x57),
             Self::Agent(BuiltinAgentProvider::Codex) => Color::Rgb(0x2c, 0xb6, 0x7d),
@@ -250,6 +254,7 @@ impl TreeToolbarAction {
     pub fn description(self) -> &'static str {
         match self {
             Self::Search => "search workspace",
+            Self::WeeklyUsage => "agent usage",
             Self::Shell => "new shell",
             Self::Agent(provider) => provider.label(),
             Self::Editor => "new editor",
@@ -1588,7 +1593,11 @@ fn build_item(
                 .custom_agent_labels
                 .and_then(|labels| labels.get(&node.id))
             {
-                format!("{icon} {name} · {display_name}")
+                if name.is_empty() {
+                    format!("{icon} {display_name}")
+                } else {
+                    format!("{icon} {name} · {display_name}")
+                }
             } else {
                 display_name
             };
@@ -2955,6 +2964,7 @@ pub(crate) fn toolbar_action_for(
     use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
     match entry {
         Entry::Search => TreeToolbarAction::Search,
+        Entry::WeeklyUsage => TreeToolbarAction::WeeklyUsage,
         Entry::Project => TreeToolbarAction::Project,
         Entry::Shell => TreeToolbarAction::Shell,
         Entry::Claude => TreeToolbarAction::Agent(BuiltinAgentProvider::Claude),

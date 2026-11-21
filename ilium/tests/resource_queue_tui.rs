@@ -1792,6 +1792,37 @@ async fn cross_process_three_agent_fifo_handoffs_and_unavailable_cancelled_wait(
         screen(tui, "FifoWaiterB").await;
         screen(tui, "FifoWaiterC").await;
     }
+    let generation = owner["ownership_generation"].as_u64().unwrap();
+    let wrong_generation = (generation + 1).to_string();
+    let owner_id = owner["reservation_id"].as_str().unwrap();
+    let agent = a.0.to_string();
+    let wrong_release = tokio::time::timeout(
+        TIMEOUT,
+        first
+            .command()
+            .args([
+                "resource",
+                "release",
+                owner_id,
+                "--agent",
+                &agent,
+                "--expected-generation",
+                &wrong_generation,
+            ])
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!wrong_release.status.success());
+    let rejection: serde_json::Value = serde_json::from_slice(&wrong_release.stdout).unwrap();
+    assert_eq!(rejection["code"], "stale_generation");
+    assert_eq!(
+        first
+            .cli(&["resource", "status", owner_id, "--agent", &agent])
+            .await["state"],
+        "owned"
+    );
     first
         .cli(&[
             "resource",
@@ -1799,6 +1830,8 @@ async fn cross_process_three_agent_fifo_handoffs_and_unavailable_cancelled_wait(
             owner["reservation_id"].as_str().unwrap(),
             "--agent",
             &a.0.to_string(),
+            "--expected-generation",
+            &generation.to_string(),
         ])
         .await;
     assert_eq!(completed_wait(waiting_b, 0).await["reservation_id"], b_id);

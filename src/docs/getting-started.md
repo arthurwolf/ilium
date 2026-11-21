@@ -341,9 +341,9 @@ Ilium is fully usable with the mouse. Terminals report mouse events to Ilium, wh
 - Double-click a row to rename it.
 - Drag a row onto another row to move it into that group, or onto the empty space below the last row to put it at the top level. Dropping onto the dragged entry's own descendants, and a release outside the tree, cancel the move.
 - Scroll the wheel over the tree to scroll it.
-- Right-click a row, or the empty space, for the context menu: search, focus, new terminal / agent / editor / group / split / folder, rename, move up and down, order by, bookmark, lock closed, worktree actions, ask for update, queue a prompt, schedule input, convert an agent session between Claude and Codex, close, and **Settings**. Which entries appear depends on what you clicked.
+- Right-click a row, or the empty space, for the context menu: search, agent usage, focus, new terminal / agent / editor / group / split / folder, rename, move up and down, order by, bookmark, lock closed, worktree actions, ask for update, queue a prompt, schedule input, convert an agent session between Claude and Codex, close, and **Settings**. Which entries appear depends on what you clicked.
 - Hover a row to show its small buttons (rename, move up and down, close, retitle). Whether hover buttons appear is a setting.
-- The tree footer has toolbar buttons including Search, Restructure, and Settings (gear).
+- The tree footer has toolbar buttons including Search, Restructure, and Settings (gear). You can add the Agent usage button in Settings → Toolbar.
 
 **Terminal panes**
 

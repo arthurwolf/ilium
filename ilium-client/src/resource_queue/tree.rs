@@ -33,8 +33,10 @@ impl ResourceRows {
         catalog: &ResourceCatalog,
         session: &str,
         local_invocations: &[AgentIdentity],
+        navigable_reservations: &[ReservationId],
     ) {
         let previous = std::mem::take(&mut self.targets);
+        let navigable: HashSet<_> = navigable_reservations.iter().collect();
         self.projects.clear();
         for project_id in tree.all_ids() {
             let Some(path) = tree.get(project_id).and_then(|node| node.project_path()) else {
@@ -77,11 +79,36 @@ impl ResourceRows {
                         .iter()
                         .any(|live| live.same_invocation(&reservation.agent))
                         && reservation.agent.session_id == session
-                        && catalog.links.iter().any(|candidate| {
-                            candidate.project_id == reservation.agent.project_id
-                                && std::path::Path::new(&candidate.project_path) == path
-                        });
-                    let pane_id = local
+                        && tree
+                            .project_ancestor(reservation.agent.pane_id)
+                            .and_then(|owner| tree.get(owner))
+                            .and_then(|owner| owner.project_path())
+                            .is_some_and(|owner_path| {
+                                catalog.links.iter().any(|candidate| {
+                                    candidate.project_id == reservation.agent.project_id
+                                        && std::path::Path::new(&candidate.project_path)
+                                            == owner_path
+                                })
+                            });
+                    let historical = navigable.contains(&reservation.id)
+                        && reservation.agent.session_id == session
+                        && tree.get(reservation.agent.pane_id).is_some_and(|node| {
+                            node.is_pane()
+                                && node.name.chars().take(120).collect::<String>()
+                                    == reservation.agent.label
+                        })
+                        && tree
+                            .project_ancestor(reservation.agent.pane_id)
+                            .and_then(|owner| tree.get(owner))
+                            .and_then(|owner| owner.project_path())
+                            .is_some_and(|owner_path| {
+                                catalog.links.iter().any(|candidate| {
+                                    candidate.project_id == reservation.agent.project_id
+                                        && std::path::Path::new(&candidate.project_path)
+                                            == owner_path
+                                })
+                            });
+                    let pane_id = (local || historical)
                         .then_some(reservation.agent.pane_id)
                         .filter(|pane| tree.get(*pane).is_some_and(|node| node.is_pane()));
                     self.allocate(
@@ -330,6 +357,7 @@ pub(crate) mod tests {
             state: ReservationState::Queued,
             ownership_generation: 0,
             acquisition_pending: false,
+            custody: None,
         };
         let record = ResourceRecord {
             definition: ResourceDefinition {
@@ -380,11 +408,11 @@ pub(crate) mod tests {
     fn resource_rows_are_reported_for_opening_once_and_again_after_removal() {
         let (tree, catalog, project, _pane) = fixture();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         let first = rows.take_unopened_resource_rows();
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].0, project);
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         assert!(rows.take_unopened_resource_rows().is_empty());
     }
     #[test]
@@ -392,7 +420,7 @@ pub(crate) mod tests {
         let (tree, catalog, project, pane) = fixture();
         let before = serde_json::to_vec(&tree).unwrap();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         let grouped = rows.items(project, &catalog, true, &Default::default(), false, None);
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].children().len(), 1);
@@ -408,7 +436,7 @@ pub(crate) mod tests {
     fn activity_filter_keeps_resource_row_but_hides_inactive_local_participant() {
         let (tree, catalog, project, pane) = fixture();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         let hidden = rows.items(
             project,
             &catalog,
@@ -433,17 +461,17 @@ pub(crate) mod tests {
     fn row_identity_survives_snapshot_and_queue_reordering() {
         let (tree, mut catalog, project, _) = fixture();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         let old = rows.projects[&project][0];
         catalog.revision += 1;
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         assert_eq!(old, rows.projects[&project][0]);
     }
     #[test]
     fn foreign_session_pane_id_never_resolves_to_local_terminal() {
         let (tree, catalog, _, _) = fixture();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "another-session", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "another-session", &live(&catalog), &[]);
         assert!(rows
             .targets
             .values()
@@ -454,7 +482,7 @@ pub(crate) mod tests {
     fn participant_row_identity_survives_invocation_becoming_stale() {
         let (tree, catalog, _, _) = fixture();
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         let old = rows
             .targets
             .iter()
@@ -462,7 +490,7 @@ pub(crate) mod tests {
                 matches!(target, ResourceRowTarget::Participant { .. }).then_some(*id)
             })
             .unwrap();
-        rows.rebuild(&tree, &catalog, "test", &[]);
+        rows.rebuild(&tree, &catalog, "test", &[], &[]);
         assert!(matches!(
             rows.targets.get(&old),
             Some(ResourceRowTarget::Participant { pane_id: None, .. })
@@ -474,7 +502,7 @@ pub(crate) mod tests {
         let mut proofs = live(&catalog);
         proofs[0].invocation_id = InvocationId::from("replacement");
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &proofs);
+        rows.rebuild(&tree, &catalog, "test", &proofs, &[]);
         assert!(rows.targets.values().all(|target| !matches!(
             target,
             ResourceRowTarget::Participant {
@@ -498,7 +526,7 @@ pub(crate) mod tests {
             .insert(second.definition.id.clone(), second);
         catalog.links.push(link);
         let mut rows = ResourceRows::default();
-        rows.rebuild(&tree, &catalog, "test", &live(&catalog));
+        rows.rebuild(&tree, &catalog, "test", &live(&catalog), &[]);
         assert!(
             matches!(rows.targets.get(&rows.projects[&project][0]),Some(ResourceRowTarget::Resource{resource_id,..}) if resource_id==&ResourceId::from("aaa"))
         );

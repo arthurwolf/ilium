@@ -1268,3 +1268,373 @@ fn stale_recovery_needs_a_stale_owner_and_a_fresh_revision() {
     .unwrap_err();
     assert_eq!(err.code, "revision_conflict");
 }
+
+fn protected_catalog() -> ResourceCatalog {
+    let c = reserve(&reserve(&catalog(), "a", 2, 60), "b", 3, 60);
+    apply_resource_command(
+        &c,
+        ResourceCommand::RegisterCustody {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+            job_id: "job-1".into(),
+            stage_id: "stage-1".into(),
+            workload_invocation_id: "worker-1".into(),
+        },
+        &context(4, Some("a")),
+    )
+    .unwrap()
+    .catalog
+}
+
+struct ExactProof;
+impl CustodyProofVerifier for ExactProof {
+    fn verify_stopped(
+        &self,
+        resource: &ResourceId,
+        reservation: &Reservation,
+        intent: &CustodyIntent,
+    ) -> bool {
+        resource.0 == "gpu"
+            && reservation.id.0 == "a"
+            && reservation.request_id.0 == "2:request"
+            && intent.registration_request_id.0 == "4:request"
+            && intent.job_id == "job-1"
+            && intent.stage_id == "stage-1"
+            && intent.workload_invocation_id == "worker-1"
+            && intent.ownership_generation == 1
+    }
+}
+
+#[test]
+fn custody_survives_serialization_and_blocks_release_and_user_override() {
+    let c = protected_catalog();
+    assert_eq!(c.schema_version, 2);
+    let c: ResourceCatalog = toml::from_str(&toml::to_string(&c).unwrap()).unwrap();
+    let release = ResourceCommand::Release {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+    };
+    assert_eq!(
+        apply_resource_command(&c, release, &context(5, Some("a")))
+            .unwrap_err()
+            .code,
+        "custody_unresolved"
+    );
+    let mut user = context(6, None);
+    user.expected_revision = Some(c.revision);
+    let revoke = ResourceCommand::Revoke {
+        reservation_id: "a".into(),
+        reason: "clear".into(),
+    };
+    assert_eq!(
+        apply_resource_command(&c, revoke, &user).unwrap_err().code,
+        "custody_unresolved"
+    );
+    let command = ResourceCommand::ClearCustody {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+    };
+    let mut system = context(7, None);
+    system.actor = ResourceActor::System;
+    assert_eq!(
+        apply_resource_command(&c, command, &system)
+            .unwrap_err()
+            .code,
+        "custody_unverified"
+    );
+}
+
+#[test]
+fn custody_blocks_owner_death_and_boot_recovery_until_exact_proof() {
+    let c = protected_catalog();
+    let mut system = context(5, None);
+    system.actor = ResourceActor::System;
+    let c = apply_resource_command(
+        &c,
+        ResourceCommand::ReconcileInvocation {
+            agent: actor("a"),
+            evidence: InvocationEligibility::Dead,
+        },
+        &system,
+    )
+    .unwrap()
+    .catalog;
+    let mut user = context(6, None);
+    user.expected_revision = Some(c.revision);
+    let recovery = ResourceCommand::RecoverStaleOwner {
+        resource_id: "gpu".into(),
+        reason: "owner died".into(),
+    };
+    assert_eq!(
+        apply_resource_command(&c, recovery.clone(), &user)
+            .unwrap_err()
+            .code,
+        "custody_unresolved"
+    );
+    let confirm = ResourceCommand::ConfirmClear {
+        resource_id: "gpu".into(),
+        reason: "operator".into(),
+    };
+    assert_eq!(
+        apply_resource_command(&c, confirm, &user).unwrap_err().code,
+        "custody_unresolved"
+    );
+    system.clock.boot_id = "new-boot".into();
+    system.request_id = "7:boot".into();
+    system.clock.unix_millis = 7;
+    let c = apply_resource_command(&c, ResourceCommand::ReconcileBoot, &system)
+        .unwrap()
+        .catalog;
+    let mut user = context(8, None);
+    user.clock.boot_id = "new-boot".into();
+    user.expected_revision = Some(c.revision);
+    assert_eq!(
+        apply_resource_command(&c, recovery.clone(), &user)
+            .unwrap_err()
+            .code,
+        "custody_unresolved"
+    );
+    system.clock.unix_millis = 9;
+    system.request_id = "9:clear".into();
+    let clear = ResourceCommand::ClearCustody {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+    };
+    let c = apply_resource_command_with_verifier(&c, clear, &system, Some(&ExactProof))
+        .unwrap()
+        .catalog;
+    user.clock.unix_millis = 10;
+    user.request_id = "10:recover".into();
+    user.expected_revision = Some(c.revision);
+    let c = apply_resource_command(&c, recovery, &user).unwrap().catalog;
+    assert_eq!(
+        c.resources[&ResourceId::from("gpu")].reservations[1].state,
+        ReservationState::Cancelled
+    ); // boot fenced queued waiter
+}
+
+#[test]
+fn custody_registration_fences_relaunch_and_wrong_generation() {
+    let c = protected_catalog();
+    let retry = ResourceCommand::RegisterCustody {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+        job_id: "job-2".into(),
+        stage_id: "stage-2".into(),
+        workload_invocation_id: "worker-2".into(),
+    };
+    assert_eq!(
+        apply_resource_command(&c, retry, &context(5, Some("a")))
+            .unwrap_err()
+            .code,
+        "custody_exists"
+    );
+    let mut system = context(6, None);
+    system.actor = ResourceActor::System;
+    let wrong = ResourceCommand::ClearCustody {
+        reservation_id: "a".into(),
+        ownership_generation: 2,
+    };
+    assert_eq!(
+        apply_resource_command_with_verifier(&c, wrong, &system, Some(&ExactProof))
+            .unwrap_err()
+            .code,
+        "stale_generation"
+    );
+}
+
+#[test]
+fn custody_allows_sequential_stages_of_one_job_without_reusing_worker_identity() {
+    let c = protected_catalog();
+    let mut system = context(5, None);
+    system.actor = ResourceActor::System;
+    let clear = ResourceCommand::ClearCustody {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+    };
+    let c = apply_resource_command_with_verifier(&c, clear, &system, Some(&ExactProof))
+        .unwrap()
+        .catalog;
+    let release = ResourceCommand::Release {
+        reservation_id: "a".into(),
+        ownership_generation: 1,
+    };
+    let c = apply_resource_command(&c, release, &context(6, Some("a")))
+        .unwrap()
+        .catalog;
+    let duplicate = ResourceCommand::RegisterCustody {
+        reservation_id: "b".into(),
+        ownership_generation: 2,
+        job_id: "job-1".into(),
+        stage_id: "stage-2".into(),
+        workload_invocation_id: "worker-1".into(),
+    };
+    assert_eq!(
+        apply_resource_command(&c, duplicate, &context(7, Some("b")))
+            .unwrap_err()
+            .code,
+        "custody_identity_reused"
+    );
+    let next = ResourceCommand::RegisterCustody {
+        reservation_id: "b".into(),
+        ownership_generation: 2,
+        job_id: "job-1".into(),
+        stage_id: "stage-2".into(),
+        workload_invocation_id: "worker-2".into(),
+    };
+    let mut c = apply_resource_command(&c, next, &context(8, Some("b")))
+        .unwrap()
+        .catalog;
+    assert_eq!(
+        c.resources[&ResourceId::from("gpu")].reservations[1]
+            .custody
+            .as_ref()
+            .unwrap()
+            .workload_invocation_id,
+        "worker-2"
+    );
+    c.resources
+        .get_mut(&ResourceId::from("gpu"))
+        .unwrap()
+        .reservations[1]
+        .custody
+        .as_mut()
+        .unwrap()
+        .workload_invocation_id = "worker-1".into();
+    assert_eq!(
+        validate_resource_catalog(&c).unwrap_err().code,
+        "corrupt_catalog"
+    );
+}
+
+#[test]
+fn custody_fences_survive_terminal_retention_and_reject_reused_job_stage() {
+    let mut system = context(5, None);
+    system.actor = ResourceActor::System;
+    let c = apply_resource_command_with_verifier(
+        &protected_catalog(),
+        ResourceCommand::ClearCustody {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+        },
+        &system,
+        Some(&ExactProof),
+    )
+    .unwrap()
+    .catalog;
+    let mut c = apply_resource_command(
+        &c,
+        ResourceCommand::Release {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+        },
+        &context(6, Some("a")),
+    )
+    .unwrap()
+    .catalog;
+    // Put the protected terminal grant outside both ordinary retention windows.
+    let resource = c.resources.get_mut(&ResourceId::from("gpu")).unwrap();
+    let template = resource.reservations[0].clone();
+    for index in 0..101_u64 {
+        let mut ordinary = template.clone();
+        ordinary.id = ReservationId(format!("terminal-{index}"));
+        ordinary.ticket = index + 3;
+        ordinary.ownership_generation = index + 3;
+        ordinary.terminal_at = Some(7);
+        ordinary.custody = None;
+        resource.reservations.push(ordinary);
+    }
+    resource.next_ticket = 104;
+    resource.next_generation = 104;
+    let now = REQUEST_WINDOW_MILLIS + 20;
+    let mut maintenance = context(now, None);
+    maintenance.expected_revision = Some(c.revision);
+    let c = apply_resource_command(
+        &c,
+        ResourceCommand::SetGate {
+            resource_id: "gpu".into(),
+            gate: ResourceGate::Unavailable {
+                reason: "maintenance".into(),
+            },
+        },
+        &maintenance,
+    )
+    .unwrap()
+    .catalog;
+    let c: ResourceCatalog = toml::from_str(&toml::to_string(&c).unwrap()).unwrap();
+    assert!(c.resources[&ResourceId::from("gpu")]
+        .reservations
+        .iter()
+        .any(|q| q.id.0 == "a" && q.custody.is_some()));
+    for (job, stage, workload) in [
+        ("job-2", "stage-2", "worker-1"),
+        ("job-1", "stage-1", "worker-2"),
+    ] {
+        let command = ResourceCommand::RegisterCustody {
+            reservation_id: "b".into(),
+            ownership_generation: 2,
+            job_id: job.into(),
+            stage_id: stage.into(),
+            workload_invocation_id: workload.into(),
+        };
+        assert_eq!(
+            apply_resource_command(&c, command, &context(now + 1, Some("b")))
+                .unwrap_err()
+                .code,
+            "custody_identity_reused"
+        );
+    }
+}
+
+#[test]
+fn duplicate_job_stage_is_rejected_when_loading_catalog() {
+    let c = protected_catalog();
+    let mut system = context(5, None);
+    system.actor = ResourceActor::System;
+    let c = apply_resource_command_with_verifier(
+        &c,
+        ResourceCommand::ClearCustody {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+        },
+        &system,
+        Some(&ExactProof),
+    )
+    .unwrap()
+    .catalog;
+    let c = apply_resource_command(
+        &c,
+        ResourceCommand::Release {
+            reservation_id: "a".into(),
+            ownership_generation: 1,
+        },
+        &context(6, Some("a")),
+    )
+    .unwrap()
+    .catalog;
+    let mut c = apply_resource_command(
+        &c,
+        ResourceCommand::RegisterCustody {
+            reservation_id: "b".into(),
+            ownership_generation: 2,
+            job_id: "job-1".into(),
+            stage_id: "stage-2".into(),
+            workload_invocation_id: "worker-2".into(),
+        },
+        &context(7, Some("b")),
+    )
+    .unwrap()
+    .catalog;
+    c.resources
+        .get_mut(&ResourceId::from("gpu"))
+        .unwrap()
+        .reservations[1]
+        .custody
+        .as_mut()
+        .unwrap()
+        .stage_id = "stage-1".into();
+    assert_eq!(
+        validate_resource_catalog(&c).unwrap_err().code,
+        "corrupt_catalog"
+    );
+}

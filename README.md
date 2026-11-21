@@ -257,6 +257,7 @@ Also included:
 - AI [titles, tree organization and custom instructions](src/docs/titles-and-instructions.md), with [provider and privacy controls](src/docs/inference-and-privacy.md).
 - [Voice control](src/docs/voice.md).
 - [Scheduled input, text triggers, prompt queues, progress monitors and Chatroom](src/docs/automation.md).
+- Optional, opt-in [polling detection](src/docs/polling-detection.md): flags agents that poll, repeat unchanged updates or churn waits, using bounded excerpts reviewed by OpenAI's Decisions API with your saved key, a spending ledger and a monthly cap. Findings are advisory; nothing is ever sent to an agent.
 - [Shared resource queues](src/docs/resource-queues.md) for exclusive GPU and USB-board coordination across projects.
 - [Editors, boards](src/docs/editors-and-boards.md) and [Smart Copy](src/docs/smart-copy.md).
 - Ambient [animated backgrounds](src/docs/animations.md): landscapes, space, maps, live data, video and more, all sharing one look.

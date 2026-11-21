@@ -48,6 +48,7 @@ pub enum IconTarget {
     Lock,
     FrozenAgent,
     ToolbarSearch,
+    ToolbarWeeklyUsage,
     ToolbarRestructure,
     ToolbarSettings,
     RowRename,
@@ -99,7 +100,7 @@ pub enum IconTarget {
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 81] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -136,6 +137,7 @@ impl IconTarget {
         Self::Lock,
         Self::FrozenAgent,
         Self::ToolbarSearch,
+        Self::ToolbarWeeklyUsage,
         Self::ToolbarRestructure,
         Self::ToolbarSettings,
         Self::RowRename,
@@ -220,6 +222,7 @@ impl IconTarget {
             Self::Lock => "Locked closed folder",
             Self::FrozenAgent => "Frozen agent pane",
             Self::ToolbarSearch => "Toolbar: search",
+            Self::ToolbarWeeklyUsage => "Toolbar: agent usage",
             Self::ToolbarRestructure => "Toolbar: restructure",
             Self::ToolbarSettings => "Toolbar: settings",
             Self::RowRename => "Row action: rename",
@@ -305,6 +308,7 @@ impl IconTarget {
             Self::Lock => "lock",
             Self::FrozenAgent => "frozen_agent",
             Self::ToolbarSearch => "toolbar_search",
+            Self::ToolbarWeeklyUsage => "toolbar_weekly_usage",
             Self::ToolbarRestructure => "toolbar_restructure",
             Self::ToolbarSettings => "toolbar_settings",
             Self::RowRename => "row_rename",
@@ -394,6 +398,7 @@ impl IconTarget {
             Self::Lock => "🔒",
             Self::FrozenAgent => "❄",
             Self::ToolbarSearch => "🔎",
+            Self::ToolbarWeeklyUsage => "📊",
             Self::ToolbarRestructure => "♻️",
             Self::ToolbarSettings => "🎚️",
             Self::RowRename => "✏️",
@@ -504,6 +509,7 @@ impl IconTarget {
             Self::Lock => &["🔒", "🔐", "🔏", "⛓️"],
             Self::FrozenAgent => &["❄", "❅", "❆", "⛄"],
             Self::ToolbarSearch => &["⌕", "🔎", "🔍", "◉"],
+            Self::ToolbarWeeklyUsage => &["📊", "▥", "▤", "▰"],
             Self::ToolbarRestructure | Self::RowRetitle | Self::RowProjectRestructure => {
                 &["♻️", "↻", "⟳", "✦"]
             }
@@ -595,6 +601,7 @@ pub struct IconSettings {
     pub lock: String,
     pub frozen_agent: String,
     pub toolbar_search: String,
+    pub toolbar_weekly_usage: String,
     pub toolbar_restructure: String,
     pub toolbar_settings: String,
     pub row_rename: String,
@@ -687,6 +694,7 @@ impl IconSettings {
             lock: value(IconTarget::Lock),
             frozen_agent: value(IconTarget::FrozenAgent),
             toolbar_search: value(IconTarget::ToolbarSearch),
+            toolbar_weekly_usage: value(IconTarget::ToolbarWeeklyUsage),
             toolbar_restructure: value(IconTarget::ToolbarRestructure),
             toolbar_settings: value(IconTarget::ToolbarSettings),
             row_rename: value(IconTarget::RowRename),
@@ -772,6 +780,7 @@ impl IconSettings {
             IconTarget::Lock => &self.lock,
             IconTarget::FrozenAgent => &self.frozen_agent,
             IconTarget::ToolbarSearch => &self.toolbar_search,
+            IconTarget::ToolbarWeeklyUsage => &self.toolbar_weekly_usage,
             IconTarget::ToolbarRestructure => &self.toolbar_restructure,
             IconTarget::ToolbarSettings => &self.toolbar_settings,
             IconTarget::RowRename => &self.row_rename,
@@ -866,6 +875,7 @@ impl IconSettings {
             IconTarget::Lock => &mut self.lock,
             IconTarget::FrozenAgent => &mut self.frozen_agent,
             IconTarget::ToolbarSearch => &mut self.toolbar_search,
+            IconTarget::ToolbarWeeklyUsage => &mut self.toolbar_weekly_usage,
             IconTarget::ToolbarRestructure => &mut self.toolbar_restructure,
             IconTarget::ToolbarSettings => &mut self.toolbar_settings,
             IconTarget::RowRename => &mut self.row_rename,

@@ -33,6 +33,7 @@ fn server_options(
 ) -> ServerOptions {
     ServerOptions {
         resource_catalog_path: None,
+        polling_paths: None,
         session_name: session_name.to_string(),
         socket_path,
         snapshot_path,

@@ -33,20 +33,9 @@ impl SetupPromptScope {
     /// A concise, human-readable description of the exact target.
     pub fn target_label(&self) -> String {
         match self {
-            Self::Global {
-                chatroom_file,
-                progress_file,
-            } if chatroom_file == progress_file => {
-                format!("Global instructions ({})", chatroom_file.display())
+            Self::Global { progress_file, .. } => {
+                format!("Global Progress instructions ({})", progress_file.display())
             }
-            Self::Global {
-                chatroom_file,
-                progress_file,
-            } => format!(
-                "Global Chatroom: {}\nGlobal Progress: {}",
-                chatroom_file.display(),
-                progress_file.display()
-            ),
             Self::Project(path) => format!("Project instructions ({})", path.display()),
         }
     }
@@ -305,14 +294,22 @@ pub fn render(frame: &mut Frame, screen_area: Rect, state: &SetupPromptState) {
         .alignment(Alignment::Center),
         layout.target,
     );
-    render_feature_row(
-        frame,
-        layout.chatroom,
-        "Chatroom coordination",
-        state.chatroom_needs_setup,
-        state.chatroom_selected,
-        state.focus == SetupPromptFocus::Chatroom,
-    );
+    if matches!(&state.scope, SetupPromptScope::Global { .. }) {
+        frame.render_widget(
+            Paragraph::new(" Chatroom instructions are project-specific")
+                .style(Style::new().add_modifier(Modifier::DIM)),
+            layout.chatroom,
+        );
+    } else {
+        render_feature_row(
+            frame,
+            layout.chatroom,
+            "Chatroom coordination",
+            state.chatroom_needs_setup,
+            state.chatroom_selected,
+            state.focus == SetupPromptFocus::Chatroom,
+        );
+    }
     render_feature_row(
         frame,
         layout.progress,

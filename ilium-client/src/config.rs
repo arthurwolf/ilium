@@ -69,6 +69,8 @@ pub struct ClientConfig {
     pub padding: crate::padding::PaddingSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
     pub inference: InferenceSettings,
+    /// Global, opt-in polling detector settings shared with the server.
+    pub polling_detection: ilium_core::polling_detection::PollingSettings,
     /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
     pub triggers: TriggerSettings,
     /// Regex-driven terminal responses shown in the Text Triggers tab.
@@ -115,6 +117,7 @@ impl Default for ClientConfig {
             kanban_board: KanbanBoardSettings::default(),
             padding: crate::padding::PaddingSettings::default(),
             inference: InferenceSettings::default(),
+            polling_detection: ilium_core::polling_detection::PollingSettings::default(),
             triggers: TriggerSettings::default(),
             text_triggers: TextTriggerSettings::default(),
             agent_setup: AgentSetupSettings::default(),
@@ -1296,6 +1299,8 @@ struct RawClientConfig {
     #[serde(default)]
     inference: InferenceSettings,
     #[serde(default)]
+    polling_detection: ilium_core::polling_detection::PollingSettings,
+    #[serde(default)]
     triggers: TriggerSettings,
     #[serde(default)]
     text_triggers: TextTriggerSettings,
@@ -1443,6 +1448,8 @@ struct RawThemeConfig {
 /// testable, mirroring `ilium_server::error::ConfigLoadError`.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
+    #[error("invalid polling detection settings: {0}")]
+    InvalidPollingDetection(&'static str),
     #[error("invalid custom status rules: {0}")]
     InvalidStatusRules(String),
     #[error("invalid custom agent settings: {0}")]
@@ -1592,6 +1599,8 @@ impl From<toml::de::Error> for ConfigLoadError {
 /// [`save_ui_settings`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigSaveError {
+    #[error("invalid polling detection settings: {0}")]
+    InvalidPollingDetection(&'static str),
     #[error("invalid custom status rules: {0}")]
     InvalidStatusRules(String),
     #[error("invalid custom agent settings: {0}")]
@@ -1702,6 +1711,12 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
             path: path.clone(),
             source: ConfigLoadError::InvalidPadding(message),
         })?;
+    raw.polling_detection
+        .validate()
+        .map_err(|source| ClientError::ConfigLoad {
+            path: path.clone(),
+            source: ConfigLoadError::InvalidPollingDetection(source),
+        })?;
     let terminal = merge_terminal(raw.terminal).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source,
@@ -1742,6 +1757,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         kanban_board,
         padding: raw.padding,
         inference: raw.inference,
+        polling_detection: raw.polling_detection,
         triggers: raw.triggers.normalized(),
         text_triggers: raw.text_triggers,
         agent_setup: raw.agent_setup,
@@ -2543,6 +2559,25 @@ pub fn save_cost_settings(config_dir: &Path, settings: &CostSettings) -> Result<
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "cost", value)
+}
+
+/// Saves only the polling detector table after validating all bounds.
+pub fn save_polling_detection_settings(
+    config_dir: &Path,
+    settings: &ilium_core::polling_detection::PollingSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    settings
+        .validate()
+        .map_err(|source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::InvalidPollingDetection(source)),
+        })?;
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path,
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "polling_detection", value)
 }
 
 pub fn save_remote_compaction_settings(
@@ -3706,6 +3741,7 @@ mod tests {
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
                 command: String::new(),
                 arguments: String::new(),
+                show_name_in_title: false,
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "s".repeat(256 * 1024),
@@ -3736,6 +3772,7 @@ mod tests {
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
                 command: String::new(),
                 arguments: String::new(),
+                show_name_in_title: false,
                 environment: vec![EnvironmentEntry {
                     key: "EXAMPLE_VALUE".into(),
                     value: "literal = 'text'\n☃".into(),
@@ -3777,6 +3814,7 @@ mod tests {
             base_provider: ilium_core::BuiltinAgentProvider::Claude,
             command: String::new(),
             arguments: String::new(),
+            show_name_in_title: false,
             environment: Vec::new(),
         };
         let original = CustomAgentSettings {
@@ -5046,6 +5084,28 @@ mod tests {
             !loaded.ui.show_context_menu_icons,
             "other tables survive the save"
         );
+    }
+
+    #[test]
+    fn polling_settings_round_trip_and_reject_invalid_values() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_context_menu_icons = false\n",
+        )
+        .unwrap();
+        let settings = ilium_core::polling_detection::PollingSettings {
+            event_interval: 8,
+            ..Default::default()
+        };
+        save_polling_detection_settings(&dir, &settings).unwrap();
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.polling_detection, settings);
+        assert!(!loaded.ui.show_context_menu_icons);
+        let mut invalid = settings;
+        invalid.event_interval = 0;
+        assert!(save_polling_detection_settings(&dir, &invalid).is_err());
+        assert_eq!(load(&dir).unwrap().polling_detection.event_interval, 8);
     }
 
     #[test]
