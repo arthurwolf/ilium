@@ -8,13 +8,9 @@
 
 ## Quick start
 
-Complete preview: [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) is the complete bundle: Linux x86_64 (six formats), Linux ARM64 (six formats), macOS Apple Silicon (four formats), macOS Intel (four formats) and Windows x86_64 (three formats), 23 files in one immutable prerelease with one `SHA256SUMS`. The public downloads have been checked against that file. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Complete preview: [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) has every platform in one prerelease (23 files, one `SHA256SUMS`). It is not marked as `latest`; the full v0.1.1 release is still pending. Plugins are an unsupported development preview.
 
-Files carried unchanged from earlier previews keep their original embedded versions. The six files new in this preview (macOS Intel tar.gz, ZIP, PKG and DMG, and Linux ARM64 rpm and Snap) were built natively on GitHub Actions runners and installed and run there.
-
-**Limits of this preview:** the macOS packages (Apple Silicon and Intel) are unsigned and not notarized, so Gatekeeper warns: right-click and choose Open, or run `xattr -dr com.apple.quarantine <file>`. The Windows files are unsigned, so Microsoft Defender SmartScreen warns: choose More info, then Run anyway, after checking the SHA-256. Plugins are an unsupported development preview.
-
-Plugin code is present for future integration and is not yet available for use.
+The macOS packages are unsigned and not notarized, so Gatekeeper warns: right-click and choose Open, or run `xattr -dr com.apple.quarantine <file>`. The Windows files are unsigned, so SmartScreen warns: choose More info, then Run anyway, after checking the SHA-256.
 
 Install on Linux or macOS (no root required):
 
@@ -22,7 +18,7 @@ Install on Linux or macOS (no root required):
 curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
 
-The installer supports Linux x86_64 and ARM64 (aarch64) and macOS Apple Silicon and Intel; it checks each archive against a pinned SHA-256 before installing. Linux ARM64 has been verified natively in containers on an ARM64 runner and in an emulated guest.
+It supports Linux x86_64 and ARM64 and macOS Apple Silicon and Intel, and checks each archive against a pinned SHA-256 before installing.
 
 Windows PowerShell (5.1 and 7):
 
@@ -30,27 +26,23 @@ Windows PowerShell (5.1 and 7):
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-Windows downloads (per-user setup `.exe`, `.msi` and ZIP; no administrator rights needed) are in the table below.
-
-Direct downloads:
+Direct downloads (the Windows installers are per-user and need no administrator rights):
 
 | System | Downloads / availability |
 | --- | --- |
-| Linux x86_64 (6 of 6 available and verified) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 (6 of 6 available and verified; rpm and Snap installed and run natively on an ARM64 runner, the other four in an emulated guest) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.flatpak) |
-| macOS Apple Silicon (4 of 4 available and verified; native macOS build, tests and installed-package checks; unsigned, not notarized; animation add-ons disabled) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.dmg) |
-| macOS Intel (4 of 4 available and verified; native macOS build, tests and installed-package checks; unsigned, not notarized; animation add-ons disabled) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.dmg) |
-| Windows x86_64 (3 of 3 available and verified; native Windows build, tests and installer checks; unsigned, SmartScreen warns; animation add-ons disabled) | [setup EXE](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64.zip) |
+| Linux x86_64 (6 of 6 available) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-x86_64.flatpak) |
+| Linux ARM64 (6 of 6 available) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-linux-aarch64.flatpak) |
+| macOS Apple Silicon (4 of 4 available; unsigned) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-aarch64.dmg) |
+| macOS Intel (4 of 4 available; unsigned) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.dmg) |
+| Windows x86_64 (3 of 3 available; unsigned) | [setup EXE](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-windows-x86_64.zip) |
 
-**Linux ARM64: 6 of 6 formats available and verified.** The rpm was installed and run in Fedora 41 and openSUSE Leap 15.6 aarch64 containers and the Snap on the host of a native ARM64 GitHub Actions runner; the tar.gz, deb, AppImage and Flatpak ran in an emulated ARM64 (QEMU) guest. All platforms are in the same prerelease, [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7).
+Check packages against [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
-Verify every package using [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/SHA256SUMS) of `v0.1.1-preview.7`, which lists all 23 files. Details: [Installation](src/docs/installation.md).
-
-The same 23 files plus `SHA256SUMS` are also published as one public OCI artifact, `ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7`. Retrieve it anonymously with [ORAS](https://oras.land/docs/installation/) (`oras pull ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7`), then check it with `sha256sum -c SHA256SUMS`.
+Also available as one OCI artifact: `oras pull ghcr.io/arthurwolf/ilium-release:v0.1.1-preview.7` ([ORAS](https://oras.land/docs/installation/)), then `sha256sum -c SHA256SUMS`.
 
 Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. For this preview, upgrade by installing a newer qualified package.
 
-No Rust toolchain is needed for releases. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform; macOS and Windows are implemented with different test coverage.
+Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform.
 
 > **AI privacy:** First-run setup lets you choose Kilo Gateway, paid APIs, local Ollama or Skip. Automatic AI requests remain paused until setup finishes. Kilo Gateway sends prompts to its service. See [Inference and privacy](src/docs/inference-and-privacy.md).
 

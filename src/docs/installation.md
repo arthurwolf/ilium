@@ -2,9 +2,9 @@
 
 This page describes Ilium's installation routes: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-Preview [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) is the complete preview bundle: Linux x86_64 (six formats), Linux ARM64 (six formats), macOS Apple Silicon (four formats), macOS Intel (four formats) and Windows x86_64 (three formats), 23 files in one immutable prerelease with one SHA256SUMS. It carries the seventeen files of v0.1.1-preview.6 unchanged (they keep their original embedded versions) and adds macOS Intel tar.gz, ZIP, PKG and DMG and Linux ARM64 rpm and Snap, which were built natively on GitHub Actions runners and installed and run there. The public downloads have been checked against SHA256SUMS. The prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending. Earlier previews (v0.1.1-linux.3 and v0.1.1-preview.4 to .6) stay published and unchanged.
+Preview [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) has every platform in one prerelease: Linux x86_64 and ARM64 (six formats each), macOS Apple Silicon and Intel (four each) and Windows x86_64 (three), 23 files with one `SHA256SUMS`. It is not marked as `latest`; the full v0.1.1 release is still pending. Earlier previews stay published.
 
-**Limits of this preview:** none of the packages is signed or notarized, animation add-on packages are disabled on macOS and Windows, and Linux ARM64 tar.gz, deb, AppImage and Flatpak were verified in an emulated guest. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
+**Limits of this preview:** none of the packages is signed or notarized, animation add-ons are disabled on macOS and Windows, and plugins are an unsupported development preview.
 
 ## Contents
 
@@ -28,9 +28,9 @@ Linux is the primary platform. macOS and Windows support is implemented, with di
 
 | Platform | Architectures | Package formats |
 | --- | --- | --- |
-| Linux | x86_64 (Intel/AMD); aarch64 (ARM64) | tar.gz, deb, rpm, AppImage, Snap, Flatpak on both; ARM64 rpm and Snap verified natively on an ARM64 runner, the other ARM64 formats in an emulated QEMU guest |
-| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; all four available for both Apple Silicon and Intel in v0.1.1-preview.7 (unsigned, not notarized) |
-| Windows | x86_64 (native AMD64) | setup exe, msi, zip; all three available in v0.1.1-preview.7 (carried from v0.1.1-preview.6; unsigned) |
+| Linux | x86_64 (Intel/AMD); aarch64 (ARM64) | tar.gz, deb, rpm, AppImage, Snap, Flatpak on both |
+| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg (unsigned, not notarized) |
+| Windows | x86_64 (native AMD64) | setup exe, msi, zip (unsigned) |
 
 Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora and openSUSE environments). Flatpak uses its declared platform runtime. All packages are unsigned: check the asset digest on the release page.
 
@@ -117,7 +117,7 @@ Download the archive and `SHA256SUMS` from the same release, and [verify the che
 Choose your architecture:
 
 - Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.tar.gz)
-- ARM64 (emulated-guest evidence only): [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz)
+- ARM64: [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz)
 
 1. Download the archive and `SHA256SUMS` into one directory.
 2. Verify: `sha256sum --ignore-missing --check SHA256SUMS`. Confirm your archive reports `OK`.
@@ -171,13 +171,9 @@ Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-
 
 Flatpak is experimental. The package forwards its trusted CLI to the host from the exact running Flatpak deployment, so panes can use host tools. This grants Ilium full host-command access; Flatpak is a distribution format here, not a security boundary for the CLI. Animation packages still run only in Ilium's separately confined helper. A candidate must pass the real installed host-launch, animation-resource and process-cleanup checks before it is published as a qualified release.
 
-### How Linux packages are qualified
-
-The Linux release gate requires receipt-bound installed-file checks, client, server and helper versions, Beach and Carpet rendering through the installed helper, an isolated pane lifecycle, and verified removal on each native architecture. Distribution containers cover deb, rpm and AppImage extract-and-run; disposable native runners cover deb, Snap, the real Flatpak sandbox and an AppImage FUSE mount. Separate VM evidence and public installation evidence remain distinct from candidate checks. Details: [Linux acceptance boundaries](../../release/RELEASING.md#linux-acceptance-boundaries).
-
 ## macOS packages
 
-**Preview: Apple Silicon and Intel, four formats each.** Apple Silicon: [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) provides [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg). All were built, linted, tested and audited natively on a GitHub Actions `macos-15` (Apple Silicon) runner, and the ZIP, PKG and DMG were installed there and passed the installed-package test (versions, session lifecycle, removal). They hold the same binaries as the tar.gz. They are **unsigned and not notarized**, so Gatekeeper warns.
+**Preview: Apple Silicon and Intel, four formats each.** Apple Silicon: [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) provides [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg). They hold the same binaries as the tar.gz. They are **unsigned and not notarized**, so Gatekeeper warns.
 
 **Native animations are disabled on macOS.** The animation sandbox (Seatbelt) is not qualified, so the product refuses animation add-ons with "macOS animation helper Seatbelt/resource isolation is not qualified; unverified packages are disabled". The macOS test asserts that refusal.
 
@@ -188,7 +184,7 @@ If macOS blocks a download or the extracted binaries, right-click and choose Ope
 3. tar.gz: extract with `tar -xzf` into a new directory; ZIP: unzip into a new directory; DMG: open it and copy the folder out; PKG: see below.
 4. Add the package directory to `PATH`.
 
-**Intel (x86_64), v0.1.1-preview.7:** [`ilium-macos-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.dmg), embedded version 0.1.1-preview.7. They were built, tested and audited natively on a GitHub Actions `macos-15-intel` runner; the ZIP, PKG and DMG were installed, run and removed there. The same animation and signing limits apply.
+**Intel (x86_64), v0.1.1-preview.7:** [`ilium-macos-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.7/ilium-macos-x86_64.dmg). The same animation and signing limits apply.
 
 The hosted installer selects your architecture and uses the same layout as Linux.
 
@@ -203,7 +199,7 @@ The ZIP, PKG and DMG packages are unsigned and not notarized. macOS may block do
 
 ## Windows packages
 
-**Preview: x86_64, three formats.** [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) provides [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64-setup.exe), [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.msi) and [`ilium-windows-x86_64.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.zip). All three were built, tested and audited natively on a GitHub Actions `windows-2025` runner, and the setup EXE and MSI were silently installed there, run and uninstalled. They are **unsigned**, so Microsoft Defender SmartScreen shows "Windows protected your PC": verify the SHA-256 first, then choose More info and Run anyway. Animation add-ons are disabled on Windows because the animation helper sandbox is not yet qualified. The resource queue (`ilium resource`) is Linux-only and refuses on Windows, and session statistics are rescanned instead of cached across restarts. The PowerShell one-line installer does not install this preview yet; use these downloads.
+**Preview: x86_64, three formats.** [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) provides [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64-setup.exe), [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.msi) and [`ilium-windows-x86_64.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.zip). They are **unsigned**, so Microsoft Defender SmartScreen shows "Windows protected your PC": verify the SHA-256 first, then choose More info and Run anyway. Animation add-ons are disabled on Windows because the animation helper sandbox is not yet qualified. The resource queue (`ilium resource`) is Linux-only and refuses on Windows, and session statistics are rescanned instead of cached across restarts. The PowerShell one-line installer is described above.
 
 For a guided install, use `ilium-windows-x86_64-setup.exe` or `ilium-windows-x86_64.msi`. Both install for your user without administrator rights, add Ilium to your `PATH`, and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
 
