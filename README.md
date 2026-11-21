@@ -8,7 +8,7 @@
 
 ## Quick start
 
-Preview: [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) is the complete preview bundle: Linux x86_64 (six formats), Linux ARM64 (six formats), macOS Apple Silicon (four formats), macOS Intel (four formats) and Windows x86_64 (three formats), 23 files in one immutable prerelease with one `SHA256SUMS`. The public downloads have been checked against that file. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Complete preview: [v0.1.1-preview.7](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.7) is the complete bundle: Linux x86_64 (six formats), Linux ARM64 (six formats), macOS Apple Silicon (four formats), macOS Intel (four formats) and Windows x86_64 (three formats), 23 files in one immutable prerelease with one `SHA256SUMS`. The public downloads have been checked against that file. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
 Files carried unchanged from earlier previews keep their original embedded versions. The six files new in this preview (macOS Intel tar.gz, ZIP, PKG and DMG, and Linux ARM64 rpm and Snap) were built natively on GitHub Actions runners and installed and run there.
 
