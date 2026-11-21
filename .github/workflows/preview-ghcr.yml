@@ -17,6 +17,9 @@ on:
         type: boolean
 permissions:
   contents: read
+env:
+  # The checkout must stay clean: tracked bytecode files are audited as source.
+  PYTHONDONTWRITEBYTECODE: '1'
 concurrency:
   group: ilium-preview7-ghcr
   cancel-in-progress: false

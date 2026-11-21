@@ -6,3 +6,4 @@
 
 ### Fixed
 - Installers now validate carried preview archives against their original embedded versions and exact published checksums when a newer preview release includes those unchanged files.
+- The preview Pages and GHCR workflows no longer rewrite tracked Python bytecode files in their checkout, which made the qualification checks reject the checkout as modified.

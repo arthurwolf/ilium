@@ -15,6 +15,9 @@ on:
         required: true
 permissions:
   contents: read
+env:
+  # The checkout must stay clean: tracked bytecode files are audited as source.
+  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
   pages:
     runs-on: ubuntu-22.04
