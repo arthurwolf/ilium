@@ -41,6 +41,9 @@ const DAY_MS: i64 = 86_400_000;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DiscoveredSession {
     pub class: AgentClass,
+    /// The transcript shows a Kilo Proxy launcher (own backend, not the
+    /// provider's account), so the session is listed in its own section.
+    pub proxy_backed: bool,
     pub session_id: String,
     pub name: String,
     pub models: Vec<ModelWorkload>,
@@ -274,6 +277,7 @@ struct CachedSession {
     project: Option<PathBuf>,
     first_prompt: Option<String>,
     last_ms: Option<i64>,
+    proxy_backed: bool,
 }
 
 fn session_cache() -> &'static Mutex<HashMap<PathBuf, CachedSession>> {
@@ -313,6 +317,7 @@ fn cached(candidate: &Candidate, signature: (u64, i64, u64, i64)) -> Option<Cach
         project: entry.project.clone(),
         first_prompt: entry.first_prompt.clone(),
         last_ms: entry.last_ms,
+        proxy_backed: entry.proxy_backed,
     })
 }
 
@@ -321,6 +326,7 @@ struct CachedHit {
     project: Option<PathBuf>,
     first_prompt: Option<String>,
     last_ms: Option<i64>,
+    proxy_backed: bool,
 }
 
 fn remember(candidate: &Candidate, signature: (u64, i64, u64, i64), hit: &CachedHit) {
@@ -340,6 +346,7 @@ fn remember(candidate: &Candidate, signature: (u64, i64, u64, i64), hit: &Cached
                 project: hit.project.clone(),
                 first_prompt: hit.first_prompt.clone(),
                 last_ms: hit.last_ms,
+                proxy_backed: hit.proxy_backed,
             },
         );
     }
@@ -361,28 +368,84 @@ fn read_spend(
         }
     }
     for extra in extras {
-        let length = std::fs::metadata(extra).map_or(0, |metadata| metadata.len());
-        let passes = length / (16 * 1024 * 1024) + 2;
-        for _ in 0..passes {
-            if cancelled() {
-                return Err(std::io::Error::other("cancelled"));
-            }
-            match candidate.class {
-                AgentClass::Codex => accumulator.ingest_codex_child(extra),
-                _ => accumulator.ingest_extra_file(extra),
-            }
-            .or_else(|error| {
-                // A file removed since listing adds nothing more.
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(error)
-                }
-            })?;
+        let result = match candidate.class {
+            AgentClass::Codex => accumulator.ingest_codex_child_to_end(extra, cancelled),
+            _ => accumulator.ingest_extra_file_to_end(extra, cancelled),
+        };
+        // A file removed since listing adds nothing more.
+        match result {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
         }
     }
     let stats = accumulator.snapshot();
     Ok((stats.spend, stats.last_at_ms))
+}
+
+/// Section id of sessions found on disk that ran through a Kilo Proxy
+/// launcher; they cannot be tied to one configured custom agent.
+pub(crate) const PROXY_PROFILE_ID: &str = "kilo-proxy-outside-ilium";
+
+/// Only the head of a transcript is searched for the proxy marker.
+const PROXY_MARKER_MAX_RECORDS: usize = 64;
+const PROXY_MARKER_MAX_BYTES: usize = 1024 * 1024;
+/// Tool name of the web-search MCP server that the Kilo Proxy launchers
+/// (`claude-proxy`, `claude-brainiac`) register for every run; it appears in
+/// the tool list recorded at the start of the transcript.
+const PROXY_MARKER: &[u8] = b"mcp__kilo-search__";
+
+/// True when the first records of a Claude transcript show a Kilo Proxy
+/// launcher. Those sessions use another backend than the Anthropic account.
+fn is_kilo_proxy_transcript(path: &Path) -> bool {
+    use std::io::{BufRead, Read};
+    let Ok(file) = ilium_platform::secure_fs::open_regular_file(path) else {
+        return false;
+    };
+    let mut reader = std::io::BufReader::new(file.take(PROXY_MARKER_MAX_BYTES as u64));
+    let mut line = Vec::new();
+    for _ in 0..PROXY_MARKER_MAX_RECORDS {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => return false,
+            Ok(_) => {}
+        }
+        if line
+            .windows(PROXY_MARKER.len())
+            .any(|window| window == PROXY_MARKER)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// `You are Claude Code running through the Kilo Proxy "Brainiac" mode in
+/// /work/dir (…). …` says nothing about the task; show mode and folder.
+fn proxy_boilerplate_label(text: &str) -> Option<String> {
+    let rest = text
+        .trim_start()
+        .strip_prefix("You are Claude Code running through the Kilo Proxy")?;
+    let rest = rest.trim_start();
+    let (mode, rest) = match rest.strip_prefix('"') {
+        Some(quoted) => quoted.split_once('"')?,
+        None => ("", rest),
+    };
+    let directory = rest
+        .split_once(" in ")
+        .map(|(_, after)| after.split_whitespace().next().unwrap_or(""))
+        .unwrap_or("");
+    let folder = Path::new(directory)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let mut label = String::from("Kilo Proxy");
+    if !mode.is_empty() {
+        label.push_str(&format!(" {mode}"));
+    }
+    if !folder.is_empty() {
+        label.push_str(&format!(" · {folder}"));
+    }
+    Some(label)
 }
 
 /// Working directory and the first real user prompt, from the transcript head.
@@ -450,7 +513,7 @@ fn first_prompt_of(class: &AgentClass, record: &serde_json::Value) -> Option<Str
         }
         _ => return None,
     };
-    prompt_label(&text)
+    prompt_label(&proxy_boilerplate_label(&text).unwrap_or(text))
 }
 
 /// One line, trimmed, without tag-only system text, cut to a readable length.
@@ -620,6 +683,17 @@ fn snapshot_names(path: &Path, length: u64, modified: i64) -> ArchiveNames {
     names
 }
 
+/// Stable synthetic row key for a session with no pane; the high bit keeps it
+/// clear of real pane ids.
+pub(crate) fn row_key(session_id: &str) -> u64 {
+    let hash = session_id
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    hash | (1 << 63)
+}
+
 /// Name shown for a session with no Ilium name and no readable prompt.
 pub(crate) fn short_session_id(session_id: &str) -> String {
     session_id.chars().take(8).collect()
@@ -686,6 +760,8 @@ fn discover(job: &DiscoverSessions, cancelled: impl Fn() -> bool) -> DiscoveryOu
                     project,
                     first_prompt,
                     last_ms,
+                    proxy_backed: candidate.class == AgentClass::Claude
+                        && is_kilo_proxy_transcript(&candidate.path),
                 };
                 remember(&candidate, signature, &hit);
                 hit
@@ -716,6 +792,7 @@ fn discover(job: &DiscoverSessions, cancelled: impl Fn() -> bool) -> DiscoveryOu
             .unwrap_or_else(|| short_session_id(&candidate.session_id));
         output.sessions.push(DiscoveredSession {
             class: candidate.class,
+            proxy_backed: hit.proxy_backed,
             session_id: candidate.session_id,
             name,
             models,
@@ -764,6 +841,167 @@ mod tests {
         format!(
             r#"{{"type":"user","timestamp":"2026-11-10T09:59:00.000Z","cwd":"/work/demo","message":{{"role":"user","content":"{text}"}}}}"#
         )
+    }
+
+    /// Manual check on the real home folder:
+    /// `<test binary> real_home_discovery_report --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_home_discovery_report() {
+        let home = PathBuf::from(std::env::var_os("HOME").expect("HOME is set"));
+        let end_ms = chrono::Utc::now().timestamp_millis();
+        // Real project folders that hold an `.ilium` archive.
+        let mut archive_projects = Vec::new();
+        let mut pending = vec![(home.join("dev"), 0_u8)];
+        while let Some((directory, depth)) = pending.pop() {
+            if directory.join(".ilium").is_dir() {
+                archive_projects.push(directory.clone());
+            }
+            if depth >= 4 {
+                continue;
+            }
+            for entry in std::fs::read_dir(&directory)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if entry.file_type().is_ok_and(|kind| kind.is_dir())
+                    && !name.starts_with('.')
+                    && name != "node_modules"
+                    && name != "target"
+                {
+                    pending.push((entry.path(), depth + 1));
+                }
+            }
+        }
+        println!("archive_projects={}", archive_projects.len());
+        let plain = discover(
+            &DiscoverSessions {
+                roots: ProviderRoots::discover(&home, std::iter::empty()),
+                start_ms: end_ms - DAY_MS,
+                end_ms,
+                prices: PriceTable::default(),
+                exclude: Vec::new(),
+                archive_projects: Vec::new(),
+            },
+            || false,
+        );
+        for (label, days) in [("1d-with-archive", 1_i64), ("7d-with-archive", 7)] {
+            let started = std::time::Instant::now();
+            let output = discover(
+                &DiscoverSessions {
+                    roots: ProviderRoots::discover(&home, std::iter::empty()),
+                    start_ms: end_ms - days * DAY_MS,
+                    end_ms,
+                    prices: PriceTable::default(),
+                    exclude: Vec::new(),
+                    archive_projects: archive_projects.clone(),
+                },
+                || false,
+            );
+            if days == 1 {
+                let renamed: Vec<_> = output
+                    .sessions
+                    .iter()
+                    .filter_map(|session| {
+                        let before = plain
+                            .sessions
+                            .iter()
+                            .find(|other| other.session_id == session.session_id)?;
+                        (before.name != session.name)
+                            .then(|| format!("{:?} -> {:?}", before.name, session.name))
+                    })
+                    .collect();
+                println!("names_changed_by_archive={}", renamed.len());
+                for line in renamed.iter().take(8) {
+                    println!("  renamed {line}");
+                }
+            }
+            let mut by_model: std::collections::BTreeMap<String, (u64, u64)> =
+                std::collections::BTreeMap::new();
+            for session in &output.sessions {
+                for model in &session.models {
+                    let entry = by_model.entry(model.model.clone()).or_default();
+                    entry.0 += model.tokens.input + model.tokens.cache_read;
+                    entry.1 += model.tokens.output;
+                }
+            }
+            println!(
+                "range={label} sessions={} partial={} unreadable={} elapsed_ms={}",
+                output.sessions.len(),
+                output.partial,
+                output.unreadable,
+                started.elapsed().as_millis()
+            );
+            for (model, (input, output_tokens)) in &by_model {
+                println!("  model={model} prompt_side={input} output={output_tokens}");
+            }
+            for session in output.sessions.iter().take(5) {
+                println!(
+                    "  sample class={:?} id={} name={:?}",
+                    session.class, session.session_id, session.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn kilo_proxy_sessions_are_marked_and_plain_sessions_are_not() {
+        let home = tempfile::tempdir().unwrap();
+        let proxy_attachment = r#"{"type":"attachment","attachment":{"type":"deferred_tools_delta","addedNames":["WebSearch","mcp__kilo-search__web_fetch"]}}"#;
+        let proxy_id = "aaaaaaaa-2222-4333-8444-555555555555";
+        write_claude(
+            home.path(),
+            proxy_id,
+            &[
+                proxy_attachment.to_owned(),
+                user_line("You are Claude Code running through the Kilo Proxy \\\"Brainiac\\\" mode in /home/arthur/dev/ai/kilo-proxy (Bun/TypeScript). Work in parallel."),
+                claude_line("m1", "claude-sonnet-5-5", "2026-11-10T10:00:00.000Z", 10),
+            ],
+        );
+        write_claude(
+            home.path(),
+            CLAUDE_ID,
+            &[
+                user_line("Fix the build please"),
+                claude_line("m2", "claude-sonnet-5-5", "2026-11-10T10:00:00.000Z", 10),
+            ],
+        );
+        let at = |text: &str| {
+            chrono::DateTime::parse_from_rfc3339(text)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let output = discover(
+            &job(
+                home.path(),
+                at("2026-11-09T00:00:00Z"),
+                at("2026-11-11T00:00:00Z"),
+            ),
+            || false,
+        );
+        let find = |id: &str| output.sessions.iter().find(|s| s.session_id == id).unwrap();
+        assert!(find(proxy_id).proxy_backed);
+        assert_eq!(find(proxy_id).name, "Kilo Proxy Brainiac · kilo-proxy");
+        assert!(!find(CLAUDE_ID).proxy_backed);
+        assert_eq!(find(CLAUDE_ID).name, "Fix the build please");
+    }
+
+    #[test]
+    fn the_proxy_marker_is_only_searched_in_the_transcript_head() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("late.jsonl");
+        let mut text = String::new();
+        for _ in 0..80 {
+            text.push_str("{\"type\":\"user\"}\n");
+        }
+        text.push_str("mcp__kilo-search__web_fetch\n");
+        std::fs::write(&path, text).unwrap();
+        assert!(!is_kilo_proxy_transcript(&path));
+        std::fs::write(&path, "x\nmcp__kilo-search__web_fetch\n").unwrap();
+        assert!(is_kilo_proxy_transcript(&path));
     }
 
     #[test]

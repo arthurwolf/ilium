@@ -443,14 +443,18 @@ fn sections(state: &WeeklyUsageState) -> Vec<(AgentClass, Option<String>, String
             } else {
                 "Codex"
             };
-            custom.push((
-                section.0,
-                section.1,
+            let heading = if label.id == crate::weekly_usage_discovery::PROXY_PROFILE_ID {
+                format!(
+                    "{} {} · own backend · started outside Ilium",
+                    label.icon, label.name
+                )
+            } else {
                 format!(
                     "{} {} · custom, based on {provider}",
                     label.icon, label.name
-                ),
-            ));
+                )
+            };
+            custom.push((section.0, section.1, heading));
         }
     }
     custom.sort_by(|left, right| left.2.cmp(&right.2).then(left.1.cmp(&right.1)));
@@ -1118,6 +1122,27 @@ mod tests {
         let heading = screen.find("Tuned Claude").unwrap();
         let tuned = screen.rfind("tuned").unwrap();
         assert!(plain < heading && heading < tuned, "{screen}");
+    }
+
+    #[test]
+    fn proxy_sessions_found_on_disk_get_their_own_section_after_claude() {
+        let mut proxy = row(2, "Kilo Proxy Brainiac · kilo-proxy", AgentClass::Claude);
+        proxy.profile = Some(ProfileLabel {
+            id: crate::weekly_usage_discovery::PROXY_PROFILE_ID.into(),
+            name: "Kilo Proxy".into(),
+            icon: "🧠".into(),
+        });
+        let mut state = WeeklyUsageState::default();
+        state.rows = vec![row(1, "plain", AgentClass::Claude), proxy];
+        let screen = dump(&draw(&state, 120, 50));
+        assert!(
+            screen.contains("Kilo Proxy · own backend · started outside Ilium"),
+            "{screen}"
+        );
+        let plain = screen.find("plain").unwrap();
+        let heading = screen.find("started outside Ilium").unwrap();
+        let proxied = screen.rfind("Brainiac").unwrap();
+        assert!(plain < heading && heading < proxied, "{screen}");
     }
 
     #[test]

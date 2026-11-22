@@ -517,6 +517,129 @@ struct ClaudeCall {
     advisors: Vec<(String, TokenTotals)>,
 }
 
+/// Most recent sub-agent calls kept unfolded, enough to merge the adjacent
+/// records of one response without retaining a call per transcript record.
+const SIDECHAIN_WINDOW_CALLS: usize = 1_024;
+const SIDECHAIN_WINDOW_TOOL_IDS: usize = 4_096;
+
+/// Bounded memory of recent sub-agent calls and tool ids (see
+/// [`StatsAccumulator::sidechain_window`]).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct SidechainWindow {
+    calls: std::collections::VecDeque<ClaudeCall>,
+    /// Message id -> sequence number of the call; `evicted` calls precede the
+    /// front of `calls`, so the position is `sequence - evicted`.
+    call_sequence: HashMap<String, u64>,
+    call_ids: std::collections::VecDeque<String>,
+    evicted: u64,
+    tool_ids: std::collections::VecDeque<String>,
+    tool_id_set: HashSet<String>,
+}
+
+impl SidechainWindow {
+    fn calls(&self) -> impl Iterator<Item = &ClaudeCall> {
+        self.calls.iter()
+    }
+
+    /// Merges a repeated record of a windowed response, or stores a new call
+    /// and returns the oldest one when the window overflowed.
+    fn merge_or_push(&mut self, id: &str, call: ClaudeCall) -> Option<ClaudeCall> {
+        if let Some(&sequence) = self.call_sequence.get(id).filter(|_| !id.is_empty()) {
+            let index = (sequence - self.evicted) as usize;
+            let existing = &mut self.calls[index];
+            existing.tokens.max_merge(&call.tokens);
+            for (position, (advisor_model, advisor_tokens)) in call.advisors.into_iter().enumerate()
+            {
+                match existing.advisors.get_mut(position) {
+                    Some((_, held)) => held.max_merge(&advisor_tokens),
+                    None => existing.advisors.push((advisor_model, advisor_tokens)),
+                }
+            }
+            return None;
+        }
+        let sequence = self.evicted + self.calls.len() as u64;
+        self.calls.push_back(call);
+        self.call_ids.push_back(id.to_string());
+        if !id.is_empty() {
+            self.call_sequence.insert(id.to_string(), sequence);
+        }
+        if self.calls.len() <= SIDECHAIN_WINDOW_CALLS {
+            return None;
+        }
+        let evicted = self.calls.pop_front();
+        if let Some(old_id) = self.call_ids.pop_front() {
+            self.call_sequence.remove(&old_id);
+        }
+        self.evicted += 1;
+        evicted
+    }
+
+    /// True the first time a tool id is seen inside the recent window.
+    fn note_tool_id(&mut self, id: &str) -> bool {
+        if id.is_empty() {
+            return true;
+        }
+        if !self.tool_id_set.insert(id.to_string()) {
+            return false;
+        }
+        self.tool_ids.push_back(id.to_string());
+        if self.tool_ids.len() > SIDECHAIN_WINDOW_TOOL_IDS {
+            if let Some(old) = self.tool_ids.pop_front() {
+                self.tool_id_set.remove(&old);
+            }
+        }
+        true
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.calls.len() * (std::mem::size_of::<ClaudeCall>() + 256)
+            + (self.call_ids.len() + self.tool_ids.len()) * 160
+    }
+}
+
+/// Sub-agent calls that left the window, kept only as totals.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct FoldedSpend {
+    tokens: TokenTotals,
+    models: HashMap<String, (u32, TokenTotals)>,
+    #[serde(with = "ordered_pairs")]
+    spend: BTreeMap<(i64, String), TokenTotals>,
+}
+
+impl FoldedSpend {
+    fn fold(&mut self, call: &ClaudeCall) {
+        let mut record = |model: &str, tokens: &TokenTotals| {
+            self.tokens.add(tokens);
+            let usage = self.models.entry(model.to_string()).or_default();
+            usage.0 += 1;
+            usage.1.add(tokens);
+            if let Some(at_ms) = call.at_ms {
+                let minute_ms = at_ms - at_ms.rem_euclid(MINUTE_MS);
+                self.spend
+                    .entry((minute_ms, model.to_string()))
+                    .or_default()
+                    .add(tokens);
+            }
+        };
+        record(&call.model, &call.tokens);
+        for (advisor_model, advisor_tokens) in &call.advisors {
+            record(advisor_model, advisor_tokens);
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.models
+            .keys()
+            .map(|name| name.capacity() + 128)
+            .sum::<usize>()
+            + self
+                .spend
+                .keys()
+                .map(|(_, name)| name.capacity() + 256)
+                .sum::<usize>()
+    }
+}
+
 // JSON object keys cannot represent the timestamp/model pairs used here.
 mod ordered_pairs {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -570,6 +693,15 @@ pub struct StatsAccumulator {
 
     claude_calls: Vec<ClaudeCall>,
     claude_call_index: HashMap<String, usize>,
+    /// Sub-agent calls. A sub-agent transcript can hold tens of thousands of
+    /// calls, so they are never retained one by one: the most recent few stay
+    /// here (a response is written as several adjacent records that must merge
+    /// by message id) and older ones fold into the aggregates below.
+    #[serde(default)]
+    sidechain_window: SidechainWindow,
+    /// Totals of every sub-agent call already folded out of the window.
+    #[serde(default)]
+    folded_sidechain: FoldedSpend,
     claude_tool_errors: u32,
     /// Bytes consumed so far from each sub-agent transcript that belongs to
     /// this session (see [`Self::ingest_extra_file`]).
@@ -622,6 +754,8 @@ impl StatsAccumulator {
             seen_progress_outcomes: HashSet::new(),
             claude_calls: Vec::new(),
             claude_call_index: HashMap::new(),
+            sidechain_window: SidechainWindow::default(),
+            folded_sidechain: FoldedSpend::default(),
             claude_tool_errors: 0,
             extra_offsets: HashMap::new(),
             codex_children: HashMap::new(),
@@ -701,6 +835,8 @@ impl StatsAccumulator {
                             .sum::<usize>()
                 })
                 .sum::<usize>()
+            + self.sidechain_window.retained_bytes()
+            + self.folded_sidechain.retained_bytes()
             + self
                 .codex_spend
                 .keys()
@@ -725,19 +861,8 @@ impl StatsAccumulator {
                 * 128
     }
     pub(crate) fn check_bounds(&self) -> std::io::Result<()> {
-        let records = self.seen_tool_ids.len()
-            + self.claude_calls.len()
-            + self.codex_spend.len()
-            + self.codex_quota_spend.len();
         let retained = self.retained_bytes();
-        const RECORD_LIMIT: usize = 65_536;
         const RETAINED_BYTE_LIMIT: usize = 8 * 1024 * 1024;
-        if records > RECORD_LIMIT {
-            return Err(std::io::Error::other(format!(
-                "Statistics retained record limit reached: observed {records}, limit {RECORD_LIMIT}, {} over; totals incomplete",
-                records.saturating_sub(RECORD_LIMIT)
-            )));
-        }
         if retained > RETAINED_BYTE_LIMIT {
             return Err(std::io::Error::other(format!(
                 "Statistics retained byte limit reached: observed {retained}, limit {RETAINED_BYTE_LIMIT}, {} over; totals incomplete",
@@ -922,6 +1047,45 @@ impl StatsAccumulator {
         Ok(())
     }
 
+    /// Reads a sub-agent transcript of any size to its end. One
+    /// [`Self::ingest_extra_file`] pass reads a bounded slice so a caller can
+    /// report progress; a session's spend needs every pass, so this repeats
+    /// them until the file is consumed or `cancelled` asks to stop.
+    pub fn ingest_extra_file_to_end(
+        &mut self,
+        path: &Path,
+        cancelled: &impl Fn() -> bool,
+    ) -> std::io::Result<()> {
+        self.ingest_to_end(path, cancelled, Self::ingest_extra_file)
+    }
+
+    /// [`Self::ingest_extra_file_to_end`] for a Codex sub-agent rollout.
+    pub fn ingest_codex_child_to_end(
+        &mut self,
+        path: &Path,
+        cancelled: &impl Fn() -> bool,
+    ) -> std::io::Result<()> {
+        self.ingest_to_end(path, cancelled, Self::ingest_codex_child)
+    }
+
+    fn ingest_to_end(
+        &mut self,
+        path: &Path,
+        cancelled: &impl Fn() -> bool,
+        pass: fn(&mut Self, &Path) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        loop {
+            if cancelled() {
+                return Err(std::io::Error::other("cancelled"));
+            }
+            let before = self.extra_offsets.get(path).copied().unwrap_or(0);
+            pass(self, path)?;
+            if self.extra_offsets.get(path).copied().unwrap_or(0) == before {
+                return Ok(());
+            }
+        }
+    }
+
     /// Feeds a Codex sub-agent rollout (a thread spawned by this session).
     /// Codex logs those in their own files with their own cumulative token
     /// counters, so each file keeps a separate baseline and model, and only
@@ -1062,7 +1226,12 @@ impl StatsAccumulator {
                 let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
                 work = WorkKind::for_tool(name);
                 let id = block.get("id").and_then(Value::as_str).unwrap_or("");
-                if !id.is_empty() && !self.seen_tool_ids.insert(id.to_string()) {
+                let first_sight = if sidechain {
+                    self.sidechain_window.note_tool_id(id)
+                } else {
+                    self.seen_tool_ids.insert(id.to_string())
+                };
+                if !id.is_empty() && !first_sight {
                     continue;
                 }
                 if !sidechain && work == WorkKind::Shell {
@@ -1085,6 +1254,19 @@ impl StatsAccumulator {
         let tokens = claude_tokens(usage);
         let advisors = claude_advisor_calls(usage);
         let id = message.get("id").and_then(Value::as_str).unwrap_or("");
+        if sidechain {
+            let call = ClaudeCall {
+                at_ms,
+                model: model.to_string(),
+                tokens,
+                sidechain,
+                advisors,
+            };
+            if let Some(evicted) = self.sidechain_window.merge_or_push(id, call) {
+                self.folded_sidechain.fold(&evicted);
+            }
+            return;
+        }
         // Every content block of one response repeats the same usage object,
         // so merging by message id (never summing) avoids multi-counting.
         if let Some(&index) = self.claude_call_index.get(id).filter(|_| !id.is_empty()) {
@@ -1596,8 +1778,15 @@ impl StatsAccumulator {
         stats.tool_errors = Some(self.claude_tool_errors);
         stats.recent_prompts = recent(&self.prompts);
         let mut by_model: HashMap<&str, (u32, TokenTotals)> = HashMap::new();
+        let mut spend: BTreeMap<(i64, &str), TokenTotals> = BTreeMap::new();
         let mut samples = Vec::with_capacity(self.claude_calls.len());
-        for call in &self.claude_calls {
+        // Sub-agent calls are real spend, so they stay in the totals; only
+        // the main conversation defines the "current" model and context.
+        let retained = self
+            .claude_calls
+            .iter()
+            .chain(self.sidechain_window.calls());
+        for call in retained {
             stats.tokens.add(&call.tokens);
             let usage = by_model.entry(call.model.as_str()).or_default();
             usage.0 += 1;
@@ -1607,6 +1796,19 @@ impl StatsAccumulator {
                 let usage = by_model.entry(advisor_model.as_str()).or_default();
                 usage.0 += 1;
                 usage.1.add(advisor_tokens);
+            }
+            if let Some(at_ms) = call.at_ms {
+                let minute_ms = at_ms - at_ms.rem_euclid(MINUTE_MS);
+                spend
+                    .entry((minute_ms, call.model.as_str()))
+                    .or_default()
+                    .add(&call.tokens);
+                for (advisor_model, advisor_tokens) in &call.advisors {
+                    spend
+                        .entry((minute_ms, advisor_model.as_str()))
+                        .or_default()
+                        .add(advisor_tokens);
+                }
             }
             if call.sidechain {
                 continue;
@@ -1625,26 +1827,21 @@ impl StatsAccumulator {
                 });
             }
         }
-        // Sub-agent calls are real spend, so they stay in the totals; only
-        // the main conversation defines the "current" model and context.
+        stats.tokens.add(&self.folded_sidechain.tokens);
+        for (model, (calls, tokens)) in &self.folded_sidechain.models {
+            let usage = by_model.entry(model.as_str()).or_default();
+            usage.0 += calls;
+            usage.1.add(tokens);
+        }
+        for ((minute_ms, model), tokens) in &self.folded_sidechain.spend {
+            spend
+                .entry((*minute_ms, model.as_str()))
+                .or_default()
+                .add(tokens);
+        }
         stats.models = model_list(by_model.into_iter().map(|(m, v)| (m.to_string(), v)));
         stats.samples = decimate(samples);
         stats.cost = self.cost_snapshot.clone();
-        let mut spend: BTreeMap<(i64, &str), TokenTotals> = BTreeMap::new();
-        for call in &self.claude_calls {
-            if let Some(at_ms) = call.at_ms {
-                spend
-                    .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), call.model.as_str()))
-                    .or_default()
-                    .add(&call.tokens);
-                for (advisor_model, advisor_tokens) in &call.advisors {
-                    spend
-                        .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), advisor_model.as_str()))
-                        .or_default()
-                        .add(advisor_tokens);
-                }
-            }
-        }
         stats.spend = spend_buckets(spend.into_iter());
     }
 
@@ -2572,6 +2769,50 @@ mod tests {
             .spend
             .iter()
             .any(|bucket| &*bucket.model == "claude-fable-5-2"));
+    }
+
+    /// Regression: a session whose sub-agents made more than 65,536 records
+    /// used to fail the retained-record limit and lose all of its spend, and
+    /// the pane path read only the first 16 MiB of each sub-agent file.
+    #[test]
+    fn huge_sub_agent_transcripts_are_counted_in_full_without_a_record_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("agent-big.jsonl");
+        let calls = 80_000_u64;
+        let mut text = String::new();
+        for number in 0..calls {
+            let minute = number % 600;
+            let (hour, minute) = (10 + minute / 60, minute % 60);
+            // Each response is written twice (two content blocks); a long
+            // padding field pushes the file well past one 16 MiB pass.
+            for _ in 0..2 {
+                text.push_str(&format!(
+                    r#"{{"isSidechain":true,"type":"assistant","timestamp":"2026-11-10T{hour:02}:{minute:02}:00.000Z","message":{{"id":"m{number}","model":"claude-opus-5-5","content":[{{"type":"tool_use","id":"t{number}","name":"Bash","input":{{"command":"{}"}}}}],"usage":{{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":10}}}}}}"#,
+                    "x".repeat(120)
+                ));
+                text.push('\n');
+            }
+        }
+        std::fs::write(&path, &text).unwrap();
+        assert!(text.len() as u64 > 16 * 1024 * 1024);
+        let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+        accumulator
+            .ingest_extra_file_to_end(&path, &|| false)
+            .unwrap();
+        accumulator.check_bounds().unwrap();
+        let stats = accumulator.snapshot();
+        assert_eq!(stats.tokens.output, calls * 2);
+        assert_eq!(stats.tokens.cache_read, calls * 10);
+        assert_eq!(stats.tokens.input, calls);
+        assert_eq!(stats.tool_calls as u64, calls);
+        let bucket_total: u64 = stats.spend.iter().map(|bucket| bucket.tokens.output).sum();
+        assert_eq!(bucket_total, calls * 2);
+        let opus = stats
+            .models
+            .iter()
+            .find(|usage| usage.model == "claude-opus-5-5")
+            .unwrap();
+        assert_eq!(opus.calls as u64, calls);
     }
 
     #[test]

@@ -878,7 +878,7 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             if context.stop_requested() {
                 return Err("Statistics cancelled; totals incomplete".into());
             }
-            match accumulator.ingest_codex_child(&child) {
+            match accumulator.ingest_codex_child_to_end(&child, &|| context.stop_requested()) {
                 Ok(()) => {}
                 // A thread file removed since discovery adds nothing more.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -897,12 +897,14 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             if context.stop_requested() {
                 return Err("Statistics cancelled; totals incomplete".into());
             }
-            accumulator.ingest_extra_file(&extra).map_err(|error| {
-                format!(
-                    "Could not read subagent {}: {error}; statistics incomplete",
-                    extra.display()
-                )
-            })?;
+            accumulator
+                .ingest_extra_file_to_end(&extra, &|| context.stop_requested())
+                .map_err(|error| {
+                    format!(
+                        "Could not read subagent {}: {error}; statistics incomplete",
+                        extra.display()
+                    )
+                })?;
         }
     }
     if context.stop_requested() {

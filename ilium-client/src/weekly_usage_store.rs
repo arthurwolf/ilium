@@ -34,6 +34,20 @@ impl Job for ReadClaudeQuota {
     }
 }
 
+/// Background scan for sessions that no pane owns.
+#[derive(Default)]
+pub(crate) struct DiscoveryState {
+    pub(crate) active: Option<Receipt<crate::weekly_usage_discovery::DiscoverSessions>>,
+    retention: Option<ilium_execution::Retention>,
+    /// Range of the last submitted scan.
+    range: Option<crate::weekly_usage::UsageRange>,
+    started_at: Option<Instant>,
+    pub(crate) status: Option<String>,
+}
+
+/// How long a finished scan stays current before the next one.
+const DISCOVERY_REFRESH: Duration = Duration::from_secs(120);
+
 pub(crate) struct DeriveUsage {
     stats: Arc<SessionStats>,
     periods: Vec<crate::weekly_usage_history::UsagePeriod>,
@@ -236,6 +250,138 @@ fn merge_models(target: &mut Vec<ModelWorkload>, included: &[ModelWorkload], tru
 }
 
 impl App {
+    /// Starts and collects the scan for sessions found on disk without a pane.
+    fn tick_usage_discovery(
+        &self,
+        state: &mut crate::weekly_usage_ui::WeeklyUsageState,
+        now: Instant,
+        now_ms: i64,
+    ) -> bool {
+        use crate::weekly_usage_discovery::{DiscoverSessions, ProviderRoots};
+        let mut changed = false;
+        if state
+            .discovery
+            .range
+            .is_some_and(|range| range != state.range)
+        {
+            if let Some(active) = state.discovery.active.take() {
+                active.cancel();
+            }
+        }
+        if let Some(mut receipt) = state.discovery.active.take() {
+            match receipt.try_take() {
+                JobPoll::Pending => state.discovery.active = Some(receipt),
+                JobPoll::Ready(mut retained) => {
+                    drop(receipt);
+                    let size =
+                        match retained.view() {
+                            JobOutcome::Finished(Ok(output)) => output
+                                .sessions
+                                .iter()
+                                .map(|found| {
+                                    std::mem::size_of::<
+                                        crate::weekly_usage_discovery::DiscoveredSession,
+                                    >() + found.name.capacity()
+                                        + found.session_id.capacity()
+                                        + found
+                                            .models
+                                            .iter()
+                                            .map(|model| {
+                                                std::mem::size_of::<ModelWorkload>()
+                                                    + model.model.capacity()
+                                            })
+                                            .sum::<usize>()
+                                })
+                                .sum::<usize>()
+                                .saturating_mul(3)
+                                .saturating_add(4096),
+                            _ => 4096,
+                        };
+                    let reduced = ilium_execution::retained_result_storage_bytes::<
+                        JobOutcome<DiscoverSessions>,
+                    >(size)
+                    .ok()
+                    .is_some_and(|size| retained.try_reduce_to_result_storage(size).is_ok());
+                    if reduced {
+                        let (outcome, retention) = retained.into_parts();
+                        if let JobOutcome::Finished(Ok(output)) = outcome {
+                            let mut status =
+                                format!("{} more sessions found on disk", output.sessions.len());
+                            if output.partial {
+                                status.push_str(" · scan limit reached, older sessions skipped");
+                            }
+                            if output.unreadable > 0 {
+                                status.push_str(&format!(
+                                    " · {} transcripts unreadable",
+                                    output.unreadable
+                                ));
+                            }
+                            state.discovery.status = Some(status);
+                            state.discovered = output.sessions;
+                            state.discovery.retention = Some(retention);
+                            changed = true;
+                        }
+                    }
+                }
+                JobPoll::Lost | JobPoll::Taken => {}
+            }
+        }
+        let due = state.discovery.range != Some(state.range)
+            || state
+                .discovery
+                .started_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= DISCOVERY_REFRESH);
+        if state.discovery.active.is_none() && due {
+            let (Some(client), Some(home)) = (
+                self.session_stats.execution_client(),
+                directories::BaseDirs::new(),
+            ) else {
+                return changed;
+            };
+            let sources = &state.acquisition.sources;
+            let roots = ProviderRoots::discover(
+                home.home_dir(),
+                sources.iter().filter_map(|source| {
+                    source
+                        .specification
+                        .request
+                        .transcript_hint
+                        .as_deref()
+                        .map(|path| (&source.specification.request.class, path))
+                }),
+            );
+            let job = DiscoverSessions {
+                roots,
+                start_ms: now_ms.saturating_sub(state.range.duration_ms()),
+                end_ms: now_ms,
+                prices: crate::cost_model::PriceTable::with_overrides(&self.cost_settings.prices),
+                exclude: sources
+                    .iter()
+                    .map(|source| {
+                        (
+                            source.specification.request.class.clone(),
+                            source.specification.request.session_id.clone(),
+                        )
+                    })
+                    .collect(),
+                archive_projects: vec![self.session_cwd.clone()],
+            };
+            if let Ok(receipt) = client.try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 32 * 1024 * 1024,
+                    result_bytes: 2 * 1024 * 1024,
+                },
+                job,
+            ) {
+                state.discovery.active = Some(receipt);
+                state.discovery.range = Some(state.range);
+                state.discovery.started_at = Some(now);
+            }
+        }
+        changed
+    }
+
     pub(crate) fn tick_weekly_usage(&mut self, now: Instant) -> bool {
         let now_ms = chrono::Utc::now().timestamp_millis();
         self.sync_weekly_usage_history(now_ms);
@@ -480,6 +626,7 @@ impl App {
                 }
             }
         }
+        changed |= self.tick_usage_discovery(&mut state, now, now_ms);
         if state.derived_range != Some(state.range) {
             // A different span changes every total: drop in-flight work and
             // force each source to derive again from its already-loaded stats.
@@ -698,7 +845,12 @@ impl App {
                 );
             }
         }
-        if changed || state.rows.len() != candidates.len() {
+        let pane_rows = state
+            .rows
+            .iter()
+            .filter(|row| row.session_id.is_none())
+            .count();
+        if changed || pane_rows != candidates.len() {
             state.rows.clear();
             for (pane_id, title, class, profile, request, binding_since_ms, historical_provider) in
                 &candidates
@@ -819,8 +971,51 @@ impl App {
                     source_time_ms,
                     codex_quota,
                     historical_provider: *historical_provider,
+                    session_id: None,
                 });
             }
+            let owned: Vec<(AgentClass, String)> = state
+                .acquisition
+                .sources
+                .iter()
+                .map(|source| {
+                    (
+                        source.specification.request.class.clone(),
+                        source.specification.request.session_id.clone(),
+                    )
+                })
+                .collect();
+            let found_rows: Vec<UsageRow> = state
+                .discovered
+                .iter()
+                .filter(|found| {
+                    !owned
+                        .iter()
+                        .any(|(class, id)| *class == found.class && *id == found.session_id)
+                })
+                .map(|found| UsageRow {
+                    pane_id: ilium_core::NodeId(crate::weekly_usage_discovery::row_key(
+                        &found.session_id,
+                    )),
+                    title: found.name.clone(),
+                    class: found.class.clone(),
+                    profile: found
+                        .proxy_backed
+                        .then(|| crate::weekly_usage_ui::ProfileLabel {
+                            id: crate::weekly_usage_discovery::PROXY_PROFILE_ID.into(),
+                            name: "Kilo Proxy".into(),
+                            icon: "🧠".into(),
+                        }),
+                    models: found.models.clone(),
+                    status: "partial · found in the transcript store · no open Ilium pane".into(),
+                    binding_since_ms: None,
+                    source_time_ms: found.last_ms,
+                    codex_quota: None,
+                    historical_provider: false,
+                    session_id: Some(found.session_id.clone()),
+                })
+                .collect();
+            state.rows.extend(found_rows);
         } else {
             // Tree titles can change without a new transcript or binding.
             for row in &mut state.rows {
@@ -1065,7 +1260,11 @@ mod tests {
                 .acquisition
                 .sources
                 .iter()
-                .all(|source| !source.completed || source.specification.periods.is_empty()),
+                .all(|source| !source.completed
+                    || source.specification.periods.is_empty()
+                    // A pane without a transcript may legitimately settle
+                    // as unavailable within the same tick.
+                    || source.status.starts_with("unavailable")),
             "every source with periods must derive again for the new range"
         );
         assert_eq!(app.weekly_usage_range, UsageRange::Hours6);
