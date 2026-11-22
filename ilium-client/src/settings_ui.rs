@@ -1223,6 +1223,7 @@ pub fn settings_help_anchors(
                     InferenceRow::RefreshModels => "INF-13",
                     InferenceRow::Test => "INF-14",
                     InferenceRow::KiloGatewayModel => "INF-12",
+                    InferenceRow::KiloModelSelection => "INF-16",
                     InferenceRow::Field(field) => match field {
                         InferenceSettingField::RestructurePromptTokenLimit => "INF-15",
                         InferenceSettingField::OllamaUrl => "INF-02",
@@ -3484,7 +3485,12 @@ pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<Infe
     let mut rows = vec![InferenceRow::Provider];
     match settings.selected_provider {
         InferenceProviderKind::KiloGateway => {
-            rows.extend([InferenceRow::RefreshModels, InferenceRow::KiloGatewayModel])
+            rows.push(InferenceRow::KiloModelSelection);
+            // The catalog and manual model only matter when the user picks the model.
+            if settings.kilo_gateway.model_selection == ilium_inference::KiloModelSelection::Manual
+            {
+                rows.extend([InferenceRow::RefreshModels, InferenceRow::KiloGatewayModel]);
+            }
         }
         InferenceProviderKind::Ollama => rows.extend([
             InferenceRow::Field(InferenceSettingField::OllamaUrl),
@@ -3543,6 +3549,9 @@ fn inference_value(
             }
             _ => "[ Load available models ]".to_string(),
         },
+        InferenceRow::KiloModelSelection => {
+            format!("‹ {} ›", settings.kilo_gateway.model_selection.label())
+        }
         InferenceRow::KiloGatewayModel => format!("‹ {} ›", settings.kilo_gateway.model),
         InferenceRow::Test => "[ Test provider ]".to_string(),
         InferenceRow::Field(field) => match field {
@@ -3586,6 +3595,7 @@ fn inference_label(row: InferenceRow) -> &'static str {
         InferenceRow::Provider => "Provider",
         InferenceRow::Field(field) => field.label(),
         InferenceRow::RefreshModels => "Available models",
+        InferenceRow::KiloModelSelection => "Kilo model source",
         InferenceRow::KiloGatewayModel => "Kilo model",
         InferenceRow::Test => "Test",
     }
@@ -3736,6 +3746,9 @@ fn inference_lines(
                 | InferenceSettingField::OpenAiModel
                 | InferenceSettingField::AnthropicModel,
             ) => "Left/right cycles; + or Enter opens all models; E types a model name.",
+            InferenceRow::KiloModelSelection => {
+                "Scanner recommendation uses the model-scanner's current pick and ignores the manual model. Manual model sends the model you choose below. Left/right or Enter toggles."
+            }
             InferenceRow::KiloGatewayModel => {
                 "Use left/right to cycle; + or Enter opens Kilo Gateway's full model catalog."
             }
@@ -7554,6 +7567,9 @@ mod number_control_tests {
                 .into_iter()
                 .map(|provider| (SettingsTab::Inference, provider)),
         );
+        // Manual mode shows the superset of Kilo rows (catalog and model).
+        app.inference_settings.kilo_gateway.model_selection =
+            ilium_inference::KiloModelSelection::Manual;
         for (tab, provider) in cases {
             app.inference_settings.selected_provider = provider;
             let state = SettingsState {
@@ -7659,6 +7675,8 @@ mod number_control_tests {
                 .map(|provider| (SettingsTab::Inference, provider)),
         );
 
+        app.inference_settings.kilo_gateway.model_selection =
+            ilium_inference::KiloModelSelection::Manual;
         for (width, height) in [(80, 24), (60, 24), (40, 24)] {
             let mut found = Vec::new();
             for (tab, provider) in cases.iter().copied() {
@@ -8396,6 +8414,8 @@ mod tests {
                     }
                 }
                 SettingsTab::Inference => {
+                    app.inference_settings.kilo_gateway.model_selection =
+                        ilium_inference::KiloModelSelection::Manual;
                     for provider in ilium_inference::InferenceProviderKind::ALL {
                         app.inference_settings.selected_provider = provider;
                         let state = SettingsState {
@@ -9073,6 +9093,31 @@ mod tests {
     }
 
     #[test]
+    fn kilo_manual_model_rows_appear_only_in_manual_mode() {
+        let mut settings = ilium_inference::InferenceSettings::default();
+        assert_eq!(
+            settings.kilo_gateway.model_selection,
+            ilium_inference::KiloModelSelection::ScannerRecommendation
+        );
+        let scanner_rows = inference_rows(&settings);
+        assert!(scanner_rows.contains(&InferenceRow::KiloModelSelection));
+        assert!(!scanner_rows.contains(&InferenceRow::KiloGatewayModel));
+        assert!(!scanner_rows.contains(&InferenceRow::RefreshModels));
+        settings.kilo_gateway.model_selection = ilium_inference::KiloModelSelection::Manual;
+        let manual_rows = inference_rows(&settings);
+        assert!(manual_rows.contains(&InferenceRow::KiloGatewayModel));
+        assert!(manual_rows.contains(&InferenceRow::RefreshModels));
+        assert_eq!(
+            inference_value(
+                InferenceRow::KiloModelSelection,
+                &settings,
+                &ModelDiscoveryState::Idle
+            ),
+            "‹ Manual model ›"
+        );
+    }
+
+    #[test]
     fn restructure_token_budget_is_visible_for_every_provider() {
         for provider in ilium_inference::InferenceProviderKind::ALL {
             let settings = ilium_inference::InferenceSettings {
@@ -9095,8 +9140,7 @@ mod tests {
             inference_rows(&settings),
             vec![
                 InferenceRow::Provider,
-                InferenceRow::RefreshModels,
-                InferenceRow::KiloGatewayModel,
+                InferenceRow::KiloModelSelection,
                 InferenceRow::Field(InferenceSettingField::RestructurePromptTokenLimit),
                 InferenceRow::Test
             ]

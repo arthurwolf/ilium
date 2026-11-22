@@ -5,8 +5,6 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 struct Scan {
     schema_version: u32,
-    #[serde(default)]
-    benchmark_version: Option<String>,
     recommendations: Recommendations,
     models: Vec<Model>,
 }
@@ -46,24 +44,21 @@ fn parse_base(bytes: &[u8]) -> Result<RecommendedModel, GatewayError> {
         .map_err(|_| GatewayError::InvalidResponse("invalid model-scanner publication".into()))?;
     let invalid =
         || GatewayError::InvalidResponse("no qualified base model-scanner recommendation".into());
-    if !matches!(scan.schema_version, 1..=3)
-        || (scan.schema_version == 2 && scan.benchmark_version.as_deref() != Some("2026-10-17.2"))
-    {
+    // The scanner owns its benchmark: suite sizes and benchmark versions change
+    // without notice, so only the schema generation and the publication's own
+    // internal consistency are checked here, never a pinned question count.
+    if !matches!(scan.schema_version, 1..=3) {
         return Err(invalid());
     }
-    if scan.schema_version == 3 && scan.benchmark_version.as_deref() != Some("2026-10-18.1") {
-        return Err(invalid());
-    }
-    let text_count = if scan.schema_version != 1 { 20 } else { 10 };
     let id = scan.recommendations.base.ok_or_else(invalid)?;
     let mut matches = scan.models.into_iter().filter(|model| model.id == id);
     let model = matches.next().ok_or_else(invalid)?;
     if matches.next().is_some()
         || id.is_empty()
         || model.context_length < 200_000
-        || model.text_completed != text_count
+        || model.text_completed == 0
         || model.text_score == 0
-        || model.text_score > text_count
+        || model.text_score > model.text_completed
         || model.max_output_tokens == Some(0)
     {
         return Err(invalid());
@@ -71,7 +66,7 @@ fn parse_base(bytes: &[u8]) -> Result<RecommendedModel, GatewayError> {
     if scan.schema_version == 3 {
         let mut evidence = serde_json::Value::Object(model.evidence.clone());
         evidence["text_score"] = serde_json::json!(model.text_score);
-        evidence["context_length"] = serde_json::json!(model.context_length);
+        evidence["text_completed"] = serde_json::json!(model.text_completed);
         if !has_agentic_evidence(&evidence) {
             return Err(invalid());
         }
@@ -90,6 +85,7 @@ fn parse_base(bytes: &[u8]) -> Result<RecommendedModel, GatewayError> {
 }
 
 /// Check measured agentic completion and derived totals before trusting a selection.
+/// Every bound comes from the publication's own `*_completed` counts.
 fn has_agentic_evidence(model: &serde_json::Value) -> bool {
     let Some(answers) = model["agentic"].as_array() else {
         return false;
@@ -105,23 +101,28 @@ fn has_agentic_evidence(model: &serde_json::Value) -> bool {
         .iter()
         .filter(|answer| answer["status"].as_str() == Some("correct"))
         .count() as u64;
-    let scores = [
-        ("text_score", 20),
-        ("visual_score", 10),
-        ("long_context_score", 5),
-        ("agentic_score", 15),
+    let sections = [
+        ("text_score", "text_completed"),
+        ("visual_score", "visual_completed"),
+        ("long_context_score", "long_context_completed"),
+        ("agentic_score", "agentic_completed"),
     ];
-    let totals_valid = scores
+    let totals_valid = sections.iter().all(|(score, completed)| {
+        let score = model[*score].as_u64().unwrap_or(0);
+        model[*completed].as_u64().is_some_and(|done| score <= done)
+    });
+    let section_sum: u64 = sections
         .iter()
-        .all(|(key, limit)| model[*key].as_u64().is_some_and(|score| score <= *limit));
-    answers.len() == 15
+        .map(|(score, _)| model[*score].as_u64().unwrap_or(0))
+        .sum();
+    !answers.is_empty()
         && answers.iter().any(|answer| {
             answer["status"].as_str() == Some("correct")
                 && answer["tool_calls"].as_u64().is_some_and(|count| count > 0)
         })
         && graded
         && correct > 0
-        && model["agentic_completed"].as_u64() == Some(15)
+        && model["agentic_completed"].as_u64() == Some(answers.len() as u64)
         && model["agentic_score"].as_u64() == Some(correct)
         && totals_valid
         && model["general_score"].as_u64()
@@ -129,19 +130,10 @@ fn has_agentic_evidence(model: &serde_json::Value) -> bool {
                 model["text_score"].as_u64().unwrap_or(0)
                     + model["visual_score"].as_u64().unwrap_or(0),
             )
-        && model["score"].as_u64()
-            == Some(
-                scores
-                    .iter()
-                    .map(|(key, _)| model[*key].as_u64().unwrap_or(0))
-                    .sum(),
-            )
-        && model["score_max"].as_u64()
-            == Some(if model["context_length"].as_u64().unwrap_or(0) >= 210000 {
-                50
-            } else {
-                45
-            })
+        && model["score"].as_u64() == Some(section_sum)
+        && model["score_max"]
+            .as_u64()
+            .is_some_and(|maximum| maximum >= section_sum)
 }
 
 #[cfg(test)]
@@ -169,21 +161,24 @@ mod tests {
         );
     }
     #[test]
-    fn expanded_base_requires_versioned_twenty_question_suite() {
-        let mut scan = serde_json::json!({"schema_version":2,"benchmark_version":"2026-10-17.2","recommendations":{"base":"expanded"},"models":[{"id":"expanded","context_length":200000,"max_output_tokens":null,"text_completed":20,"text_score":18}]});
+    fn suite_size_and_benchmark_version_are_not_pinned() {
+        let mut scan = serde_json::json!({"schema_version":2,"benchmark_version":"any-future-version","recommendations":{"base":"expanded"},"models":[{"id":"expanded","context_length":200000,"max_output_tokens":null,"text_completed":40,"text_score":18}]});
         assert_eq!(
             parse_base(scan.to_string().as_bytes()).unwrap().id,
             "expanded"
         );
-        scan["models"][0]["text_completed"] = serde_json::json!(10);
+        scan["models"][0]["text_completed"] = serde_json::json!(0);
         assert!(parse_base(scan.to_string().as_bytes()).is_err());
-        scan["benchmark_version"] = serde_json::json!("unknown");
+        scan["models"][0]["text_completed"] = serde_json::json!(10);
+        scan["models"][0]["text_score"] = serde_json::json!(11);
+        assert!(parse_base(scan.to_string().as_bytes()).is_err());
+        scan["schema_version"] = serde_json::json!(4);
         assert!(parse_base(scan.to_string().as_bytes()).is_err());
     }
     #[test]
     fn agentic_recommendation_requires_graded_answers_and_consistent_totals() {
         let answers: Vec<_> = (0..15).map(|index| serde_json::json!({"question_id":format!("agentic-{index}"),"status":"correct","tool_calls":1})).collect();
-        let mut scan = serde_json::json!({"schema_version":3,"benchmark_version":"2026-10-18.1","recommendations":{"base":"measured"},"models":[{"id":"measured","context_length":1000000,"max_output_tokens":4096,"text_completed":20,"text_score":20,"visual_completed":10,"visual_score":10,"long_context_score":0,"general_score":30,"score":45,"score_max":50,"agentic":answers,"agentic_score":15,"agentic_completed":15}]});
+        let mut scan = serde_json::json!({"schema_version":3,"benchmark_version":"2026-10-27.1","recommendations":{"base":"measured"},"models":[{"id":"measured","context_length":1000000,"max_output_tokens":4096,"text_completed":40,"text_score":39,"visual_completed":10,"visual_score":9,"long_context_completed":10,"long_context_score":9,"general_score":48,"score":72,"score_max":75,"agentic":answers,"agentic_score":15,"agentic_completed":15}]});
         assert!(parse_base(scan.to_string().as_bytes()).is_ok());
         for answer in scan["models"][0]["agentic"].as_array_mut().unwrap() {
             answer["tool_calls"] = serde_json::json!(0);
@@ -198,11 +193,9 @@ mod tests {
         scan["models"][0]["agentic"][0]["status"] = serde_json::json!("incorrect");
         assert!(parse_base(scan.to_string().as_bytes()).is_err());
         scan["models"][0]["agentic_score"] = serde_json::json!(14);
-        scan["models"][0]["score"] = serde_json::json!(44);
+        scan["models"][0]["score"] = serde_json::json!(71);
         assert!(parse_base(scan.to_string().as_bytes()).is_ok());
-        scan["models"][0]["score"] = serde_json::json!(50);
-        assert!(parse_base(scan.to_string().as_bytes()).is_err());
-        scan["benchmark_version"] = serde_json::json!("unknown");
+        scan["models"][0]["score"] = serde_json::json!(80);
         assert!(parse_base(scan.to_string().as_bytes()).is_err());
     }
 }

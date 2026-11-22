@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 pub use ilium_kilo_gateway::PaidProxy;
 use ilium_kilo_gateway::{
     choose_random_paid_proxy, ChatMessage, CompletionRequest, CompletionStreamEvent, GatewayError,
-    KiloGatewayClient, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
+    KiloGatewayClient, ModelPolicy, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
     FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
@@ -165,9 +165,48 @@ impl InferenceSettings {
     }
 }
 
+/// Who picks the Kilo Gateway model: the model-scanner or the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KiloModelSelection {
+    /// Use the model-scanner's validated recommendation; `model` is ignored.
+    #[default]
+    ScannerRecommendation,
+    /// Send the model chosen in `KiloGatewaySettings::model`.
+    Manual,
+}
+
+impl KiloModelSelection {
+    pub const ALL: [Self; 2] = [Self::ScannerRecommendation, Self::Manual];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ScannerRecommendation => "Scanner recommendation",
+            Self::Manual => "Manual model",
+        }
+    }
+
+    /// The other mode, for a two-state toggle row.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::ScannerRecommendation => Self::Manual,
+            Self::Manual => Self::ScannerRecommendation,
+        }
+    }
+
+    fn gateway_policy(self) -> ModelPolicy {
+        match self {
+            Self::ScannerRecommendation => ModelPolicy::ScannerRecommendation,
+            Self::Manual => ModelPolicy::AsRequested,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KiloGatewaySettings {
+    /// Whether the model-scanner or `model` decides which model is sent.
+    pub model_selection: KiloModelSelection,
     pub model: String,
     /// Power-user escape hatch, deliberately absent from the settings UI:
     /// enable only by hand-editing `config.toml`'s `[inference.kilo_gateway]`
@@ -232,6 +271,7 @@ impl Default for ProxyDatabaseStructure {
 impl Default for KiloGatewaySettings {
     fn default() -> Self {
         Self {
+            model_selection: KiloModelSelection::default(),
             model: DEFAULT_KILO_GATEWAY_SELECTED_MODEL.to_string(),
             paid_proxies_enabled: false,
             proxy_database: ProxyDatabaseSettings::default(),
@@ -242,12 +282,15 @@ impl Default for KiloGatewaySettings {
 
 /// Builds a Kilo Gateway client honoring the hidden paid-proxies flag: a
 /// fresh random proxy is sampled per call so repeated calls spread across
-/// the configured list rather than pinning to one egress IP.
+/// the configured list rather than pinning to one egress IP. Kilo Gateway is
+/// never refused: with the flag off, or on with no proxy rows loaded, the call
+/// goes out directly.
 fn kilo_gateway_client(
     settings: &KiloGatewaySettings,
     timeout: Option<Duration>,
 ) -> Result<KiloGatewayClient, InferenceError> {
-    let mut client = KiloGatewayClient::default();
+    let mut client =
+        KiloGatewayClient::default().with_model_policy(settings.model_selection.gateway_policy());
     if let Some(timeout) = timeout {
         client = client.with_request_timeout(timeout);
     }
@@ -256,9 +299,10 @@ fn kilo_gateway_client(
     }
     match choose_random_paid_proxy(&settings.paid_proxies) {
         Some(proxy) => Ok(client.with_proxy_url(proxy.connect_url())),
-        None => Err(InferenceError::Configuration(
-            "paid proxy egress is enabled but no proxies were loaded from MongoDB".to_string(),
-        )),
+        None => {
+            tracing::warn!("paid proxies enabled but none loaded; calling Kilo Gateway directly");
+            Ok(client)
+        }
     }
 }
 
@@ -2444,17 +2488,13 @@ mod tests {
     }
 
     #[test]
-    fn kilo_gateway_proxy_egress_fails_closed_without_boot_loaded_rows() {
+    fn kilo_gateway_calls_directly_when_proxies_enabled_but_none_loaded() {
         let settings = KiloGatewaySettings {
             paid_proxies_enabled: true,
             ..KiloGatewaySettings::default()
         };
 
-        assert!(matches!(
-            kilo_gateway_client(&settings, None),
-            Err(InferenceError::Configuration(message))
-                if message.contains("no proxies were loaded from MongoDB")
-        ));
+        assert!(kilo_gateway_client(&settings, None).is_ok());
     }
 
     #[test]

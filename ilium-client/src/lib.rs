@@ -575,7 +575,12 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         && !should_open_onboarding
         && config.onboarding.automatic_ai_allowed()
     {
-        proxy_database::load_paid_proxies(&mut config.inference.kilo_gateway).await?;
+        if let Err(error) =
+            proxy_database::load_paid_proxies(&mut config.inference.kilo_gateway).await
+        {
+            // Kilo Gateway must keep working: without proxies it calls directly.
+            tracing::warn!(%error, "could not load paid proxies; Kilo Gateway will call directly");
+        }
     }
     tracing::info!(
         session_name = options.session_name,

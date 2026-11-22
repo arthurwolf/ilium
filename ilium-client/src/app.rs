@@ -689,6 +689,8 @@ pub enum InferenceRow {
     Provider,
     Field(InferenceSettingField),
     RefreshModels,
+    /// Kilo only: scanner recommendation or manually chosen model.
+    KiloModelSelection,
     KiloGatewayModel,
     Test,
 }
@@ -9306,6 +9308,13 @@ impl App {
             as usize;
         let mut settings = self.inference_settings.clone();
         settings.ollama.model = self.ollama_models[next].clone();
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    /// Toggles who picks the Kilo model; both directions flip the two-state row.
+    pub fn settings_toggle_kilo_model_selection(&mut self) {
+        let mut settings = self.inference_settings.clone();
+        settings.kilo_gateway.model_selection = settings.kilo_gateway.model_selection.toggled();
         self.apply_and_persist_inference_settings(settings);
     }
 

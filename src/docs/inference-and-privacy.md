@@ -62,7 +62,7 @@ Requests ask for the model's maximum output allowance when it is known; response
    - OpenAI-compatible: **URL**, **API key**, **Load available models**, **Model**.
    - Anthropic: **URL**, **API key**, **Load available models**, **Model**.
    - OpenRouter: **API key**, **Model**.
-   - Kilo Gateway: choose a **Model** with Left and Right.
+   - Kilo Gateway: choose the **Kilo model source** with Left, Right or `Enter`. *Scanner recommendation* (default) sends the model the local model-scanner currently recommends and ignores any manual choice; if the scanner has no valid recommendation the request fails with a visible error rather than switching model. *Manual model* reveals **Load available models** and **Kilo model**, and sends exactly the model you choose without reading the scanner.
 4. Press `Enter` on a text row to edit it, type, and press `Enter` again. The editor stays open until the value has been written to disk; if writing fails your input stays with an error and `Enter` retries.
 5. Select **Test provider** to verify the configuration (see below).
 6. Optionally open the **Triggers** tab to decide which events cause AI requests.

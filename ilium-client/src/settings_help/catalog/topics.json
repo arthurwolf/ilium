@@ -4421,6 +4421,18 @@
     ]
   },
   {
+    "id": "INF-16",
+    "title": "Kilo model source",
+    "explanation": "“Choose whether Kilo Gateway uses the model-scanner’s current recommendation or the model you pick.”",
+    "specimen": "Kilo group `Kilo model source ‹ Scanner recommendation ›` → `‹ Manual model ›`, with the manual model rows appearing as synthetic placeholders.",
+    "states": "source changes; manual model rows appear only in Manual mode.",
+    "motion": "static.",
+    "caveat": "scanner mode ignores the manual model and fails visibly if the scanner has no qualified recommendation; no provider call.",
+    "frames": [
+      "Kilo group `Kilo model source ‹ Scanner recommendation ›` → `‹ Manual model ›`, with the manual model rows appearing as synthetic placeholders."
+    ]
+  },
+  {
     "id": "AN-67",
     "title": "Northern lights",
     "explanation": "Luminous curtains sway above a dark horizon with adjustable hills and optional seeded trees. Horizon height and roughness change the dark cutout. Optional seeded trees add a skyline without imported assets.",

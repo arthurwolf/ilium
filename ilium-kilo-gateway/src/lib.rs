@@ -206,6 +206,18 @@ impl GatewayError {
     }
 }
 
+/// Who chooses the model for requests to the canonical Kilo endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelPolicy {
+    /// The model-scanner's validated base recommendation replaces the requested
+    /// model, and its output-token limit replaces the requested one. A missing
+    /// or unqualified recommendation is an error: there is no silent fallback.
+    #[default]
+    ScannerRecommendation,
+    /// The model named in the request is sent unchanged.
+    AsRequested,
+}
+
 /// Client for Kilo Gateway's OpenAI-compatible `/chat/completions` endpoint.
 pub struct KiloGatewayClient {
     base_url: String,
@@ -215,6 +227,7 @@ pub struct KiloGatewayClient {
     proxy_url: Option<String>,
     /// Overrides `REQUEST_TIMEOUT` for long calls such as transcript summaries.
     request_timeout: Duration,
+    model_policy: ModelPolicy,
 }
 
 impl Default for KiloGatewayClient {
@@ -230,6 +243,25 @@ impl KiloGatewayClient {
             retry_policy,
             proxy_url: None,
             request_timeout: REQUEST_TIMEOUT,
+            model_policy: ModelPolicy::default(),
+        }
+    }
+
+    /// Chooses whether the scanner recommendation or the requested model is sent.
+    pub fn with_model_policy(mut self, model_policy: ModelPolicy) -> Self {
+        self.model_policy = model_policy;
+        self
+    }
+
+    /// The scanner recommendation to apply, or `None` when the request's own
+    /// model must be sent (non-canonical endpoint, or manual selection).
+    fn scanner_recommendation(&self) -> Result<Option<scanner::RecommendedModel>, GatewayError> {
+        if self.model_policy == ModelPolicy::ScannerRecommendation
+            && self.base_url.starts_with("https://api.kilo.ai/")
+        {
+            scanner::read_base().map(Some)
+        } else {
+            Ok(None)
         }
     }
 
@@ -295,11 +327,7 @@ impl KiloGatewayClient {
             }),
         };
         let agent = self.build_agent()?;
-        let recommendation = if self.base_url.starts_with("https://api.kilo.ai/") {
-            Some(scanner::read_base()?)
-        } else {
-            None
-        };
+        let recommendation = self.scanner_recommendation()?;
         let payload = ChatCompletionPayload {
             model: recommendation
                 .as_ref()
@@ -520,11 +548,7 @@ impl KiloGatewayClient {
         payload: &ChatCompletionPayload<'_>,
     ) -> Result<ChatCompletionResponse, GatewayError> {
         let agent = self.build_agent()?;
-        let recommendation = if self.base_url.starts_with("https://api.kilo.ai/") {
-            Some(scanner::read_base()?)
-        } else {
-            None
-        };
+        let recommendation = self.scanner_recommendation()?;
         let payload = ChatCompletionPayload {
             model: recommendation
                 .as_ref()
@@ -806,6 +830,14 @@ fn gateway_http_status(error: &GatewayError) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manual_policy_never_reads_the_scanner_for_the_canonical_endpoint() {
+        let manual = KiloGatewayClient::default().with_model_policy(ModelPolicy::AsRequested);
+        assert!(matches!(manual.scanner_recommendation(), Ok(None)));
+        let other = KiloGatewayClient::new("http://127.0.0.1:1", RetryPolicy::default());
+        assert!(matches!(other.scanner_recommendation(), Ok(None)));
+    }
+
     use super::*;
     use std::cell::Cell;
     use std::io::{Read, Write};

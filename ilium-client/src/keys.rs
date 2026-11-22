@@ -3613,6 +3613,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Field(
                     crate::app::InferenceSettingField::AnthropicModel,
                 )) => app.settings_adjust_anthropic_model(-1),
+                Some(crate::app::InferenceRow::KiloModelSelection) => {
+                    app.settings_toggle_kilo_model_selection()
+                }
                 Some(crate::app::InferenceRow::KiloGatewayModel) => {
                     app.settings_adjust_kilo_gateway_model(-1)
                 }
@@ -3630,6 +3633,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     app.settings_adjust_inference_provider(1)
                 }
                 Some(crate::app::InferenceRow::RefreshModels) => app.request_model_refresh(),
+                Some(crate::app::InferenceRow::KiloModelSelection) => {
+                    app.settings_toggle_kilo_model_selection()
+                }
                 Some(crate::app::InferenceRow::KiloGatewayModel) => {
                     app.settings_adjust_kilo_gateway_model(1)
                 }

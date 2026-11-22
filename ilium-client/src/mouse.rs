@@ -3785,6 +3785,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             app.settings_adjust_inference_provider(direction)
                         }
                         crate::app::InferenceRow::RefreshModels => app.request_model_refresh(),
+                        crate::app::InferenceRow::KiloModelSelection => {
+                            app.settings_toggle_kilo_model_selection()
+                        }
                         crate::app::InferenceRow::KiloGatewayModel => {
                             app.settings_adjust_kilo_gateway_model(direction)
                         }
